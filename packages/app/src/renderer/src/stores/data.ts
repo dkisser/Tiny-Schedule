@@ -19,7 +19,7 @@ interface DataState {
   upsertTask: (task: Task) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   updateSettings: (
-    patch: Partial<AppSettings> & { aiProviders?: ProviderDraft[] },
+    patch: Omit<Partial<AppSettings>, 'aiProviders'> & { aiProviders?: ProviderDraft[] },
   ) => Promise<void>;
 }
 

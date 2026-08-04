@@ -7,6 +7,7 @@ import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
 import { projectTasks, tagTasks, upcomingTasks } from './lib/tasks';
+import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
 import { useTimerStore } from './stores/timer';
@@ -101,7 +102,7 @@ export default function App() {
     ) : view.type === 'export' ? (
       <Placeholder name="导入导出" />
     ) : (
-      <Placeholder name="设置" />
+      <SettingsPage />
     );
 
   return (
