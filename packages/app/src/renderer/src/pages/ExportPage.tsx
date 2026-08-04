@@ -15,25 +15,35 @@ export function ExportPage() {
 
   const runImport = async () => {
     setMessage('导入中…');
-    const res = await api().importRun();
-    if (res.ok && res.counts) {
-      setMessage(
-        `✓ 导入成功：${res.counts.tasks} 任务 / ${res.counts.projects} 项目 / ${res.counts.tags} 标签`,
-      );
-      await load();
-    } else if (res.error && res.error !== 'CANCELLED') {
-      setMessage(`✗ 导入失败：${res.error}`);
-    } else {
-      setMessage('');
+    try {
+      const res = await api().importRun();
+      if (res.ok && res.counts) {
+        setMessage(
+          `✓ 导入成功：${res.counts.tasks} 任务 / ${res.counts.projects} 项目 / ${res.counts.tags} 标签`,
+        );
+        await load();
+      } else if (res.error && res.error !== 'CANCELLED') {
+        setMessage(`✗ 导入失败：${res.error}`);
+      } else {
+        setMessage('');
+      }
+    } catch (err) {
+      setMessage(`✗ 导入失败：${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
   const runExport = async (mode: 'projectList' | 'worklog') => {
     setMessage('导出中…');
-    const res = await api().exportMarkdown(
-      mode === 'projectList' ? { mode, projectId } : { mode, from: '1970-01-01', to: '2999-12-31' },
-    );
-    setMessage(res.savedPath ? `✓ 已保存：${res.savedPath}` : res.error ? `✗ ${res.error}` : '');
+    try {
+      const res = await api().exportMarkdown(
+        mode === 'projectList'
+          ? { mode, projectId }
+          : { mode, from: '1970-01-01', to: '2999-12-31' },
+      );
+      setMessage(res.savedPath ? `✓ 已保存：${res.savedPath}` : res.error ? `✗ ${res.error}` : '');
+    } catch (err) {
+      setMessage(`✗ 导出失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (

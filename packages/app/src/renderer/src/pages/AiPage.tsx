@@ -20,7 +20,10 @@ export function AiPage() {
     const off = api().onAiEvent((ev) => {
       if (ev.requestId !== requestIdRef.current) return;
       if (ev.delta) setOutput((o) => o + ev.delta);
-      if (ev.full !== undefined) setRunning(false);
+      if (ev.full !== undefined) {
+        setOutput(ev.full); // reconcile any missed deltas
+        setRunning(false);
+      }
       if (ev.error) {
         setError(
           ev.error === 'NO_PROVIDER_CONFIGURED' ? '尚未配置 AI Provider' : `分析失败：${ev.error}`,
@@ -35,11 +38,16 @@ export function AiPage() {
     setOutput('');
     setError('');
     setRunning(true);
-    const { requestId } = await api().aiAnalyze({
-      scope,
-      projectId: scope === 'project' ? projectId : undefined,
-    });
-    requestIdRef.current = requestId;
+    try {
+      const { requestId } = await api().aiAnalyze({
+        scope,
+        projectId: scope === 'project' ? projectId : undefined,
+      });
+      requestIdRef.current = requestId;
+    } catch (err) {
+      setError(`分析失败：${err instanceof Error ? err.message : String(err)}`);
+      setRunning(false);
+    }
   };
 
   const runWith = async (s: 'today' | 'week' | 'project', providerId: string) => {
@@ -47,8 +55,13 @@ export function AiPage() {
     setOutput('');
     setError('');
     setRunning(true);
-    const { requestId } = await api().aiAnalyze({ scope: s, providerId });
-    requestIdRef.current = requestId;
+    try {
+      const { requestId } = await api().aiAnalyze({ scope: s, providerId });
+      requestIdRef.current = requestId;
+    } catch (err) {
+      setError(`分析失败：${err instanceof Error ? err.message : String(err)}`);
+      setRunning(false);
+    }
   };
 
   // Finish Day 自动触发：Task 13 的 ui store 中的 aiAutoRun 交接

@@ -73,8 +73,13 @@ export function TaskCard({ task, data, active }: { task: Task; data: AppData; ac
         </div>
       </div>
       <div className="shrink-0 text-xs text-muted-foreground">
-        {task.timeSpent > 0 && `${formatMs(task.timeSpent)} / `}
-        {task.timeEstimate > 0 ? formatMs(task.timeEstimate) : ''}
+        {task.timeSpent > 0 && task.timeEstimate > 0
+          ? `${formatMs(task.timeSpent)} / ${formatMs(task.timeEstimate)}`
+          : task.timeSpent > 0
+            ? formatMs(task.timeSpent)
+            : task.timeEstimate > 0
+              ? formatMs(task.timeEstimate)
+              : ''}
       </div>
       <div className="flex shrink-0 gap-1 opacity-0 group-hover:opacity-100">
         <button

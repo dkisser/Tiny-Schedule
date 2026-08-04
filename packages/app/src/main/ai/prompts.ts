@@ -47,7 +47,8 @@ export function buildAnalysisData(data: AppData, scope: AnalysisScope): string {
   let from = scope.date;
   let to = scope.date;
   if (scope.scope === 'week') {
-    const dow = new Date(scope.date).getDay(); // 0 = Sunday
+    const [ay, am, ad] = scope.date.split('-').map(Number) as [number, number, number];
+    const dow = new Date(ay, am - 1, ad).getDay(); // 0 = Sunday
     const mondayOffset = dow === 0 ? -6 : 1 - dow;
     from = addDays(scope.date, mondayOffset);
     to = addDays(from, 6);

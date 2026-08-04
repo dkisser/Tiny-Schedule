@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { emptyAppData, SYSTEM_TAG_IDS, type Task } from '@tiny-schedule/shared';
+import { emptyAppData, localDate, SYSTEM_TAG_IDS, type Task } from '@tiny-schedule/shared';
 import { buildAnalysisData, DEFAULT_PROMPT, renderPrompt } from '../ai/prompts';
 
 function task(overrides: Partial<Task>): Task {
@@ -63,6 +63,20 @@ describe('buildAnalysisData', () => {
       '写周报',
       '只有截止日',
     ]);
+  });
+
+  test('week scope: Sunday anchor maps to the preceding Monday..Sunday (TZ-independent)', () => {
+    // 2026-08-09 is a Sunday — assert via local construction (TZ-independent)
+    expect(new Date(2026, 8 - 1, 9).getDay()).toBe(0);
+    const expectedFrom = localDate(new Date(2026, 8 - 1, 3).getTime());
+    const expectedTo = localDate(new Date(2026, 8 - 1, 9).getTime());
+    const d = emptyAppData();
+    d.projects.p1 = { id: 'p1', title: '工作', isArchived: false };
+    d.tasks.t1 = task({ timeSpentOnDay: { [expectedFrom]: 100 } });
+    const json = JSON.parse(buildAnalysisData(d, { scope: 'week', date: '2026-08-09' }));
+    expect(json.range).toBe(`${expectedFrom} ~ ${expectedTo}`);
+    expect(json.tasks).toHaveLength(1);
+    expect(json.summary.totalSpentMs).toBe(100);
   });
 
   test('project scope filters by projectId', () => {

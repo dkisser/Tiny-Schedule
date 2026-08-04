@@ -5,6 +5,7 @@ import {
   AiTestReqSchema,
   type AppData,
   ExportMarkdownReqSchema,
+  FinishDayReqSchema,
   type ImportRunResult,
   Ipc,
   localDate,
@@ -106,7 +107,9 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
   });
 
-  ipcMain.handle(Ipc.finishDay, () => {
+  ipcMain.handle(Ipc.finishDay, (_e, raw: unknown) => {
+    // payload date is validated but not used for logic: finishing always applies to the local "today"
+    FinishDayReqSchema.parse(raw);
     const today = localDate(Date.now());
     const next = store.update((d) => {
       const tasks = { ...d.tasks };
@@ -133,6 +136,18 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     try {
       const raw = JSON.parse(await readFile(picked.filePaths[0] as string, 'utf8'));
       const { data: imported, counts } = normalizeBackup(raw);
+      const taskCount = Object.keys(store.get().tasks).length;
+      if (taskCount > 0) {
+        const confirm = await electronDialog.showMessageBox(win, {
+          type: 'question',
+          buttons: ['覆盖', '取消'],
+          defaultId: 0,
+          cancelId: 1,
+          message: '本地已有数据',
+          detail: `导入将覆盖当前 ${taskCount} 个任务（导入前会自动备份当前数据）。`,
+        });
+        if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
+      }
       const next = store.update((d) => mergeImport(d, imported));
       logger.info({ action: 'import:run', counts, file: picked.filePaths[0] });
       void next;
