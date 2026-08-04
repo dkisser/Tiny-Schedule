@@ -1,9 +1,14 @@
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
 import { app, BrowserWindow } from 'electron';
+import { DataStore } from './dataStore';
+import { registerIpcHandlers } from './ipcHandlers';
+import { createLogger } from './logger';
+
+let win: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {
-  const win = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -16,19 +21,25 @@ function createWindow(): BrowserWindow {
       sandbox: false,
     },
   });
-  win.on('ready-to-show', () => win.show());
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    win.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  window.on('ready-to-show', () => window.show());
+  if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+    window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    win.loadFile(join(__dirname, '../renderer/index.html'));
+    window.loadFile(join(__dirname, '../renderer/index.html'));
   }
-  return win;
+  return window;
 }
 
 app.whenReady().then(() => {
-  createWindow();
+  const userData = app.getPath('userData');
+  const logger = createLogger(join(userData, 'logs'));
+  const store = new DataStore(userData);
+  store.load();
+  logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
+  registerIpcHandlers({ store, logger, getWindow: () => win });
+  win = createWindow();
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) win = createWindow();
   });
 });
 
