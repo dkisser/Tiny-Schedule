@@ -1,6 +1,8 @@
 import { INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
 import { CheckCircle2 } from 'lucide-react';
+import { useState } from 'react';
 import { AddTaskInput } from '../components/AddTaskInput';
+import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
 import { todayTasks } from '../lib/tasks';
@@ -16,6 +18,7 @@ function formatMs(ms: number): string {
 export function TodayPage() {
   const data = useDataStore((s) => s.data);
   const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
+  const [finishOpen, setFinishOpen] = useState(false);
   if (!data) return null;
   const today = localDate(Date.now());
   const tasks = todayTasks(data);
@@ -48,16 +51,11 @@ export function TodayPage() {
         <AddTaskInput projectId={INBOX_PROJECT_ID} addToToday />
       </div>
       <div className="mt-8 flex justify-center">
-        <Button
-          variant="outline"
-          disabled={finishedToday}
-          onClick={() => {
-            /* Task 19 接入 Finish Day */
-          }}
-        >
+        <Button variant="outline" disabled={finishedToday} onClick={() => setFinishOpen(true)}>
           <CheckCircle2 className="mr-1 h-4 w-4" /> Finish Day
         </Button>
       </div>
+      <FinishDayDialog open={finishOpen} onClose={() => setFinishOpen(false)} />
     </div>
   );
 }

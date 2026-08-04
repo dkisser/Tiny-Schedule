@@ -7,16 +7,14 @@ import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
 import { projectTasks, tagTasks, upcomingTasks } from './lib/tasks';
+import { AiPage } from './pages/AiPage';
+import { ExportPage } from './pages/ExportPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
 import { useTimerStore } from './stores/timer';
 import { useUiStore } from './stores/ui';
 import { applyTheme } from './theme';
-
-function Placeholder({ name }: { name: string }) {
-  return <div className="p-4 text-muted-foreground">{name} 页面待实现</div>;
-}
 
 function ProjectPage({ projectId }: { projectId: string }) {
   const data = useDataStore((s) => s.data);
@@ -98,9 +96,9 @@ export default function App() {
     ) : view.type === 'upcoming' ? (
       <UpcomingPage />
     ) : view.type === 'ai' ? (
-      <Placeholder name="AI 分析" />
+      <AiPage />
     ) : view.type === 'export' ? (
-      <Placeholder name="导入导出" />
+      <ExportPage />
     ) : (
       <SettingsPage />
     );
