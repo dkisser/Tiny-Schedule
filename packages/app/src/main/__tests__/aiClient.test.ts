@@ -120,6 +120,20 @@ describe('streamChat', () => {
     expect(await collect(gen)).toBe('ab');
   });
 
+  test('propagates fetch rejection unrelated to timeout', async () => {
+    const fetchImpl = (async (): Promise<Response> => {
+      throw new Error('network down');
+    }) as unknown as typeof fetch;
+    const gen = streamChat({
+      baseUrl: 'http://x/v1',
+      apiKey: 'k',
+      model: 'm',
+      messages: [{ role: 'user', content: 'hi' }],
+      fetchImpl,
+    });
+    await expect(collect(gen)).rejects.toThrow('network down');
+  });
+
   test('sends expected request shape', async () => {
     let captured: { url?: string; init?: RequestInit } = {};
     const fetchImpl = async (url: string, init: RequestInit) => {

@@ -42,6 +42,7 @@ export async function* streamChat(opts: StreamChatOptions): AsyncGenerator<strin
     body: JSON.stringify({ model: opts.model, messages: opts.messages, stream: true }),
     signal: controller.signal,
   }).catch((err: unknown) => {
+    if (timeout) clearTimeout(timeout);
     if (abortError) throw abortError;
     throw err instanceof Error ? err : new Error(String(err));
   });
