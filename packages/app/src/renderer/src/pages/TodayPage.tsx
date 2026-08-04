@@ -5,6 +5,7 @@ import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
 import { todayTasks } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
+import { useTimerStore } from '../stores/timer';
 
 function formatMs(ms: number): string {
   const m = Math.floor(ms / 60_000);
@@ -14,6 +15,7 @@ function formatMs(ms: number): string {
 
 export function TodayPage() {
   const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   if (!data) return null;
   const today = localDate(Date.now());
   const tasks = todayTasks(data);
@@ -40,7 +42,7 @@ export function TodayPage() {
         </div>
       )}
       <div className="mt-4">
-        <TaskList tasks={tasks} data={data} />
+        <TaskList tasks={tasks} data={data} activeTaskId={activeTaskId} />
       </div>
       <div className="mt-4">
         <AddTaskInput projectId={INBOX_PROJECT_ID} addToToday />

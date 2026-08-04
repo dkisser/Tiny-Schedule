@@ -5,9 +5,11 @@ import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
 import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
+import { TimerBar } from './components/TimerBar';
 import { projectTasks, tagTasks, upcomingTasks } from './lib/tasks';
 import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
+import { useTimerStore } from './stores/timer';
 import { useUiStore } from './stores/ui';
 import { applyTheme } from './theme';
 
@@ -17,12 +19,13 @@ function Placeholder({ name }: { name: string }) {
 
 function ProjectPage({ projectId }: { projectId: string }) {
   const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   if (!data) return null;
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h1 className="text-xl font-semibold">{data.projects[projectId]?.title ?? '项目'}</h1>
       <div className="mt-4">
-        <TaskList tasks={projectTasks(data, projectId)} data={data} />
+        <TaskList tasks={projectTasks(data, projectId)} data={data} activeTaskId={activeTaskId} />
       </div>
       <div className="mt-4">
         <AddTaskInput projectId={projectId} />
@@ -33,12 +36,13 @@ function ProjectPage({ projectId }: { projectId: string }) {
 
 function TagPage({ tagId }: { tagId: string }) {
   const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   if (!data) return null;
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h1 className="text-xl font-semibold">{data.tags[tagId]?.title ?? '标签'}</h1>
       <div className="mt-4">
-        <TaskList tasks={tagTasks(data, tagId)} data={data} />
+        <TaskList tasks={tagTasks(data, tagId)} data={data} activeTaskId={activeTaskId} />
       </div>
     </div>
   );
@@ -46,12 +50,13 @@ function TagPage({ tagId }: { tagId: string }) {
 
 function UpcomingPage() {
   const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   if (!data) return null;
   return (
     <div className="mx-auto max-w-3xl p-6">
       <h1 className="text-xl font-semibold">Upcoming</h1>
       <div className="mt-4">
-        <TaskList tasks={upcomingTasks(data)} data={data} />
+        <TaskList tasks={upcomingTasks(data)} data={data} activeTaskId={activeTaskId} />
       </div>
       <div className="mt-4">
         <AddTaskInput projectId={INBOX_PROJECT_ID} />
@@ -68,7 +73,10 @@ export default function App() {
   const theme = data?.settings.theme;
 
   useEffect(() => {
-    void load();
+    void load().then(() => {
+      const data = useDataStore.getState().data;
+      if (data) useTimerStore.getState().restore(data);
+    });
   }, [load]);
 
   useEffect(() => {
@@ -97,10 +105,7 @@ export default function App() {
     );
 
   return (
-    <Layout
-      sidebar={<Sidebar />}
-      timerBar={<div className="p-3 text-sm text-muted-foreground">计时条待实现</div>}
-    >
+    <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
       <div className="flex h-full">
         <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
         {selectedTask && <TaskDetail key={selectedTask.id} task={selectedTask} />}

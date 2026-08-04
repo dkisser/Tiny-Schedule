@@ -2,6 +2,7 @@ import type { AppData, Task } from '@tiny-schedule/shared';
 import { Check, Play, Trash2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
+import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
 
 function formatMs(ms: number): string {
@@ -15,6 +16,7 @@ export function TaskCard({ task, data, active }: { task: Task; data: AppData; ac
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
+  const startTimer = useTimerStore((s) => s.start);
   const selected = selectedTaskId === task.id;
 
   return (
@@ -80,7 +82,8 @@ export function TaskCard({ task, data, active }: { task: Task; data: AppData; ac
           aria-label="开始计时"
           className="hover:text-pink-500"
           onClick={(e) => {
-            e.stopPropagation(); /* Task 17 接入 */
+            e.stopPropagation();
+            startTimer(task.id);
           }}
         >
           <Play className="h-4 w-4" />
