@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { AddTaskInput } from './components/AddTaskInput';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
+import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { projectTasks, tagTasks, upcomingTasks } from './lib/tasks';
 import { TodayPage } from './pages/TodayPage';
@@ -63,6 +64,7 @@ export default function App() {
   const data = useDataStore((s) => s.data);
   const load = useDataStore((s) => s.load);
   const view = useUiStore((s) => s.view);
+  const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const theme = data?.settings.theme;
 
   useEffect(() => {
@@ -74,6 +76,8 @@ export default function App() {
   }, [theme]);
 
   if (!data) return <div className="p-4">加载中…</div>;
+
+  const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
 
   const page =
     view.type === 'today' ? (
@@ -97,7 +101,10 @@ export default function App() {
       sidebar={<Sidebar />}
       timerBar={<div className="p-3 text-sm text-muted-foreground">计时条待实现</div>}
     >
-      {page}
+      <div className="flex h-full">
+        <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
+        {selectedTask && <TaskDetail task={selectedTask} />}
+      </div>
     </Layout>
   );
 }
