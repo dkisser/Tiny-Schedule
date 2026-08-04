@@ -51,6 +51,7 @@ const AiProviderSchema = z.object({
   id: z.string(),
   registryId: z.string(),
   apiKeyEncrypted: z.string(),
+  baseUrl: z.string().optional(),
   model: z.string(),
   isDefault: z.boolean(),
 });
@@ -115,6 +116,7 @@ export const SettingsUpdateReqSchema = z
         id: z.string(),
         registryId: z.string(),
         apiKey: z.string(), // plain text from renderer; encrypted in main
+        baseUrl: z.string().optional(),
         model: z.string(),
         isDefault: z.boolean(),
       }),

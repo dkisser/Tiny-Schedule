@@ -43,6 +43,7 @@ export interface AiProviderConfig {
   id: string; // unique instance id
   registryId: string; // id in PROVIDER_REGISTRY
   apiKeyEncrypted: string; // base64 of safeStorage-encrypted key (main process only)
+  baseUrl?: string; // for custom providers; empty/absent means use registry default
   model: string;
   isDefault: boolean;
 }
