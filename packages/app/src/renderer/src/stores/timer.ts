@@ -67,14 +67,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   stop: async () => {
     const cur = get().timer;
     if (!cur) return;
-    const now = Date.now();
-    const settlement = settleTimer(cur, now);
+    set({ timer: null }); // clear first: prevents re-entrant double settlement
+    const settlement = settleTimer(cur, Date.now());
     const data = useDataStore.getState().data;
     const task = data?.tasks[cur.taskId];
     if (task && settlement.ms > 0) {
       await useDataStore.getState().upsertTask(applySettlement(task, settlement));
     }
-    set({ timer: null });
     await sync(null);
   },
 
