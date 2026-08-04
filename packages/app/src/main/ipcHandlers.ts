@@ -80,14 +80,18 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         settings.autoAiAnalyzeOnFinishDay = patch.autoAiAnalyzeOnFinishDay;
       }
       if (patch.aiProviders !== undefined) {
-        settings.aiProviders = patch.aiProviders.map((p) => ({
-          id: p.id,
-          registryId: p.registryId,
-          baseUrl: p.baseUrl,
-          apiKeyEncrypted: encryptKey(p.apiKey),
-          model: p.model,
-          isDefault: p.isDefault,
-        }));
+        settings.aiProviders = patch.aiProviders.map((p) => {
+          const prev = d.settings.aiProviders.find((x) => x.id === p.id);
+          return {
+            id: p.id,
+            registryId: p.registryId,
+            baseUrl: p.baseUrl,
+            apiKeyEncrypted:
+              p.apiKey === '<unchanged>' && prev ? prev.apiKeyEncrypted : encryptKey(p.apiKey),
+            model: p.model,
+            isDefault: p.isDefault,
+          };
+        });
       }
       return { ...d, settings };
     });
