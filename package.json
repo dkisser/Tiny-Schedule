@@ -1,0 +1,19 @@
+{
+  "name": "tiny-schedule",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "bun run --cwd packages/app dev",
+    "build": "bun run --cwd packages/app build",
+    "test": "bun run --cwd packages/app test && bun run --cwd packages/shared test",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0",
+    "typescript": "^5.7.0"
+  }
+}
