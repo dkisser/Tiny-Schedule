@@ -48,6 +48,7 @@ export function SettingsPage() {
   };
 
   const addProvider = (registryId: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
     const next = [
       ...drafts.map((d) => ({ ...d, isDefault: false })),
       {
