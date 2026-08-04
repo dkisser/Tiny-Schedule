@@ -1,12 +1,62 @@
+import { INBOX_PROJECT_ID } from '@tiny-schedule/shared';
 import { useEffect } from 'react';
+import { AddTaskInput } from './components/AddTaskInput';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
+import { TaskList } from './components/TaskList';
+import { projectTasks, tagTasks, upcomingTasks } from './lib/tasks';
+import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
 import { useUiStore } from './stores/ui';
 import { applyTheme } from './theme';
 
 function Placeholder({ name }: { name: string }) {
   return <div className="p-4 text-muted-foreground">{name} 页面待实现</div>;
+}
+
+function ProjectPage({ projectId }: { projectId: string }) {
+  const data = useDataStore((s) => s.data);
+  if (!data) return null;
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-xl font-semibold">{data.projects[projectId]?.title ?? '项目'}</h1>
+      <div className="mt-4">
+        <TaskList tasks={projectTasks(data, projectId)} data={data} />
+      </div>
+      <div className="mt-4">
+        <AddTaskInput projectId={projectId} />
+      </div>
+    </div>
+  );
+}
+
+function TagPage({ tagId }: { tagId: string }) {
+  const data = useDataStore((s) => s.data);
+  if (!data) return null;
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-xl font-semibold">{data.tags[tagId]?.title ?? '标签'}</h1>
+      <div className="mt-4">
+        <TaskList tasks={tagTasks(data, tagId)} data={data} />
+      </div>
+    </div>
+  );
+}
+
+function UpcomingPage() {
+  const data = useDataStore((s) => s.data);
+  if (!data) return null;
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-xl font-semibold">Upcoming</h1>
+      <div className="mt-4">
+        <TaskList tasks={upcomingTasks(data)} data={data} />
+      </div>
+      <div className="mt-4">
+        <AddTaskInput projectId={INBOX_PROJECT_ID} />
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -27,13 +77,13 @@ export default function App() {
 
   const page =
     view.type === 'today' ? (
-      <Placeholder name="今日" />
+      <TodayPage />
     ) : view.type === 'project' ? (
-      <Placeholder name="项目" />
+      <ProjectPage projectId={view.id} />
     ) : view.type === 'tag' ? (
-      <Placeholder name="标签" />
+      <TagPage tagId={view.id} />
     ) : view.type === 'upcoming' ? (
-      <Placeholder name="Upcoming" />
+      <UpcomingPage />
     ) : view.type === 'ai' ? (
       <Placeholder name="AI 分析" />
     ) : view.type === 'export' ? (
