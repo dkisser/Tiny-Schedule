@@ -1,1 +1,1 @@
-export const SHARED_READY = true;
+export * from './models';
