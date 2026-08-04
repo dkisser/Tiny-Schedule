@@ -103,7 +103,7 @@ export default function App() {
     >
       <div className="flex h-full">
         <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
-        {selectedTask && <TaskDetail task={selectedTask} />}
+        {selectedTask && <TaskDetail key={selectedTask.id} task={selectedTask} />}
       </div>
     </Layout>
   );
