@@ -6,5 +6,5 @@
     "paths": { "@/*": ["./src/renderer/src/*"] },
     "types": ["vite/client", "bun"]
   },
-  "include": ["src", "electron.vite.config.ts"]
+  "include": ["src", "src/**/*.json", "electron.vite.config.ts"]
 }

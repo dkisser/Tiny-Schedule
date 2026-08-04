@@ -1,0 +1,93 @@
+{
+  "timestamp": 1785700000000,
+  "lastUpdate": 1785700000000,
+  "crossModelVersion": 12,
+  "data": {
+    "task": {
+      "ids": ["t1", "t2", "t3"],
+      "entities": {
+        "t1": {
+          "id": "t1",
+          "title": "写周报",
+          "projectId": "p1",
+          "tagIds": ["TODAY"],
+          "subTaskIds": ["t3"],
+          "timeSpent": 1800000,
+          "timeEstimate": 3600000,
+          "timeSpentOnDay": { "2026-08-03": 1800000 },
+          "isDone": false,
+          "created": 1785600000000,
+          "attachments": [],
+          "dueDay": "2026-08-04"
+        },
+        "t2": {
+          "id": "t2",
+          "title": "已完成任务",
+          "projectId": "p1",
+          "tagIds": [],
+          "subTaskIds": [],
+          "timeSpent": 600000,
+          "timeEstimate": 0,
+          "timeSpentOnDay": {},
+          "isDone": true,
+          "created": 1785500000000,
+          "attachments": []
+        },
+        "t3": {
+          "id": "t3",
+          "title": "子任务",
+          "projectId": "p1",
+          "tagIds": [],
+          "subTaskIds": [],
+          "timeSpent": 0,
+          "timeEstimate": 0,
+          "timeSpentOnDay": {},
+          "isDone": false,
+          "created": 1785600001000,
+          "attachments": []
+        }
+      },
+      "currentTaskId": null,
+      "isDataLoaded": true
+    },
+    "project": {
+      "ids": ["INBOX_PROJECT", "p1"],
+      "entities": {
+        "INBOX_PROJECT": {
+          "id": "INBOX_PROJECT",
+          "title": "Inbox",
+          "icon": "inbox",
+          "isArchived": false,
+          "theme": { "primary": "#aaa" }
+        },
+        "p1": {
+          "id": "p1",
+          "title": "工作",
+          "icon": "work",
+          "isArchived": false,
+          "theme": { "primary": "rgb(144, 187, 165)" }
+        }
+      }
+    },
+    "tag": {
+      "ids": ["TODAY", "EM_IMPORTANT", "custom1"],
+      "entities": {
+        "TODAY": { "id": "TODAY", "title": "Today", "taskIds": ["t1"] },
+        "EM_IMPORTANT": { "id": "EM_IMPORTANT", "title": "Important", "taskIds": [] },
+        "custom1": { "id": "custom1", "title": "学习", "color": "#3b82f6", "taskIds": [] }
+      }
+    },
+    "note": { "ids": [], "entities": {}, "todayOrder": [] },
+    "planner": { "days": { "2026-08-03": ["t1"] } },
+    "metric": { "ids": [], "entities": {} },
+    "boards": { "boardCfgs": [] },
+    "timeTracking": {
+      "tag": {
+        "TODAY": { "2026-08-03": { "s": 1785600000000, "e": 1785603600000, "b": 1, "bt": 300000 } }
+      }
+    },
+    "simpleCounter": { "ids": [], "entities": {} },
+    "taskRepeatCfg": { "ids": [], "entities": {} },
+    "globalConfig": { "misc": { "customTheme": "default" } }
+  }
+}
