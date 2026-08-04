@@ -38,8 +38,16 @@ app.whenReady().then(() => {
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   registerIpcHandlers({ store, logger, getWindow: () => win });
   win = createWindow();
+  win.on('closed', () => {
+    win = null;
+  });
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) win = createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      win = createWindow();
+      win.on('closed', () => {
+        win = null;
+      });
+    }
   });
 });
 

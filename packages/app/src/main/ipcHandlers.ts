@@ -35,6 +35,10 @@ function masked(data: AppData): AppData {
   return maskDataForRenderer(data);
 }
 
+function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
 export function registerIpcHandlers(deps: IpcDeps): void {
   const { store, logger, getWindow } = deps;
 
@@ -203,7 +207,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       ? providers.find((p) => p.id === req.providerId)
       : (providers.find((p) => p.isDefault) ?? providers[0]);
     if (!cfg) {
-      getWindow()?.webContents.send(Ipc.aiError, { requestId, error: 'NO_PROVIDER_CONFIGURED' });
+      sendSafe(getWindow(), Ipc.aiError, { requestId, error: 'NO_PROVIDER_CONFIGURED' });
       return { requestId };
     }
     const def = getProviderDef(cfg.registryId);
@@ -225,13 +229,13 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           messages: [{ role: 'user', content: prompt }],
         })) {
           full += delta;
-          win?.webContents.send(Ipc.aiChunk, { requestId, delta });
+          sendSafe(win, Ipc.aiChunk, { requestId, delta });
         }
-        win?.webContents.send(Ipc.aiDone, { requestId, full });
+        sendSafe(win, Ipc.aiDone, { requestId, full });
         logger.info({ action: 'ai:analyze:done', requestId, length: full.length });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        win?.webContents.send(Ipc.aiError, { requestId, error: message, full });
+        sendSafe(win, Ipc.aiError, { requestId, error: message, full });
         logger.error({ action: 'ai:analyze:error', requestId, error: message });
       }
     })();
