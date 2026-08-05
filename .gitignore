@@ -5,3 +5,7 @@ out/
 .DS_Store
 .vite/
 dist-types/
+
+# graphify 
+graphify-out/
+.qoder/
