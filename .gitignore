@@ -6,6 +6,10 @@ out/
 .vite/
 dist-types/
 
-# graphify 
+# graphify
 graphify-out/
+
+# local tooling
 .qoder/
+.superpowers/
+docs/superpowers/
