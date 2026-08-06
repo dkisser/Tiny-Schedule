@@ -5,6 +5,9 @@ export const Ipc = {
   dataLoad: 'data:load',
   taskUpsert: 'task:upsert',
   taskDelete: 'task:delete',
+  orderSet: 'order:set',
+  projectCreate: 'project:create',
+  tagCreate: 'tag:create',
   settingsUpdate: 'settings:update',
   finishDay: 'day:finish',
   timerSync: 'timer:sync',
@@ -103,6 +106,25 @@ export const AppDataSchema = z.object({
 });
 
 export const TaskDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+export const OrderSetReqSchema = z.object({
+  viewKey: z.string().min(1),
+  ids: z.array(z.string()),
+});
+export type OrderSetReq = z.infer<typeof OrderSetReqSchema>;
+
+export const ProjectCreateReqSchema = z.object({
+  title: z.string().trim().min(1).max(100),
+  icon: z.string().optional(),
+  primaryColor: z.string().optional(),
+});
+export type ProjectCreateReq = z.infer<typeof ProjectCreateReqSchema>;
+
+export const TagCreateReqSchema = z.object({
+  title: z.string().trim().min(1).max(50),
+  color: z.string().optional(),
+});
+export type TagCreateReq = z.infer<typeof TagCreateReqSchema>;
 
 // Settings updates from the renderer carry PLAIN-TEXT api keys in a separate
 // field; the main process encrypts them before persisting.

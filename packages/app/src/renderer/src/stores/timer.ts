@@ -16,7 +16,7 @@ interface TimerState {
   timer: ActiveTimer | null;
   now: number;
   restore: (data: AppData) => void;
-  start: (taskId: string) => void;
+  start: (taskId: string) => Promise<void>;
   pause: () => void;
   resume: () => void;
   stop: () => Promise<void>;
@@ -25,6 +25,14 @@ interface TimerState {
 
 async function sync(timer: ActiveTimer | null) {
   await api().timerSync({ timer });
+}
+
+async function settleInto(cur: ActiveTimer, now: number): Promise<void> {
+  const settlement = settleTimer(cur, now);
+  const task = useDataStore.getState().data?.tasks[cur.taskId];
+  if (task && settlement.ms > 0) {
+    await useDataStore.getState().upsertTask(applySettlement(task, settlement));
+  }
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -42,10 +50,18 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     void clock; // intervals live for app lifetime
   },
 
-  start: (taskId) => {
-    const t = startTimer(taskId, Date.now());
-    set({ timer: t, now: Date.now() });
-    void sync(t);
+  start: async (taskId) => {
+    const cur = get().timer;
+    // Same task already running: ignore instead of restarting (which would
+    // silently discard the elapsed time accumulated so far).
+    if (cur && cur.taskId === taskId && !cur.isPaused) return;
+    const now = Date.now();
+    const next = startTimer(taskId, now);
+    // Swap synchronously first so rapid clicks can't race, then settle the
+    // previous timer so its elapsed time isn't lost.
+    set({ timer: next, now });
+    if (cur) await settleInto(cur, now);
+    await sync(next);
   },
 
   pause: () => {
@@ -68,12 +84,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const cur = get().timer;
     if (!cur) return;
     set({ timer: null }); // clear first: prevents re-entrant double settlement
-    const settlement = settleTimer(cur, Date.now());
-    const data = useDataStore.getState().data;
-    const task = data?.tasks[cur.taskId];
-    if (task && settlement.ms > 0) {
-      await useDataStore.getState().upsertTask(applySettlement(task, settlement));
-    }
+    await settleInto(cur, Date.now());
     await sync(null);
   },
 

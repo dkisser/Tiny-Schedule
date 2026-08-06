@@ -39,6 +39,14 @@ export interface Tag {
   color?: string;
 }
 
+export interface AiSummary {
+  id: string;
+  scope: 'today' | 'week' | 'project';
+  projectId?: string;
+  createdAt: number; // epoch ms
+  content: string; // markdown
+}
+
 export interface AiProviderConfig {
   id: string; // unique instance id
   registryId: string; // id in PROVIDER_REGISTRY
@@ -112,7 +120,6 @@ export function emptyAppData(): AppData {
       },
     },
     tags: {
-      [SYSTEM_TAG_IDS.today]: { id: SYSTEM_TAG_IDS.today, title: 'Today' },
       [SYSTEM_TAG_IDS.important]: { id: SYSTEM_TAG_IDS.important, title: 'Important' },
       [SYSTEM_TAG_IDS.urgent]: { id: SYSTEM_TAG_IDS.urgent, title: 'Urgent' },
     },

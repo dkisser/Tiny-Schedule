@@ -4,8 +4,11 @@ import type {
   ExportMarkdownReq,
   ExportMarkdownResult,
   ImportRunResult,
+  OrderSetReq,
+  ProjectCreateReq,
   ProviderInfo,
   SettingsUpdateReq,
+  TagCreateReq,
   TaskPayload,
   TimerSyncReq,
 } from './ipc';
@@ -15,6 +18,9 @@ export interface RendererApi {
   dataLoad(): Promise<AppData>;
   taskUpsert(task: TaskPayload): Promise<AppData>;
   taskDelete(id: string): Promise<AppData>;
+  orderSet(req: OrderSetReq): Promise<void>;
+  projectCreate(req: ProjectCreateReq): Promise<AppData>;
+  tagCreate(req: TagCreateReq): Promise<AppData>;
   settingsUpdate(patch: SettingsUpdateReq): Promise<AppData>;
   finishDay(date: string): Promise<AppData>;
   timerSync(req: TimerSyncReq): Promise<void>;

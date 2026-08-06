@@ -95,6 +95,7 @@ describe('buildAnalysisData', () => {
   test('includes tag titles and system tag mapping', () => {
     const d = emptyAppData();
     d.projects.p1 = { id: 'p1', title: '工作', isArchived: false };
+    d.tags[SYSTEM_TAG_IDS.today] = { id: SYSTEM_TAG_IDS.today, title: 'Today' };
     d.tasks.t1 = task({ tagIds: [SYSTEM_TAG_IDS.today] });
     const json = JSON.parse(buildAnalysisData(d, { scope: 'today', date: '2026-08-04' }));
     expect(json.tasks[0].tags).toEqual(['Today']);

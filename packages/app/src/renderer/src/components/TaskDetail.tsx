@@ -3,7 +3,9 @@ import { Plus, X } from 'lucide-react';
 import { useState } from 'react';
 import { blankTask } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
+import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
+import { DeleteTaskDialog } from './DeleteTaskDialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
@@ -17,7 +19,9 @@ export function TaskDetail({ task }: { task: Task }) {
   const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
   const selectTask = useUiStore((s) => s.selectTask);
+  const activeTaskId = useTimerStore((s) => s.timer?.taskId ?? null);
   const [subTitle, setSubTitle] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
@@ -134,16 +138,19 @@ export function TaskDetail({ task }: { task: Task }) {
               <span className={s.isDone ? 'line-through text-muted-foreground' : ''}>
                 {s.title}
               </span>
-              <button
-                type="button"
-                aria-label="删除子任务"
-                className="ml-auto text-muted-foreground hover:text-destructive"
-                onClick={() => {
-                  void deleteTask(s.id);
-                }}
-              >
-                <X className="h-3 w-3" />
-              </button>
+              {activeTaskId !== s.id && (
+                <button
+                  type="button"
+                  aria-label="删除子任务"
+                  className="ml-auto text-muted-foreground hover:text-destructive"
+                  onClick={() => {
+                    if (s.timeSpent > 0 || s.timeEntries.length > 0) setConfirmDelete(s);
+                    else void deleteTask(s.id);
+                  }}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -169,6 +176,16 @@ export function TaskDetail({ task }: { task: Task }) {
           placeholder="支持 Markdown"
         />
       </div>
+
+      <DeleteTaskDialog
+        open={confirmDelete !== null}
+        title={confirmDelete?.title ?? ''}
+        timeSpent={confirmDelete?.timeSpent ?? 0}
+        onConfirm={() => {
+          if (confirmDelete) void deleteTask(confirmDelete.id);
+        }}
+        onClose={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

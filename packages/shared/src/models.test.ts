@@ -11,7 +11,6 @@ describe('emptyAppData', () => {
       INBOX_PROJECT: { id: 'INBOX_PROJECT', title: 'Inbox', icon: 'inbox', isArchived: false },
     });
     expect(d.tags).toEqual({
-      TODAY: { id: 'TODAY', title: 'Today' },
       EM_IMPORTANT: { id: 'EM_IMPORTANT', title: 'Important' },
       EM_URGENT: { id: 'EM_URGENT', title: 'Urgent' },
     });
@@ -24,9 +23,9 @@ describe('emptyAppData', () => {
     expect(d.projects.INBOX_PROJECT?.title).toBe('Inbox');
   });
 
-  test('includes system tags', () => {
+  test('includes system tags except Today (now dueDay-driven)', () => {
     const d = emptyAppData();
-    expect(d.tags[SYSTEM_TAG_IDS.today]?.title).toBe('Today');
+    expect(d.tags[SYSTEM_TAG_IDS.today]).toBeUndefined();
     expect(d.tags[SYSTEM_TAG_IDS.important]).toBeDefined();
     expect(d.tags[SYSTEM_TAG_IDS.urgent]).toBeDefined();
   });

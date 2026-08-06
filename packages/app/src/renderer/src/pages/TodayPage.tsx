@@ -1,11 +1,12 @@
 import { INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { AddTaskInput } from '../components/AddTaskInput';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
-import { todayTasks } from '../lib/tasks';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
+import { applyManualOrder, taskOrderFor, todayDoneTasks, todayTasks } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 
@@ -21,7 +22,8 @@ export function TodayPage() {
   const [finishOpen, setFinishOpen] = useState(false);
   if (!data) return null;
   const today = localDate(Date.now());
-  const tasks = todayTasks(data);
+  const tasks = applyManualOrder(todayTasks(data), taskOrderFor(data, 'today'));
+  const doneTasks = todayDoneTasks(data);
   const workedToday = Object.values(data.tasks).reduce(
     (sum, t) => sum + (t.timeSpentOnDay[today] ?? 0),
     0,
@@ -45,11 +47,24 @@ export function TodayPage() {
         </div>
       )}
       <div className="mt-4">
-        <TaskList tasks={tasks} data={data} activeTaskId={activeTaskId} />
+        <TaskList tasks={tasks} data={data} activeTaskId={activeTaskId} viewKey="today" />
       </div>
       <div className="mt-4">
         <AddTaskInput projectId={INBOX_PROJECT_ID} addToToday />
       </div>
+      {doneTasks.length > 0 && (
+        <Collapsible className="mt-4">
+          <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded-md px-1 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <ChevronRight className="h-4 w-4 transition-transform group-data-[state=open]:rotate-90" />
+            今日已完成（{doneTasks.length}）
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-2">
+              <TaskList tasks={doneTasks} data={data} activeTaskId={activeTaskId} />
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
       <div className="mt-8 flex justify-center">
         <Button variant="outline" disabled={finishedToday} onClick={() => setFinishOpen(true)}>
           <CheckCircle2 className="mr-1 h-4 w-4" /> Finish Day

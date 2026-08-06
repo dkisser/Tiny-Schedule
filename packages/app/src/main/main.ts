@@ -6,6 +6,7 @@ import type { Logger } from 'pino';
 import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
 import { createLogger } from './logger';
+import { migrateRemoveTodayTag } from './migrations';
 
 let win: BrowserWindow | null = null;
 let store: DataStore | null = null;
@@ -109,6 +110,8 @@ app.whenReady().then(() => {
   logger = createLogger(join(userData, 'logs'));
   store = new DataStore(userData);
   store.load();
+  const migrated = migrateRemoveTodayTag(store.get());
+  if (migrated !== store.get()) store.save(migrated);
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   registerIpcHandlers({ store, logger, getWindow: () => win });
   trackWindow(createWindow());

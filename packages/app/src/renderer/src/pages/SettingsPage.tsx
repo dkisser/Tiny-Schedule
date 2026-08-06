@@ -13,11 +13,17 @@ export function SettingsPage() {
   const updateSettings = useDataStore((s) => s.updateSettings);
   const [registry, setRegistry] = useState<ProviderInfo[]>([]);
   const [drafts, setDrafts] = useState<ProviderDraft[]>([]);
+  const [avatarBroken, setAvatarBroken] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void api().aiRegistry().then(setRegistry);
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the avatar source changes
+  useEffect(() => {
+    setAvatarBroken(false);
+  }, [data?.settings.avatar]);
 
   // initialize drafts from saved providers (keys masked as <unchanged>)
   // Re-init only when provider count changes; per brief, not on every data object change.
@@ -69,8 +75,13 @@ export function SettingsPage() {
       <section className="mt-6">
         <h2 className="text-sm font-medium text-muted-foreground">用户信息</h2>
         <div className="mt-2 flex items-center gap-4">
-          {settings.avatar ? (
-            <img src={settings.avatar} alt="头像" className="h-14 w-14 rounded-full object-cover" />
+          {settings.avatar && !avatarBroken ? (
+            <img
+              src={settings.avatar}
+              alt="头像"
+              className="h-14 w-14 rounded-full object-cover"
+              onError={() => setAvatarBroken(true)}
+            />
           ) : (
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary text-lg">
               {settings.userName.slice(0, 1) || '?'}

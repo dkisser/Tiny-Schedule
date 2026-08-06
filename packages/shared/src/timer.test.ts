@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Task } from './models';
 import {
+  addDays,
   applySettlement,
   computeElapsed,
   localDate,
@@ -50,6 +51,22 @@ describe('localDate', () => {
     const d = new Date(2026, 7, 4, 9, 30); // Aug = month 7
     expect(localDate(d.getTime())).toBe('2026-08-04');
     expect(localDate(new Date(2026, 0, 1, 0, 0).getTime())).toBe('2026-01-01');
+  });
+});
+
+describe('addDays', () => {
+  test('adds one day', () => {
+    expect(addDays('2026-08-04', 1)).toBe('2026-08-05');
+  });
+  test('rolls over month and year boundaries', () => {
+    expect(addDays('2026-08-31', 1)).toBe('2026-09-01');
+    expect(addDays('2026-12-31', 1)).toBe('2027-01-01');
+  });
+  test('handles leap years', () => {
+    expect(addDays('2028-02-28', 1)).toBe('2028-02-29');
+  });
+  test('supports negative offsets', () => {
+    expect(addDays('2026-08-01', -1)).toBe('2026-07-31');
   });
 });
 

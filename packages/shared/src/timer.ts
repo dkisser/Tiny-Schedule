@@ -28,6 +28,12 @@ export function localDate(ts: number): string {
   return `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 }
 
+/** Add n days to a YYYY-MM-DD string, computed in local time. */
+export function addDays(date: string, n: number): string {
+  const [y = 1970, m = 1, d = 1] = date.split('-').map(Number);
+  return localDate(new Date(y, m - 1, d + n).getTime());
+}
+
 export interface Settlement {
   ms: number;
   entry: TimeEntry;

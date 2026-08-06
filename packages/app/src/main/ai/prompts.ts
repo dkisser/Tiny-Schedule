@@ -1,5 +1,4 @@
-import type { AppData } from '@tiny-schedule/shared';
-import { localDate } from '@tiny-schedule/shared';
+import { type AppData, addDays } from '@tiny-schedule/shared';
 
 export const DEFAULT_PROMPT = `你是一个效率分析助手。以下是用户 {{date}} 的任务与时间数据（JSON）：
 
@@ -25,11 +24,6 @@ export interface AnalysisScope {
   scope: 'today' | 'week' | 'project';
   date: string; // anchor date YYYY-MM-DD
   projectId?: string;
-}
-
-function addDays(date: string, delta: number): string {
-  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
-  return localDate(new Date(y, m - 1, d + delta).getTime());
 }
 
 function touchesRange(

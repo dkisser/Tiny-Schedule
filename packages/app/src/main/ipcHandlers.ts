@@ -4,14 +4,17 @@ import {
   AiAnalyzeReqSchema,
   AiTestReqSchema,
   type AppData,
+  addDays,
   ExportMarkdownReqSchema,
   FinishDayReqSchema,
   type ImportRunResult,
   Ipc,
   localDate,
   maskDataForRenderer,
+  OrderSetReqSchema,
+  ProjectCreateReqSchema,
   SettingsUpdateReqSchema,
-  SYSTEM_TAG_IDS,
+  TagCreateReqSchema,
   TaskDeleteReqSchema,
   TaskSchema,
   TimerSyncReqSchema,
@@ -25,6 +28,7 @@ import type { DataStore } from './dataStore';
 import { exportProjectTaskList, exportWorklog } from './exporter';
 import { mergeImport, normalizeBackup } from './importer';
 import { decryptKey, encryptKey } from './keys';
+import { migrateRemoveTodayTag } from './migrations';
 
 export interface IpcDeps {
   store: DataStore;
@@ -66,6 +70,47 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       return { ...d, tasks };
     });
     logger.info({ action: 'task:delete', taskId: id });
+    return masked(next);
+  });
+
+  ipcMain.handle(Ipc.orderSet, (_e, raw: unknown) => {
+    const { viewKey, ids } = OrderSetReqSchema.parse(raw);
+    store.update((d) => {
+      const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;
+      return { ...d, misc: { ...d.misc, taskOrder: { ...taskOrder, [viewKey]: ids } } };
+    });
+    logger.info({ action: 'order:set', viewKey, count: ids.length });
+  });
+
+  ipcMain.handle(Ipc.projectCreate, (_e, raw: unknown) => {
+    const req = ProjectCreateReqSchema.parse(raw);
+    const next = store.update((d) => {
+      const id = `p_${randomUUID()}`;
+      return {
+        ...d,
+        projects: {
+          ...d.projects,
+          [id]: {
+            id,
+            title: req.title,
+            icon: req.icon,
+            isArchived: false,
+            primaryColor: req.primaryColor,
+          },
+        },
+      };
+    });
+    logger.info({ action: 'project:create', title: req.title });
+    return masked(next);
+  });
+
+  ipcMain.handle(Ipc.tagCreate, (_e, raw: unknown) => {
+    const req = TagCreateReqSchema.parse(raw);
+    const next = store.update((d) => {
+      const id = `tag_${randomUUID()}`;
+      return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
+    });
+    logger.info({ action: 'tag:create', title: req.title });
     return masked(next);
   });
 
@@ -111,11 +156,14 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // payload date is validated but not used for logic: finishing always applies to the local "today"
     FinishDayReqSchema.parse(raw);
     const today = localDate(Date.now());
+    const tomorrow = addDays(today, 1);
     const next = store.update((d) => {
       const tasks = { ...d.tasks };
       for (const t of Object.values(tasks)) {
-        if (!t.isDone && t.tagIds.includes(SYSTEM_TAG_IDS.today)) {
-          tasks[t.id] = { ...t, tagIds: t.tagIds.filter((id) => id !== SYSTEM_TAG_IDS.today) };
+        // Roll unfinished tasks due today to tomorrow so they remain visible
+        // in the dueDay-driven Today view instead of silently disappearing.
+        if (!t.isDone && t.dueDay === today) {
+          tasks[t.id] = { ...t, dueDay: tomorrow };
         }
       }
       return { ...d, tasks, misc: { ...d.misc, lastFinishDay: today } };
@@ -148,7 +196,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         });
         if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
       }
-      const next = store.update((d) => mergeImport(d, imported));
+      const next = store.update((d) => migrateRemoveTodayTag(mergeImport(d, imported)));
       logger.info({ action: 'import:run', counts, file: picked.filePaths[0] });
       void next;
       return { ok: true, counts };
@@ -250,6 +298,20 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           full += delta;
           sendSafe(win, Ipc.aiChunk, { requestId, delta });
         }
+        // Persist before signaling done so the renderer can reload and see the history entry.
+        store.update((d) => {
+          const history = [
+            {
+              id: randomUUID(),
+              scope: req.scope,
+              ...(req.projectId ? { projectId: req.projectId } : {}),
+              createdAt: Date.now(),
+              content: full,
+            },
+            ...((d.misc.aiHistory ?? []) as unknown[]),
+          ].slice(0, 50);
+          return { ...d, misc: { ...d.misc, aiHistory: history } };
+        });
         sendSafe(win, Ipc.aiDone, { requestId, full });
         logger.info({ action: 'ai:analyze:done', requestId, length: full.length });
       } catch (err) {

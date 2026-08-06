@@ -1,4 +1,4 @@
-import { SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
+import { localDate } from '@tiny-schedule/shared';
 import { useState } from 'react';
 import { blankTask } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
@@ -17,8 +17,9 @@ export function AddTaskInput({
   const submit = async () => {
     const trimmed = title.trim();
     if (!trimmed) return;
-    const tags = addToToday ? [SYSTEM_TAG_IDS.today] : [];
-    await upsertTask(blankTask(trimmed, projectId, tags));
+    const task = blankTask(trimmed, projectId);
+    if (addToToday) task.dueDay = localDate(Date.now());
+    await upsertTask(task);
     setTitle('');
   };
 

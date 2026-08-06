@@ -50,7 +50,7 @@ export function FinishDayDialog({ open, onClose }: { open: boolean; onClose: () 
           <DialogTitle>结束今天？</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          未完成的“今日”任务将移回所属项目，明天可重新加入今日。
+          未完成的今日任务将顺延到明天，已完成任务保留在今日记录中。
         </p>
         <div className="flex flex-col gap-2 text-sm">
           <label className="flex items-center gap-2">
