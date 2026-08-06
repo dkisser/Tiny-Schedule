@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createLogger } from '../logger';
+import { createLogger } from '../src/main/logger';
 
 describe('createLogger', () => {
   test('writes NDJSON lines to file in logs dir', async () => {

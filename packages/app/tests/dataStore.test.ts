@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emptyAppData } from '@tiny-schedule/shared';
-import { DataStore } from '../dataStore';
+import { DataStore } from '../src/main/dataStore';
 
 function tmpDir() {
   return mkdtempSync(join(tmpdir(), 'tsdata-'));

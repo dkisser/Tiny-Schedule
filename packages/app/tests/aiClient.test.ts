@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { streamChat } from '../ai/client';
+import { streamChat } from '../src/main/ai/client';
 
 function sseStream(chunks: string[], delayMs = 0): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();

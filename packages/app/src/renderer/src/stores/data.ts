@@ -39,7 +39,7 @@ export const useDataStore = create<DataState>((set) => ({
     set({ data });
   },
   deleteTask: async (id) => {
-    const data = await api().taskDelete(id);
+    const data = await api().taskDelete({ id });
     set({ data });
   },
   setTaskOrder: (viewKey, ids) => {

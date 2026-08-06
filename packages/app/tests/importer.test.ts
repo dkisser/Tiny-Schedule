@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { emptyAppData, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
-import { mergeImport, normalizeBackup } from '../importer';
+import { mergeImport, normalizeBackup } from '../src/main/importer';
 import fixture from './fixtures/backup.fixture.json';
 
 describe('normalizeBackup', () => {

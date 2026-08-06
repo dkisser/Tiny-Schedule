@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { Task } from './models';
+import type { Task } from '../src/models';
 import {
   addDays,
   applySettlement,
@@ -9,7 +9,7 @@ import {
   resumeTimer,
   settleTimer,
   startTimer,
-} from './timer';
+} from '../src/timer';
 
 const T0 = 1_785_700_000_000;
 

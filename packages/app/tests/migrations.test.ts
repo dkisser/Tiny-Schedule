@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { emptyAppData, localDate, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
-import { migrateRemoveTodayTag } from '../migrations';
+import { migrateRemoveTodayTag } from '../src/main/migrations';
 
 describe('migrateRemoveTodayTag', () => {
   test('strips TODAY tag and backfills dueDay when missing', () => {

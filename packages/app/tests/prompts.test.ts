@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { emptyAppData, localDate, SYSTEM_TAG_IDS, type Task } from '@tiny-schedule/shared';
-import { buildAnalysisData, DEFAULT_PROMPT, renderPrompt } from '../ai/prompts';
+import { buildAnalysisData, DEFAULT_PROMPT, renderPrompt } from '../src/main/ai/prompts';
 
 function task(overrides: Partial<Task>): Task {
   return {

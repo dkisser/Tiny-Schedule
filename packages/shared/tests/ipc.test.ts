@@ -6,8 +6,8 @@ import {
   SettingsUpdateReqSchema,
   TaskSchema,
   TimerSyncReqSchema,
-} from './ipc';
-import { emptyAppData } from './models';
+} from '../src/ipc';
+import { emptyAppData } from '../src/models';
 
 describe('Ipc channels', () => {
   test('channels are unique', () => {

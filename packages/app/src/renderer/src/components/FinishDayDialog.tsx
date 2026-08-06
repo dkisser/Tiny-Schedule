@@ -27,7 +27,7 @@ export function FinishDayDialog({ open, onClose }: { open: boolean; onClose: () 
   const hasProvider = data.settings.aiProviders.length > 0;
 
   const confirm = async () => {
-    const next = await api().finishDay(new Date().toISOString());
+    const next = await api().finishDay({ date: new Date().toISOString() });
     useDataStore.setState({ data: next });
     if (autoAnalyze !== data.settings.autoAiAnalyzeOnFinishDay) {
       await updateSettings({ autoAiAnalyzeOnFinishDay: autoAnalyze });

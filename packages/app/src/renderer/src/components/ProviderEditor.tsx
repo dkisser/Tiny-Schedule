@@ -22,7 +22,7 @@ export function ProviderEditor({
 
   const test = async () => {
     setTestResult('测试中…');
-    const res = await api().aiTestProvider(draft.id);
+    const res = await api().aiTestProvider({ providerId: draft.id });
     setTestResult(res.ok ? '✓ 连接成功' : `✗ ${res.error ?? '连接失败'}`);
   };
 

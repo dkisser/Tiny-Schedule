@@ -1,37 +1,12 @@
-import type {
-  AiAnalyzeReq,
-  AiStreamEvent,
-  ExportMarkdownReq,
-  ExportMarkdownResult,
-  ImportRunResult,
-  OrderSetReq,
-  ProjectCreateReq,
-  ProviderInfo,
-  SettingsUpdateReq,
-  TagCreateReq,
-  TaskPayload,
-  TimerSyncReq,
-} from './ipc';
-import type { AppData } from './models';
+import type { AiStreamEvent, IpcInvokeFn, IpcInvokeKey } from './ipc';
 
-export interface RendererApi {
-  dataLoad(): Promise<AppData>;
-  taskUpsert(task: TaskPayload): Promise<AppData>;
-  taskDelete(id: string): Promise<AppData>;
-  orderSet(req: OrderSetReq): Promise<void>;
-  projectCreate(req: ProjectCreateReq): Promise<AppData>;
-  tagCreate(req: TagCreateReq): Promise<AppData>;
-  settingsUpdate(patch: SettingsUpdateReq): Promise<AppData>;
-  finishDay(date: string): Promise<AppData>;
-  timerSync(req: TimerSyncReq): Promise<void>;
-  importRun(): Promise<ImportRunResult>;
-  exportMarkdown(req: ExportMarkdownReq): Promise<ExportMarkdownResult>;
-  selectAvatar(): Promise<string | null>; // data URL
-  aiRegistry(): Promise<ProviderInfo[]>;
-  aiTestProvider(providerId: string): Promise<{ ok: boolean; error?: string }>;
-  aiAnalyze(req: AiAnalyzeReq): Promise<{ requestId: string }>;
+// Derived from IpcInvokeContract so the renderer-facing signatures can never
+// drift from the request schemas or response types declared in the contract.
+export type RendererApi = {
+  [K in IpcInvokeKey]: IpcInvokeFn<K>;
+} & {
   onAiEvent(cb: (ev: AiStreamEvent) => void): () => void;
-}
+};
 
 export const RENDERER_API_KEY = 'tinyApi';
 

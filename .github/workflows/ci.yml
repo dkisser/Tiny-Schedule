@@ -27,6 +27,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: IPC guard
+        run: bun run check:ipc
+
       - name: Typecheck
         run: bun run typecheck
 

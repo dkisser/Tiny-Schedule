@@ -200,6 +200,80 @@ export const AiStreamEventSchema = z.object({
 });
 export type AiStreamEvent = z.infer<typeof AiStreamEventSchema>;
 
+// Single source of truth for invoke channels: channel name + request schema +
+// response type. Adding an entry here forces both ends to implement it at
+// compile time (IpcInvokeHandlers in main, RendererApi in preload).
+// Event channels (aiChunk/aiDone/aiError) are main->renderer only and stay
+// outside this contract; see IpcEventChannels.
+export const IpcInvokeContract = {
+  dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
+  taskUpsert: { ch: Ipc.taskUpsert, req: TaskSchema, res: null as unknown as AppData },
+  taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
+  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
+  orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
+  projectCreate: {
+    ch: Ipc.projectCreate,
+    req: ProjectCreateReqSchema,
+    res: null as unknown as AppData,
+  },
+  tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as AppData },
+  settingsUpdate: {
+    ch: Ipc.settingsUpdate,
+    req: SettingsUpdateReqSchema,
+    res: null as unknown as AppData,
+  },
+  finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
+  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
+  timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
+  importRun: { ch: Ipc.importRun, res: null as unknown as ImportRunResult },
+  exportMarkdown: {
+    ch: Ipc.exportMarkdown,
+    req: ExportMarkdownReqSchema,
+    res: null as unknown as ExportMarkdownResult,
+  },
+  selectAvatar: { ch: Ipc.selectAvatar, res: null as unknown as string | null },
+  aiRegistry: { ch: Ipc.aiRegistry, res: null as unknown as ProviderInfo[] },
+  aiTestProvider: {
+    ch: Ipc.aiTestProvider,
+    req: AiTestReqSchema,
+    res: null as unknown as { ok: boolean; error?: string },
+  },
+  aiAnalyze: {
+    ch: Ipc.aiAnalyze,
+    req: AiAnalyzeReqSchema,
+    res: null as unknown as { requestId: string },
+  },
+} as const;
+
+export type IpcInvokeKey = keyof typeof IpcInvokeContract;
+
+export type IpcRes<K extends IpcInvokeKey> = (typeof IpcInvokeContract)[K]['res'];
+
+/** Renderer-facing signature: zero-arg when the channel has no request schema. */
+export type IpcInvokeFn<K extends IpcInvokeKey> = (typeof IpcInvokeContract)[K] extends {
+  req: infer S;
+}
+  ? S extends z.ZodType
+    ? (req: z.infer<S>) => Promise<IpcRes<K>>
+    : never
+  : () => Promise<IpcRes<K>>;
+
+/** Main-process handler signature mirroring IpcInvokeFn. */
+export type IpcHandlerFn<K extends IpcInvokeKey> = (typeof IpcInvokeContract)[K] extends {
+  req: infer S;
+}
+  ? S extends z.ZodType
+    ? (req: z.infer<S>) => Promise<IpcRes<K>> | IpcRes<K>
+    : never
+  : () => Promise<IpcRes<K>> | IpcRes<K>;
+
+export type IpcInvokeHandlers = {
+  [K in IpcInvokeKey]: IpcHandlerFn<K>;
+};
+
+/** Main -> renderer push channels; preload subscribes, main sends. */
+export const IpcEventChannels = [Ipc.aiChunk, Ipc.aiDone, Ipc.aiError] as const;
+
 /** AppData sent to the renderer never contains real keys. */
 export function maskDataForRenderer(data: AppData): AppData {
   return {

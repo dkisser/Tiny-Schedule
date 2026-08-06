@@ -1,31 +1,34 @@
-import { type AiStreamEvent, Ipc, RENDERER_API_KEY, type RendererApi } from '@tiny-schedule/shared';
+import {
+  type AiStreamEvent,
+  IpcEventChannels,
+  IpcInvokeContract,
+  RENDERER_API_KEY,
+  type RendererApi,
+} from '@tiny-schedule/shared';
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api: RendererApi = {
-  dataLoad: () => ipcRenderer.invoke(Ipc.dataLoad),
-  taskUpsert: (task) => ipcRenderer.invoke(Ipc.taskUpsert, task),
-  taskDelete: (id) => ipcRenderer.invoke(Ipc.taskDelete, { id }),
-  orderSet: (req) => ipcRenderer.invoke(Ipc.orderSet, req),
-  projectCreate: (req) => ipcRenderer.invoke(Ipc.projectCreate, req),
-  tagCreate: (req) => ipcRenderer.invoke(Ipc.tagCreate, req),
-  settingsUpdate: (patch) => ipcRenderer.invoke(Ipc.settingsUpdate, patch),
-  finishDay: (date) => ipcRenderer.invoke(Ipc.finishDay, { date }),
-  timerSync: (req) => ipcRenderer.invoke(Ipc.timerSync, req),
-  importRun: () => ipcRenderer.invoke(Ipc.importRun),
-  exportMarkdown: (req) => ipcRenderer.invoke(Ipc.exportMarkdown, req),
-  selectAvatar: () => ipcRenderer.invoke(Ipc.selectAvatar),
-  aiRegistry: () => ipcRenderer.invoke(Ipc.aiRegistry),
-  aiTestProvider: (providerId) => ipcRenderer.invoke(Ipc.aiTestProvider, { providerId }),
-  aiAnalyze: (req) => ipcRenderer.invoke(Ipc.aiAnalyze, req),
+  dataLoad: () => ipcRenderer.invoke(IpcInvokeContract.dataLoad.ch),
+  taskUpsert: (task) => ipcRenderer.invoke(IpcInvokeContract.taskUpsert.ch, task),
+  taskDelete: (req) => ipcRenderer.invoke(IpcInvokeContract.taskDelete.ch, req),
+  orderSet: (req) => ipcRenderer.invoke(IpcInvokeContract.orderSet.ch, req),
+  projectCreate: (req) => ipcRenderer.invoke(IpcInvokeContract.projectCreate.ch, req),
+  tagCreate: (req) => ipcRenderer.invoke(IpcInvokeContract.tagCreate.ch, req),
+  settingsUpdate: (patch) => ipcRenderer.invoke(IpcInvokeContract.settingsUpdate.ch, patch),
+  finishDay: (req) => ipcRenderer.invoke(IpcInvokeContract.finishDay.ch, req),
+  timerSync: (req) => ipcRenderer.invoke(IpcInvokeContract.timerSync.ch, req),
+  importRun: () => ipcRenderer.invoke(IpcInvokeContract.importRun.ch),
+  exportMarkdown: (req) => ipcRenderer.invoke(IpcInvokeContract.exportMarkdown.ch, req),
+  selectAvatar: () => ipcRenderer.invoke(IpcInvokeContract.selectAvatar.ch),
+  aiRegistry: () => ipcRenderer.invoke(IpcInvokeContract.aiRegistry.ch),
+  aiTestProvider: (req) => ipcRenderer.invoke(IpcInvokeContract.aiTestProvider.ch, req),
+  aiAnalyze: (req) => ipcRenderer.invoke(IpcInvokeContract.aiAnalyze.ch, req),
   onAiEvent: (cb) => {
     const listener = (_e: unknown, ev: AiStreamEvent) => cb(ev);
-    ipcRenderer.on(Ipc.aiChunk, listener as never);
-    ipcRenderer.on(Ipc.aiDone, listener as never);
-    ipcRenderer.on(Ipc.aiError, listener as never);
+    // check-ipc: ok — ch iterates IpcEventChannels
+    for (const ch of IpcEventChannels) ipcRenderer.on(ch, listener as never);
     return () => {
-      ipcRenderer.removeListener(Ipc.aiChunk, listener as never);
-      ipcRenderer.removeListener(Ipc.aiDone, listener as never);
-      ipcRenderer.removeListener(Ipc.aiError, listener as never);
+      for (const ch of IpcEventChannels) ipcRenderer.removeListener(ch, listener as never);
     };
   },
 };

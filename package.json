@@ -10,6 +10,7 @@
     "test": "bun run --cwd packages/app test && bun run --cwd packages/shared test",
     "lint": "biome check .",
     "format": "biome check --write .",
+    "check:ipc": "bun scripts/check-ipc-literals.ts",
     "typecheck": "tsc -b"
   },
   "devDependencies": {

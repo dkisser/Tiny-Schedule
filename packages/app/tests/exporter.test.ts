@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { type AppData, emptyAppData, type Task } from '@tiny-schedule/shared';
-import { formatDuration } from '../duration';
-import { exportProjectTaskList, exportWorklog } from '../exporter';
+import { formatDuration } from '../src/main/duration';
+import { exportProjectTaskList, exportWorklog } from '../src/main/exporter';
 
 function makeTask(overrides: Partial<Task>): Task {
   return {
