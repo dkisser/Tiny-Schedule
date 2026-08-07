@@ -15,4 +15,3 @@ graphify-out/
 docs/superpowers/
 # git worktrees
 .worktrees/
-bun.lockb

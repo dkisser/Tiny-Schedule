@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.1",
+    "@earendil-works/pi-ai": "^0.84.1",
     "@tiny-schedule/shared": "workspace:*",
     "cherry-markdown": "^0.11.9",
     "class-variance-authority": "^0.7.1",
