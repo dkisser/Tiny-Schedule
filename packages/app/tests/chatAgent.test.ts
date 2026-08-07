@@ -9,7 +9,13 @@ import type { ChatSession } from '@tiny-schedule/shared';
 import type { ChatEventSink } from '../src/main/ai/chatAgent';
 import { ChatAgentManager } from '../src/main/ai/chatAgent';
 
-function setup() {
+type SetupOptions = {
+  /** 'default': 工具调用 + 文本答案两轮；'error': 每次调用都返回 stopReason 'error'；'slow': 慢速流式响应（保持 run in-flight） */
+  script?: 'default' | 'error' | 'slow';
+};
+
+function setup(options: SetupOptions = {}) {
+  const { script = 'default' } = options;
   const sessions: ChatSession[] = [];
   const events: { kind: string; payload: unknown }[] = [];
   const sink: ChatEventSink = {
@@ -73,13 +79,34 @@ function setup() {
     // 脚本在钩子内部注入（两轮响应：先调 listProjects 工具，再给文本答案），
     // 测试不需要持有 faux 引用。
     createAgent: (opts) => {
-      const faux = fauxProvider();
+      const faux = fauxProvider(script === 'slow' ? { tokensPerSecond: 20 } : undefined);
       const models = createModels();
       models.setProvider(faux.provider);
-      faux.setResponses([
-        fauxAssistantMessage([fauxToolCall('listProjects', {})]),
-        fauxAssistantMessage('你还没有创建任何项目。'),
-      ]);
+      if (script === 'error') {
+        // 每次 provider 调用都返回 stopReason 'error'（流式失败，run 会 resolve 而不是 reject）。
+        // faux 每次 stream 调用消费一条脚本响应，重试共 3 次调用，故脚本 3 条错误。
+        faux.setResponses([
+          fauxAssistantMessage('provider exploded', {
+            stopReason: 'error',
+            errorMessage: 'provider exploded',
+          }),
+          fauxAssistantMessage('provider exploded', {
+            stopReason: 'error',
+            errorMessage: 'provider exploded',
+          }),
+          fauxAssistantMessage('provider exploded', {
+            stopReason: 'error',
+            errorMessage: 'provider exploded',
+          }),
+        ]);
+      } else if (script === 'slow') {
+        faux.setResponses([fauxAssistantMessage('慢速长响应 ' + 'x'.repeat(300))]);
+      } else {
+        faux.setResponses([
+          fauxAssistantMessage([fauxToolCall('listProjects', {})]),
+          fauxAssistantMessage('你还没有创建任何项目。'),
+        ]);
+      }
       return opts.buildAgent(models.streamSimple.bind(models), faux.getModel() as never);
     },
   });
@@ -121,5 +148,50 @@ describe('ChatAgentManager', () => {
     const s = manager.createSession();
     manager.deleteSession(s.id);
     expect(sessions).toHaveLength(0);
+  });
+
+  test('stop mid-run: no done event and no aborted tail persisted', async () => {
+    const { manager, sessions, events } = setup({ script: 'slow' });
+    const s = manager.createSession();
+    const res = await manager.send(s.id, '慢速响应，用于测试 stop');
+    expect('requestId' in res).toBe(true);
+    manager.stop(s.id);
+    await manager.waitForIdle(s.id);
+    const kinds = events.map((e) => e.kind);
+    // 用户 stop 后：不发 done、不发 error、不进入 retrying/failed
+    expect(kinds).not.toContain('done');
+    expect(kinds).not.toContain('error');
+    const statuses = events
+      .filter((e) => e.kind === 'status')
+      .map((e) => (e.payload as { status: string }).status);
+    expect(statuses).toEqual(['running']);
+    // 中止的 assistant 尾部消息（stopReason 'aborted'）不得持久化进 session
+    expect(sessions[0]?.messages ?? []).toHaveLength(0);
+  });
+
+  test('provider stream error: retrying then failed + error, no done', async () => {
+    const { manager, sessions, events } = setup({ script: 'error' });
+    const s = manager.createSession();
+    const res = await manager.send(s.id, '触发 provider 错误');
+    expect('requestId' in res).toBe(true);
+    await manager.waitForIdle(s.id);
+    const statuses = events
+      .filter((e) => e.kind === 'status')
+      .map((e) => e.payload as { status: string; attempt?: number; error?: string });
+    // 3 次 provider 调用全部失败：running → retrying(1) → retrying(2) → failed
+    expect(statuses.map((st) => st.status)).toEqual(['running', 'retrying', 'retrying', 'failed']);
+    expect(statuses.filter((st) => st.status === 'retrying').map((st) => st.attempt)).toEqual([
+      1, 2,
+    ]);
+    expect(statuses[statuses.length - 1]).toMatchObject({
+      status: 'failed',
+      error: 'provider exploded',
+    });
+    const errors = events.filter((e) => e.kind === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.payload).toMatchObject({ error: 'provider exploded' });
+    expect(events.some((e) => e.kind === 'done')).toBe(false);
+    // 重试耗尽后按规格 persist 转录
+    expect((sessions[0]?.messages ?? []).length).toBeGreaterThan(0);
   });
 });

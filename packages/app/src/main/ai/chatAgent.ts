@@ -54,7 +54,8 @@ export interface CreateAgentOpts {
 
 export class ChatAgentManager {
   private agents = new Map<string, Agent>();
-  private runIds = new Map<string, string>(); // sessionId -> 当前 requestId
+  private runIds = new Map<string, string>(); // sessionId -> 当前 requestId（run 失效校验）
+  private agentRunIds = new Map<Agent, string>(); // agent -> 正在其上执行的 run 的 requestId（订阅事件归属）
   private runPromises = new Map<string, Promise<void>>(); // sessionId -> 最近一次 run() 的 promise
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -115,7 +116,8 @@ export class ChatAgentManager {
 
   stop(sessionId: string): void {
     this.clearTimer(sessionId);
-    // 使当前 run 失效：被 abort 的 prompt/continue 落入重试分支时直接放弃
+    // 使当前 run 失效：被 abort 的 prompt/continue 以 stopReason 'aborted' 收尾并 resolve，
+    // run 循环在 resolve 后的 runIds 校验里检测到失效，静默放弃（不发 done/error、不 persist）。
     this.runIds.delete(sessionId);
     this.agents.get(sessionId)?.abort();
   }
@@ -162,7 +164,9 @@ export class ChatAgentManager {
 
   private subscribeAgent(agent: Agent, sessionId: string): void {
     agent.subscribe((event) => {
-      const requestId = this.runIds.get(sessionId) ?? '';
+      // 事件归属按 run 作用域取值：run() 在开始执行时写入 agentRunIds，
+      // 避免用 session 级 runIds 实时读取导致旧 run 的迟到 chunk 被标成新 run 的 requestId。
+      const requestId = this.agentRunIds.get(agent) ?? '';
       switch (event.type) {
         case 'message_update': {
           const inner = event.assistantMessageEvent;
@@ -210,33 +214,96 @@ export class ChatAgentManager {
     const agent = this.getOrCreateAgent(session, cfg);
     this.deps.sink.status({ sessionId, requestId, status: 'running' });
     this.armTimer(sessionId, FIRST_TOKEN_TIMEOUT_MS, 'FIRST_TOKEN_TIMEOUT', () => agent.abort());
+    // 事件归属：仅当 agent 空闲时把本次 run 的 requestId 绑定到订阅映射。
+    // 若 agent 正忙（例如并发 send），本次 run 会立即失败，不应抢占当前执行中 run 的事件标签。
+    if (!agent.state.isStreaming) this.agentRunIds.set(agent, requestId);
 
     let attempt = 0;
     for (;;) {
       try {
         if (attempt === 0) await agent.prompt(text);
         else await agent.continue();
-        break;
       } catch (err) {
-        // run 已失效（用户 stop / 新的 send / 超时触发）：放弃重试与失败上报
-        if (this.runIds.get(sessionId) !== requestId) return;
+        // 拒绝路径（agent 抛出的真实错误，如 "already processing"、监听器异常）
+        if (this.runIds.get(sessionId) !== requestId) {
+          // run 已失效（用户 stop / 超时 / 新 send 抢占）：静默放弃
+          this.clearTimer(sessionId);
+          this.stripErrorTail(sessionId);
+          return;
+        }
         const message = err instanceof Error ? err.message : String(err);
         if (attempt < MAX_RETRIES) {
           attempt += 1;
           this.deps.logger.info({ action: 'chat:retry', sessionId, attempt, error: message });
           this.deps.sink.status({ sessionId, requestId, status: 'retrying', attempt });
-        } else {
-          this.persist(sessionId, agent);
-          this.deps.sink.status({ sessionId, requestId, status: 'failed', error: message });
-          this.deps.sink.error({ sessionId, requestId, error: message });
-          this.deps.logger.error({ action: 'chat:error', sessionId, error: message });
-          return;
+          continue;
         }
+        this.clearTimer(sessionId);
+        this.persist(sessionId, agent);
+        this.deps.sink.status({ sessionId, requestId, status: 'failed', error: message });
+        this.deps.sink.error({ sessionId, requestId, error: message });
+        this.deps.logger.error({ action: 'chat:error', sessionId, error: message });
+        return;
       }
+
+      // pi-agent-core 在 abort / 流式失败时也会 RESOLVE（以 stopReason 'aborted'/'error'
+      // 的 assistant 消息收尾），所以 resolve 后必须检查 run 是否仍有效 + 终态是否错误。
+      if (this.runIds.get(sessionId) !== requestId) {
+        // run 已失效（用户 stop / 超时 / 新 send 抢占）：
+        // 不发 done/error、不 persist 被中止的尾部消息
+        this.clearTimer(sessionId);
+        this.stripErrorTail(sessionId);
+        return;
+      }
+      if (this.isErrorOutcome(agent)) {
+        const message = agent.state.errorMessage ?? 'AI provider error';
+        if (attempt < MAX_RETRIES) {
+          attempt += 1;
+          // 移除错误 assistant 尾部消息后 continue() 才能通过
+          // （pi-agent-core 不允许从 assistant 消息继续）
+          this.stripErrorTail(sessionId);
+          this.deps.logger.info({ action: 'chat:retry', sessionId, attempt, error: message });
+          this.deps.sink.status({ sessionId, requestId, status: 'retrying', attempt });
+          continue;
+        }
+        this.clearTimer(sessionId);
+        this.persist(sessionId, agent);
+        this.deps.sink.status({ sessionId, requestId, status: 'failed', error: message });
+        this.deps.sink.error({ sessionId, requestId, error: message });
+        this.deps.logger.error({ action: 'chat:error', sessionId, error: message });
+        return;
+      }
+      break;
     }
     this.clearTimer(sessionId);
     this.persist(sessionId, agent);
     this.deps.sink.done(sessionId, requestId);
+  }
+
+  /** 最近一次 run 是否以错误/中止收尾（最后一条 assistant 消息 stopReason 为 error/aborted，或 state.errorMessage 已置位）。 */
+  private isErrorOutcome(agent: Agent): boolean {
+    const messages = agent.state.messages as AgentMessage[];
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant') {
+      const reason = last.stopReason;
+      if (reason === 'error' || reason === 'aborted') return true;
+    }
+    return agent.state.errorMessage !== undefined;
+  }
+
+  /** 移除 transcript 末尾的 assistant error/aborted 消息（pi-agent-core 失败/中止时追加的），
+   *  避免它在后续 run 中继续污染转录或被持久化。 */
+  private stripErrorTail(sessionId: string): void {
+    const agent = this.agents.get(sessionId);
+    if (!agent) return;
+    const messages = agent.state.messages as AgentMessage[];
+    const last = messages[messages.length - 1];
+    if (
+      last?.role === 'assistant' &&
+      (last.stopReason === 'error' || last.stopReason === 'aborted')
+    ) {
+      agent.state.messages = messages.slice(0, -1);
+    }
   }
 
   private persist(sessionId: string, agent: Agent): void {
