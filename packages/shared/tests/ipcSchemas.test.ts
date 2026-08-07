@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  ChatContinueReqSchema,
   ChatSendReqSchema,
   ChatSessionCreateReqSchema,
   ChatSessionDeleteReqSchema,
@@ -15,6 +16,7 @@ describe('chat IPC schemas', () => {
     expect(Ipc.chatSessionDelete).toBe('chat:sessionDelete');
     expect(Ipc.chatSend).toBe('chat:send');
     expect(Ipc.chatStop).toBe('chat:stop');
+    expect(Ipc.chatContinue).toBe('chat:continue');
     expect(Ipc.chatChunk).toBe('chat:chunk');
     expect(Ipc.chatToolEvent).toBe('chat:toolEvent');
     expect(Ipc.chatStatus).toBe('chat:status');
@@ -34,6 +36,12 @@ describe('chat IPC schemas', () => {
     expect(ChatSessionCreateReqSchema.parse({}).providerId).toBeUndefined();
     expect(ChatSessionDeleteReqSchema.safeParse({}).success).toBe(false);
     expect(ChatStopReqSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1');
+  });
+
+  test('chatContinue requires a sessionId', () => {
+    expect(ChatContinueReqSchema.safeParse({}).success).toBe(false);
+    expect(ChatContinueReqSchema.safeParse({ sessionId: '' }).success).toBe(false);
+    expect(ChatContinueReqSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1');
   });
 
   test('chatStatus event schema', () => {

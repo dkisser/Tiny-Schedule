@@ -27,6 +27,7 @@ function setup(options: SetupOptions = {}) {
     error: (ev) => events.push({ kind: 'error', payload: ev }),
   };
   const logger = { info: () => {}, error: () => {} } as never;
+  const faux = fauxProvider(script === 'slow' ? { tokensPerSecond: 20 } : undefined);
   const manager = new ChatAgentManager({
     getSessions: () => sessions,
     saveSession: (s) => {
@@ -77,9 +78,8 @@ function setup(options: SetupOptions = {}) {
     logger,
     // 测试注入：用 faux provider 替代真实 openai-completions 调用。
     // 脚本在钩子内部注入（两轮响应：先调 listProjects 工具，再给文本答案），
-    // 测试不需要持有 faux 引用。
+    // 测试通过返回的 faux 句柄追加/替换脚本（如 continue 恢复场景）。
     createAgent: (opts) => {
-      const faux = fauxProvider(script === 'slow' ? { tokensPerSecond: 20 } : undefined);
       const models = createModels();
       models.setProvider(faux.provider);
       if (script === 'error') {
@@ -110,7 +110,7 @@ function setup(options: SetupOptions = {}) {
       return opts.buildAgent(models.streamSimple.bind(models), faux.getModel() as never);
     },
   });
-  return { manager, sessions, events };
+  return { manager, sessions, events, faux };
 }
 
 describe('ChatAgentManager', () => {
@@ -193,5 +193,45 @@ describe('ChatAgentManager', () => {
     expect(events.some((e) => e.kind === 'done')).toBe(false);
     // 重试耗尽后按规格 persist 转录
     expect((sessions[0]?.messages ?? []).length).toBeGreaterThan(0);
+  });
+
+  test('continue without an agent returns SESSION_NOT_FOUND', async () => {
+    const { manager } = setup();
+    const s = manager.createSession();
+    // 从未 send 过，agent 尚未创建
+    expect(await manager.continue(s.id)).toEqual({ error: 'SESSION_NOT_FOUND' });
+  });
+
+  test('continue after a failed run emits running -> done and adds no user message', async () => {
+    const { manager, sessions, events, faux } = setup({ script: 'error' });
+    const s = manager.createSession();
+    const sendRes = await manager.send(s.id, '第一次触发 provider 错误');
+    expect('requestId' in sendRes).toBe(true);
+    await manager.waitForIdle(s.id);
+    const statuses = events
+      .filter((e) => e.kind === 'status')
+      .map((e) => e.payload as { status: string });
+    expect(statuses[statuses.length - 1]?.status).toBe('failed');
+    const userCountBefore = (sessions[0]?.messages ?? []).filter(
+      (m) => (m as { role?: string }).role === 'user',
+    ).length;
+    expect(userCountBefore).toBe(1);
+
+    // provider 恢复后，continue() 复用同一套 run 机制（running -> done），
+    // 但不新增 user 消息，也不改变会话标题。
+    faux.setResponses([fauxAssistantMessage('重试成功')]);
+    const continueRes = await manager.continue(s.id);
+    expect('requestId' in continueRes).toBe(true);
+    await manager.waitForIdle(s.id);
+
+    const kinds = events.map((e) => e.kind);
+    expect(kinds[kinds.length - 1]).toBe('done');
+    const userCountAfter = (sessions[0]?.messages ?? []).filter(
+      (m) => (m as { role?: string }).role === 'user',
+    ).length;
+    expect(userCountAfter).toBe(userCountBefore);
+    const last = sessions[0]?.messages?.at(-1) as { role?: string; content?: unknown };
+    expect(last?.role).toBe('assistant');
+    expect(sessions[0]?.title).toBe('第一次触发 provider 错误');
   });
 });

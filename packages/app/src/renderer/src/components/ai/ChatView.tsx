@@ -11,7 +11,7 @@ function StatusBanner() {
   const status = useChatStore((s) => s.status);
   const detail = useChatStore((s) => s.statusDetail);
   const stop = useChatStore((s) => s.stop);
-  const send = useChatStore((s) => s.send);
+  const retry = useChatStore((s) => s.retry);
   if (status === 'idle') return null;
   // store stop() 不清 streamText/toolCards，这里一并复位流状态
   const handleStop = async () => {
@@ -33,7 +33,7 @@ function StatusBanner() {
       {status === 'failed' && (
         <>
           <span className="flex-1 text-destructive">{detail || '请求失败'}</span>
-          <Button variant="outline" size="sm" onClick={() => void send('继续')}>
+          <Button variant="outline" size="sm" onClick={() => void retry()}>
             重试
           </Button>
         </>
@@ -86,11 +86,23 @@ function ToolCards() {
   );
 }
 
-function HistoryToolCard({ m }: { m: DisplayMessage & { kind: 'tool' | 'toolResult' } }) {
-  if (m.kind === 'tool') return <ToolCardItem name={m.toolName} status="done" args={m.args} />;
-  return (
-    <ToolCardItem name="工具结果" status={m.isError ? 'error' : 'done'} resultSummary={m.text} />
-  );
+function HistoryToolCard({ m, messages }: { m: DisplayMessage; messages: DisplayMessage[] }) {
+  if (m.kind === 'tool') {
+    // 用同 toolCallId 的 toolResult 的 isError 决定 失败/完成 状态，而非硬编码 done
+    const result = messages.find(
+      (x): x is Extract<DisplayMessage, { kind: 'toolResult' }> =>
+        x.kind === 'toolResult' && x.toolCallId === m.toolCallId,
+    );
+    return (
+      <ToolCardItem name={m.toolName} status={result?.isError ? 'error' : 'done'} args={m.args} />
+    );
+  }
+  if (m.kind === 'toolResult') {
+    return (
+      <ToolCardItem name="工具结果" status={m.isError ? 'error' : 'done'} resultSummary={m.text} />
+    );
+  }
+  return null;
 }
 
 export function ChatView({ onBack }: { onBack: () => void }) {
@@ -105,20 +117,21 @@ export function ChatView({ onBack }: { onBack: () => void }) {
   const send = useChatStore((s) => s.send);
   const [input, setInput] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
+  const active = sessions.find((s) => s.id === activeSessionId);
+  const messages = active ? toDisplayMessages(active.messages) : [];
 
   useEffect(() => {
     void load();
     return subscribeChatEvents();
   }, [load]);
 
+  // messages 在 chatDone 刷新会话后变化，也要触发滚动到底部
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [streamText, activeSessionId]);
+  }, [streamText, activeSessionId, messages]);
 
   if (!data) return null;
   const hasProvider = data.settings.aiProviders.length > 0;
-  const active = sessions.find((s) => s.id === activeSessionId);
-  const messages = active ? toDisplayMessages(active.messages) : [];
 
   const submit = () => {
     const text = input.trim();
@@ -189,7 +202,7 @@ export function ChatView({ onBack }: { onBack: () => void }) {
                   </div>
                 );
               // tool/toolResult 历史条目以折叠卡展示（与实时 toolCards 同款式）
-              return <HistoryToolCard key={i} m={m} />;
+              return <HistoryToolCard key={i} m={m} messages={messages} />;
             })}
             <ToolCards />
             {streamText && (
@@ -213,7 +226,8 @@ export function ChatView({ onBack }: { onBack: () => void }) {
               disabled={!hasProvider}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+                // isComposing：中文输入法候选确认时不触发发送
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   submit();
                 }

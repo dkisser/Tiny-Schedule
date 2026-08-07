@@ -347,6 +347,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     chatSessionCreate: (req) => chatManager.createSession(req.providerId),
     chatSessionDelete: (req) => chatManager.deleteSession(req.sessionId),
     chatSend: (req) => chatManager.send(req.sessionId, req.text, req.providerId),
+    chatContinue: (req) => chatManager.continue(req.sessionId),
     chatStop: (req) => {
       chatManager.stop(req.sessionId);
     },

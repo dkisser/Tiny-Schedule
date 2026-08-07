@@ -26,6 +26,7 @@ interface ChatState {
   remove: (id: string) => Promise<void>;
   select: (id: string) => void;
   send: (text: string) => Promise<void>;
+  retry: () => Promise<void>;
   stop: () => Promise<void>;
 }
 
@@ -70,6 +71,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!activeSessionId) activeSessionId = await get().create();
     set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
     const res = await api().chatSend({ sessionId: activeSessionId, text });
+    if ('error' in res) {
+      set({
+        status: 'failed',
+        statusDetail: res.error === 'NO_PROVIDER_CONFIGURED' ? '尚未配置 AI Provider' : res.error,
+      });
+      return;
+    }
+    set({ requestId: res.requestId });
+  },
+
+  // 失败后重试：走 chat:continue，不新增 user 消息（真正的 continue，而非再次 send）
+  retry: async () => {
+    if (get().status === 'running') return;
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+    set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
+    const res = await api().chatContinue({ sessionId: activeSessionId });
     if ('error' in res) {
       set({
         status: 'failed',
@@ -135,6 +153,8 @@ export function subscribeChatEvents(): () => void {
         break;
       case Ipc.chatError:
         useChatStore.setState({
+          streamText: '',
+          toolCards: [],
           status: 'failed',
           statusDetail: (ev.payload as { error: string }).error,
         });

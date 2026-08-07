@@ -114,6 +114,25 @@ export class ChatAgentManager {
     return { requestId };
   }
 
+  /** 真正的「继续」：复用 send() 的 run 机制，但不新增 user 消息（agent.continue()）。 */
+  async continue(sessionId: string): Promise<{ requestId: string } | { error: string }> {
+    const session = this.deps.getSessions().find((s) => s.id === sessionId);
+    if (!session || !this.agents.has(sessionId)) return { error: 'SESSION_NOT_FOUND' };
+    const providers = this.deps.getProviders();
+    const cfg =
+      providers.find((p) => p.id === session.providerId) ??
+      providers.find((p) => p.isDefault) ??
+      providers[0];
+    if (!cfg) return { error: 'NO_PROVIDER_CONFIGURED' };
+
+    const requestId = randomUUID();
+    this.runIds.set(sessionId, requestId);
+    const runPromise = this.run(sessionId, undefined, requestId, cfg);
+    this.runPromises.set(sessionId, runPromise);
+    void runPromise;
+    return { requestId };
+  }
+
   stop(sessionId: string): void {
     this.clearTimer(sessionId);
     // 使当前 run 失效：被 abort 的 prompt/continue 以 stopReason 'aborted' 收尾并 resolve，
@@ -205,7 +224,7 @@ export class ChatAgentManager {
 
   private async run(
     sessionId: string,
-    text: string,
+    text: string | undefined,
     requestId: string,
     cfg: AiProviderConfig,
   ): Promise<void> {
@@ -221,8 +240,15 @@ export class ChatAgentManager {
     let attempt = 0;
     for (;;) {
       try {
-        if (attempt === 0) await agent.prompt(text);
-        else await agent.continue();
+        if (attempt === 0 && text) {
+          await agent.prompt(text);
+        } else {
+          // continue 模式（text 为空：continue() 或重试）：先移除可能存在的
+          // assistant error/aborted 尾部消息，否则 pi-agent-core 会拒绝从
+          // assistant 消息继续（“Cannot continue from message role: assistant”）。
+          if (!text) this.stripErrorTail(sessionId);
+          await agent.continue();
+        }
       } catch (err) {
         // 拒绝路径（agent 抛出的真实错误，如 "already processing"、监听器异常）
         if (this.runIds.get(sessionId) !== requestId) {

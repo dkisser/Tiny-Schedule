@@ -24,6 +24,7 @@ export const Ipc = {
   chatSessionCreate: 'chat:sessionCreate',
   chatSessionDelete: 'chat:sessionDelete',
   chatSend: 'chat:send',
+  chatContinue: 'chat:continue',
   chatStop: 'chat:stop',
   chatChunk: 'chat:chunk',
   chatToolEvent: 'chat:toolEvent',
@@ -226,6 +227,9 @@ export type ChatSendReq = z.infer<typeof ChatSendReqSchema>;
 export const ChatStopReqSchema = z.object({ sessionId: z.string().min(1) });
 export type ChatStopReq = z.infer<typeof ChatStopReqSchema>;
 
+export const ChatContinueReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatContinueReq = z.infer<typeof ChatContinueReqSchema>;
+
 export const ChatChunkEventSchema = z.object({
   sessionId: z.string(),
   requestId: z.string(),
@@ -339,6 +343,11 @@ export const IpcInvokeContract = {
   chatSend: {
     ch: Ipc.chatSend,
     req: ChatSendReqSchema,
+    res: null as unknown as { requestId: string } | { error: string },
+  },
+  chatContinue: {
+    ch: Ipc.chatContinue,
+    req: ChatContinueReqSchema,
     res: null as unknown as { requestId: string } | { error: string },
   },
   // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"

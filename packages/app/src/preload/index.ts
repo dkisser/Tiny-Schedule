@@ -29,6 +29,7 @@ const api: RendererApi = {
   chatSessionCreate: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSessionCreate.ch, req),
   chatSessionDelete: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSessionDelete.ch, req),
   chatSend: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSend.ch, req),
+  chatContinue: (req) => ipcRenderer.invoke(IpcInvokeContract.chatContinue.ch, req),
   chatStop: (req) => ipcRenderer.invoke(IpcInvokeContract.chatStop.ch, req),
   onChatEvent: (cb) => {
     // check-ipc: ok — ch iterates IpcChatEventChannels
