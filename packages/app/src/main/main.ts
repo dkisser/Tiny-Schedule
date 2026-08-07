@@ -40,7 +40,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -50,7 +50,7 @@ function createWindow(): BrowserWindow {
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     window.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
-    window.loadFile(join(__dirname, '../renderer/index.html'));
+    window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
   }
   return window;
 }

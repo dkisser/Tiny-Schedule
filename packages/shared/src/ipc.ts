@@ -350,7 +350,6 @@ export const IpcInvokeContract = {
     req: ChatContinueReqSchema,
     res: null as unknown as { requestId: string } | { error: string },
   },
-  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
   chatStop: { ch: Ipc.chatStop, req: ChatStopReqSchema, res: null as unknown as void },
 } as const;
 
