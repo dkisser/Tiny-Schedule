@@ -46,7 +46,8 @@ export function buildChatTools(getData: () => AppData, today: () => string): Age
   const summary: AgentTool<typeof summaryParams> = {
     name: 'getSummary',
     label: '统计汇总',
-    description: '聚合统计（任务数、完成数、总耗时、按项目/标签分布）。scope：today/week/project。',
+    description:
+      '聚合统计（任务数、完成数、总耗时、按项目/标签分布）。scope：today/week/project；project 范围必须提供 projectId。',
     parameters: summaryParams,
     execute: async (_toolCallId, params) =>
       json(getSummary(getData(), { ...params, date: params.date ?? today() })),

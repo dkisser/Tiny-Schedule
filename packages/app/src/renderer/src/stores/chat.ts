@@ -65,11 +65,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeSessionId: id, streamText: '', toolCards: [], status: 'idle', statusDetail: '' }),
 
   send: async (text) => {
-    // 防重复发送：manager 拒绝并发 run，run 进行中直接忽略新的 send
-    if (get().status === 'running') return;
-    let { activeSessionId } = get();
-    if (!activeSessionId) activeSessionId = await get().create();
+    // 防重复发送：仅 idle 可发起新 run（running/retrying 期间的发送直接忽略；
+    // failed 只能走 retry() 的 true-continue 路径，不允许追加新消息）。
+    // 先置 running 再 await create()，让守卫覆盖异步间隙，杜绝双次快速发送。
+    if (get().status !== 'idle') return;
     set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
+    let { activeSessionId } = get();
+    if (!activeSessionId) {
+      try {
+        activeSessionId = await get().create();
+      } catch {
+        set({ status: 'idle', statusDetail: '' });
+        return;
+      }
+    }
     const res = await api().chatSend({ sessionId: activeSessionId, text });
     if ('error' in res) {
       set({
@@ -81,9 +90,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ requestId: res.requestId });
   },
 
-  // 失败后重试：走 chat:continue，不新增 user 消息（真正的 continue，而非再次 send）
+  // 失败后重试：走 chat:continue，不新增 user 消息（真正的 continue，而非再次 send）。
+  // 仅 failed 状态可发起：running/retrying 期间再次点击或误调直接忽略，避免抢占在途 run。
   retry: async () => {
-    if (get().status === 'running') return;
+    if (get().status !== 'failed') return;
     const { activeSessionId } = get();
     if (!activeSessionId) return;
     set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
@@ -104,6 +114,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ status: 'idle' });
   },
 }));
+
+/** 把主进程的超时错误码映射为中文文案；其余错误原样展示。 */
+function displayChatError(error: string): string {
+  if (error === 'FIRST_TOKEN_TIMEOUT') return '等待响应超时';
+  if (error === 'IDLE_TIMEOUT') return '连接空闲超时';
+  return error;
+}
 
 /** 订阅 chat 事件；返回取消函数。在 ChatView 挂载时调用一次。 */
 export function subscribeChatEvents(): () => void {
@@ -143,7 +160,9 @@ export function subscribeChatEvents(): () => void {
         useChatStore.setState({
           status: s.status,
           statusDetail:
-            s.status === 'retrying' ? `连接中断，重试中 ${s.attempt ?? 1}/2…` : (s.error ?? ''),
+            s.status === 'retrying'
+              ? `连接中断，重试中 ${s.attempt ?? 1}/2…`
+              : displayChatError(s.error ?? ''),
         });
         break;
       }
@@ -156,7 +175,7 @@ export function subscribeChatEvents(): () => void {
           streamText: '',
           toolCards: [],
           status: 'failed',
-          statusDetail: (ev.payload as { error: string }).error,
+          statusDetail: displayChatError((ev.payload as { error: string }).error),
         });
         break;
     }

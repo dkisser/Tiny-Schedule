@@ -91,6 +91,16 @@ describe('queryTasks', () => {
   test('no filters returns all top-level tasks', () => {
     expect(queryTasks(fixture(), {}).length).toBe(2);
   });
+  test('from-only treats the lower bound as open and keeps timeSpentInRangeMs', () => {
+    const rows = queryTasks(fixture(), { from: '2026-08-04' });
+    expect(rows.map((r) => r.id)).toEqual(['t2']);
+    expect(rows[0]?.timeSpentInRangeMs).toBe(900_000);
+  });
+  test('to-only treats the upper bound as open and keeps timeSpentInRangeMs', () => {
+    const rows = queryTasks(fixture(), { to: '2026-08-03' });
+    expect(rows.map((r) => r.id)).toEqual(['t1']);
+    expect(rows[0]?.timeSpentInRangeMs).toBe(1800_000);
+  });
 });
 
 describe('getSummary', () => {
@@ -105,6 +115,15 @@ describe('getSummary', () => {
     const s = getSummary(fixture(), { scope: 'week', date: '2026-08-04' });
     expect(s.taskCount).toBe(2);
     expect(s.byTag).toEqual([{ tag: '文档', taskCount: 1, spentMs: 1800_000 }]);
+  });
+  test('project scope without projectId returns an empty summary', () => {
+    const s = getSummary(fixture(), { scope: 'project' });
+    expect(s.range).toBe('');
+    expect(s.taskCount).toBe(0);
+    expect(s.doneCount).toBe(0);
+    expect(s.totalSpentMs).toBe(0);
+    expect(s.byProject).toEqual([]);
+    expect(s.byTag).toEqual([]);
   });
 });
 

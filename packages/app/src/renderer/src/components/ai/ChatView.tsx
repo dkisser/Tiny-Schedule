@@ -110,6 +110,7 @@ export function ChatView({ onBack }: { onBack: () => void }) {
   const sessions = useChatStore((s) => s.sessions);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const streamText = useChatStore((s) => s.streamText);
+  const status = useChatStore((s) => s.status);
   const load = useChatStore((s) => s.load);
   const create = useChatStore((s) => s.create);
   const remove = useChatStore((s) => s.remove);
@@ -132,10 +133,12 @@ export function ChatView({ onBack }: { onBack: () => void }) {
 
   if (!data) return null;
   const hasProvider = data.settings.aiProviders.length > 0;
+  // run 进行中（running/retrying）禁用输入与发送，从 UI 上杜绝双发/抢占在途 run
+  const isBusy = status === 'running' || status === 'retrying';
 
   const submit = () => {
     const text = input.trim();
-    if (!text || !hasProvider) return;
+    if (!text || !hasProvider || isBusy) return;
     setInput('');
     void send(text);
   };
@@ -223,7 +226,7 @@ export function ChatView({ onBack }: { onBack: () => void }) {
                   : '尚未配置 AI Provider，请先去设置'
               }
               value={input}
-              disabled={!hasProvider}
+              disabled={!hasProvider || isBusy}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 // isComposing：中文输入法候选确认时不触发发送
@@ -234,7 +237,7 @@ export function ChatView({ onBack }: { onBack: () => void }) {
               }}
               rows={2}
             />
-            <Button disabled={!hasProvider || !input.trim()} onClick={submit}>
+            <Button disabled={!hasProvider || !input.trim() || isBusy} onClick={submit}>
               <Bot className="mr-1 h-4 w-4" />
               发送
             </Button>
