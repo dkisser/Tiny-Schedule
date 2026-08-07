@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import {
   type AppData,
   addDays,
+  type ChatSession,
   type ImportRunResult,
   Ipc,
   IpcInvokeContract,
@@ -13,6 +14,7 @@ import {
 } from '@tiny-schedule/shared';
 import { type BrowserWindow, dialog as electronDialog, ipcMain } from 'electron';
 import type { Logger } from 'pino';
+import { ChatAgentManager } from './ai/chatAgent';
 import { streamChat, testConnection } from './ai/client';
 import { buildAnalysisData, renderPrompt } from './ai/prompts';
 import { getProviderDef, PROVIDER_REGISTRY, toProviderInfo } from './ai/providers';
@@ -39,6 +41,37 @@ function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown):
 
 export function registerIpcHandlers(deps: IpcDeps): void {
   const { store, logger, getWindow } = deps;
+
+  const chatManager = new ChatAgentManager({
+    getSessions: () => (store.get().misc.chatSessions ?? []) as ChatSession[],
+    saveSession: (s) => {
+      store.update((d) => {
+        const list = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== s.id);
+        return { ...d, misc: { ...d.misc, chatSessions: [s, ...list] } };
+      });
+    },
+    deleteStoredSession: (id) => {
+      let next: ChatSession[] = [];
+      store.update((d) => {
+        next = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== id);
+        return { ...d, misc: { ...d.misc, chatSessions: next } };
+      });
+      return next;
+    },
+    getProviders: () => store.get().settings.aiProviders,
+    decryptKey,
+    getData: () => store.get(),
+    today: () => localDate(Date.now()),
+    sink: {
+      chunk: (sessionId, requestId, delta) =>
+        sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),
+      tool: (ev) => sendSafe(getWindow(), Ipc.chatToolEvent, ev),
+      status: (ev) => sendSafe(getWindow(), Ipc.chatStatus, ev),
+      done: (sessionId, requestId) => sendSafe(getWindow(), Ipc.chatDone, { sessionId, requestId }),
+      error: (ev) => sendSafe(getWindow(), Ipc.chatError, ev),
+    },
+    logger,
+  });
 
   // IpcInvokeHandlers is exhaustive over IpcInvokeContract: forgetting a
   // handler (or adding a contract entry without implementing it) is a
@@ -308,6 +341,14 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         }
       })();
       return { requestId };
+    },
+
+    chatSessionsList: () => chatManager.listSessions(),
+    chatSessionCreate: (req) => chatManager.createSession(req.providerId),
+    chatSessionDelete: (req) => chatManager.deleteSession(req.sessionId),
+    chatSend: (req) => chatManager.send(req.sessionId, req.text, req.providerId),
+    chatStop: (req) => {
+      chatManager.stop(req.sessionId);
     },
   };
 

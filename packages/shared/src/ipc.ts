@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AppData, AppSettings, Task } from './models';
+import type { AppData, AppSettings, ChatSession, Task } from './models';
 
 export const Ipc = {
   dataLoad: 'data:load',
@@ -272,6 +272,13 @@ export const IpcChatEventChannels = [
   Ipc.chatError,
 ] as const;
 
+export type ChatEvent =
+  | { channel: typeof Ipc.chatChunk; payload: ChatChunkEvent }
+  | { channel: typeof Ipc.chatToolEvent; payload: ChatToolEvent }
+  | { channel: typeof Ipc.chatStatus; payload: ChatStatusEvent }
+  | { channel: typeof Ipc.chatDone; payload: ChatDoneEvent }
+  | { channel: typeof Ipc.chatError; payload: ChatErrorEvent };
+
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
 // compile time (IpcInvokeHandlers in main, RendererApi in preload).
@@ -315,6 +322,27 @@ export const IpcInvokeContract = {
     req: AiAnalyzeReqSchema,
     res: null as unknown as { requestId: string },
   },
+  chatSessionsList: {
+    ch: Ipc.chatSessionsList,
+    res: null as unknown as ChatSession[],
+  },
+  chatSessionCreate: {
+    ch: Ipc.chatSessionCreate,
+    req: ChatSessionCreateReqSchema,
+    res: null as unknown as ChatSession,
+  },
+  chatSessionDelete: {
+    ch: Ipc.chatSessionDelete,
+    req: ChatSessionDeleteReqSchema,
+    res: null as unknown as ChatSession[],
+  },
+  chatSend: {
+    ch: Ipc.chatSend,
+    req: ChatSendReqSchema,
+    res: null as unknown as { requestId: string } | { error: string },
+  },
+  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
+  chatStop: { ch: Ipc.chatStop, req: ChatStopReqSchema, res: null as unknown as void },
 } as const;
 
 export type IpcInvokeKey = keyof typeof IpcInvokeContract;
