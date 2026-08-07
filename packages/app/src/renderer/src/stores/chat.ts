@@ -65,10 +65,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ activeSessionId: id, streamText: '', toolCards: [], status: 'idle', statusDetail: '' }),
 
   send: async (text) => {
-    // 防重复发送：仅 idle 可发起新 run（running/retrying 期间的发送直接忽略；
-    // failed 只能走 retry() 的 true-continue 路径，不允许追加新消息）。
+    // 防重复发送：仅阻挡在途 run（running/retrying）；failed 可发起全新 run
+    // （无在途 run，manager 会开启新 run，无需强制走 retry()）。
     // 先置 running 再 await create()，让守卫覆盖异步间隙，杜绝双次快速发送。
-    if (get().status !== 'idle') return;
+    if (get().status === 'running' || get().status === 'retrying') return;
     set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
     let { activeSessionId } = get();
     if (!activeSessionId) {
