@@ -47,6 +47,15 @@ export interface AiSummary {
   content: string; // markdown
 }
 
+export interface ChatSession {
+  id: string;
+  title: string; // 首条用户消息前 30 字；新会话为 ''
+  createdAt: number; // epoch ms
+  updatedAt: number; // epoch ms
+  providerId?: string; // 缺省跟随全局默认 provider
+  messages: unknown[]; // pi-agent-core AgentMessage[] 原样序列化
+}
+
 export interface AiProviderConfig {
   id: string; // unique instance id
   registryId: string; // id in PROVIDER_REGISTRY

@@ -20,6 +20,16 @@ export const Ipc = {
   aiChunk: 'ai:chunk',
   aiDone: 'ai:done',
   aiError: 'ai:error',
+  chatSessionsList: 'chat:sessionsList',
+  chatSessionCreate: 'chat:sessionCreate',
+  chatSessionDelete: 'chat:sessionDelete',
+  chatSend: 'chat:send',
+  chatStop: 'chat:stop',
+  chatChunk: 'chat:chunk',
+  chatToolEvent: 'chat:toolEvent',
+  chatStatus: 'chat:status',
+  chatDone: 'chat:done',
+  chatError: 'chat:error',
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -199,6 +209,68 @@ export const AiStreamEventSchema = z.object({
   error: z.string().optional(),
 });
 export type AiStreamEvent = z.infer<typeof AiStreamEventSchema>;
+
+export const ChatSessionCreateReqSchema = z.object({ providerId: z.string().optional() });
+export type ChatSessionCreateReq = z.infer<typeof ChatSessionCreateReqSchema>;
+
+export const ChatSessionDeleteReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatSessionDeleteReq = z.infer<typeof ChatSessionDeleteReqSchema>;
+
+export const ChatSendReqSchema = z.object({
+  sessionId: z.string().min(1),
+  text: z.string().trim().min(1),
+  providerId: z.string().optional(),
+});
+export type ChatSendReq = z.infer<typeof ChatSendReqSchema>;
+
+export const ChatStopReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatStopReq = z.infer<typeof ChatStopReqSchema>;
+
+export const ChatChunkEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string(),
+  delta: z.string(),
+});
+export type ChatChunkEvent = z.infer<typeof ChatChunkEventSchema>;
+
+export const ChatToolEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string(),
+  toolCallId: z.string(),
+  name: z.string(),
+  status: z.enum(['running', 'done', 'error']),
+  args: z.unknown().optional(),
+  resultSummary: z.string().optional(),
+});
+export type ChatToolEvent = z.infer<typeof ChatToolEventSchema>;
+
+export const ChatStatusEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string().optional(),
+  status: z.enum(['running', 'retrying', 'failed']),
+  attempt: z.number().optional(),
+  error: z.string().optional(),
+});
+export type ChatStatusEvent = z.infer<typeof ChatStatusEventSchema>;
+
+export const ChatDoneEventSchema = z.object({ sessionId: z.string(), requestId: z.string() });
+export type ChatDoneEvent = z.infer<typeof ChatDoneEventSchema>;
+
+export const ChatErrorEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string().optional(),
+  error: z.string(),
+});
+export type ChatErrorEvent = z.infer<typeof ChatErrorEventSchema>;
+
+/** Main -> renderer chat push channels; separate from ai* event channels. */
+export const IpcChatEventChannels = [
+  Ipc.chatChunk,
+  Ipc.chatToolEvent,
+  Ipc.chatStatus,
+  Ipc.chatDone,
+  Ipc.chatError,
+] as const;
 
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
