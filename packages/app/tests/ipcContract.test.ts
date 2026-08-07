@@ -3,6 +3,7 @@ import {
   type AppData,
   emptyAppData,
   Ipc,
+  IpcChatEventChannels,
   IpcEventChannels,
   IpcInvokeContract,
 } from '@tiny-schedule/shared';
@@ -68,7 +69,7 @@ beforeAll(async () => {
 
 const contractChannels = Object.values(IpcInvokeContract).map((e) => e.ch);
 const allChannels = Object.values(Ipc);
-const eventChannels = [...IpcEventChannels];
+const eventChannels = [...IpcEventChannels, ...IpcChatEventChannels];
 
 describe('IPC contract', () => {
   test('every channel preload invokes has a handler registered in main (S1)', () => {
@@ -100,9 +101,9 @@ describe('IPC contract', () => {
     expect(new Set(allChannels).size).toBe(allChannels.length);
   });
 
-  test('preload api exposes every contract method plus onAiEvent', () => {
+  test('preload api exposes every contract method plus event subscribers', () => {
     const keys = Object.keys(exposedApi as object);
-    const expected = [...Object.keys(IpcInvokeContract), 'onAiEvent'];
+    const expected = [...Object.keys(IpcInvokeContract), 'onAiEvent', 'onChatEvent'];
     expect(keys.sort()).toEqual(expected.sort());
   });
 });

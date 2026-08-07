@@ -1,5 +1,7 @@
 import {
   type AiStreamEvent,
+  type ChatEvent,
+  IpcChatEventChannels,
   IpcEventChannels,
   IpcInvokeContract,
   RENDERER_API_KEY,
@@ -23,6 +25,24 @@ const api: RendererApi = {
   aiRegistry: () => ipcRenderer.invoke(IpcInvokeContract.aiRegistry.ch),
   aiTestProvider: (req) => ipcRenderer.invoke(IpcInvokeContract.aiTestProvider.ch, req),
   aiAnalyze: (req) => ipcRenderer.invoke(IpcInvokeContract.aiAnalyze.ch, req),
+  chatSessionsList: () => ipcRenderer.invoke(IpcInvokeContract.chatSessionsList.ch),
+  chatSessionCreate: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSessionCreate.ch, req),
+  chatSessionDelete: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSessionDelete.ch, req),
+  chatSend: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSend.ch, req),
+  chatContinue: (req) => ipcRenderer.invoke(IpcInvokeContract.chatContinue.ch, req),
+  chatStop: (req) => ipcRenderer.invoke(IpcInvokeContract.chatStop.ch, req),
+  onChatEvent: (cb) => {
+    // check-ipc: ok — ch iterates IpcChatEventChannels
+    const subs = IpcChatEventChannels.map((ch) => {
+      const listener = (_e: unknown, payload: unknown) => cb({ channel: ch, payload } as ChatEvent);
+      // check-ipc: ok — ch is the IpcChatEventChannels iterator
+      ipcRenderer.on(ch, listener as never);
+      return { ch, listener };
+    });
+    return () => {
+      for (const { ch, listener } of subs) ipcRenderer.removeListener(ch, listener as never);
+    };
+  },
   onAiEvent: (cb) => {
     const listener = (_e: unknown, ev: AiStreamEvent) => cb(ev);
     // check-ipc: ok — ch iterates IpcEventChannels

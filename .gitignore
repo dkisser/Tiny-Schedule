@@ -13,3 +13,5 @@ graphify-out/
 .qoder/
 .superpowers/
 docs/superpowers/
+# git worktrees
+.worktrees/

@@ -26,7 +26,7 @@ export interface AnalysisScope {
   projectId?: string;
 }
 
-function touchesRange(
+export function touchesRange(
   t: { timeSpentOnDay: Record<string, number>; dueDay?: string },
   from: string,
   to: string,
@@ -37,16 +37,20 @@ function touchesRange(
   return !!t.dueDay && t.dueDay >= from && t.dueDay <= to;
 }
 
+export function scopeToRange(
+  scope: 'today' | 'week' | 'project',
+  date: string,
+): { from: string; to: string } {
+  if (scope !== 'week') return { from: date, to: date };
+  const [ay, am, ad] = date.split('-').map(Number) as [number, number, number];
+  const dow = new Date(ay, am - 1, ad).getDay(); // 0 = Sunday
+  const mondayOffset = dow === 0 ? -6 : 1 - dow;
+  const from = addDays(date, mondayOffset);
+  return { from, to: addDays(from, 6) };
+}
+
 export function buildAnalysisData(data: AppData, scope: AnalysisScope): string {
-  let from = scope.date;
-  let to = scope.date;
-  if (scope.scope === 'week') {
-    const [ay, am, ad] = scope.date.split('-').map(Number) as [number, number, number];
-    const dow = new Date(ay, am - 1, ad).getDay(); // 0 = Sunday
-    const mondayOffset = dow === 0 ? -6 : 1 - dow;
-    from = addDays(scope.date, mondayOffset);
-    to = addDays(from, 6);
-  }
+  const { from, to } = scopeToRange(scope.scope, scope.date);
 
   const tasks = Object.values(data.tasks)
     .filter((t) => !t.parentTaskId)

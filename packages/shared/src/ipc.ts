@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { AppData, AppSettings, Task } from './models';
+import type { AppData, AppSettings, ChatSession, Task } from './models';
 
 export const Ipc = {
   dataLoad: 'data:load',
@@ -20,6 +20,17 @@ export const Ipc = {
   aiChunk: 'ai:chunk',
   aiDone: 'ai:done',
   aiError: 'ai:error',
+  chatSessionsList: 'chat:sessionsList',
+  chatSessionCreate: 'chat:sessionCreate',
+  chatSessionDelete: 'chat:sessionDelete',
+  chatSend: 'chat:send',
+  chatContinue: 'chat:continue',
+  chatStop: 'chat:stop',
+  chatChunk: 'chat:chunk',
+  chatToolEvent: 'chat:toolEvent',
+  chatStatus: 'chat:status',
+  chatDone: 'chat:done',
+  chatError: 'chat:error',
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -200,6 +211,78 @@ export const AiStreamEventSchema = z.object({
 });
 export type AiStreamEvent = z.infer<typeof AiStreamEventSchema>;
 
+export const ChatSessionCreateReqSchema = z.object({ providerId: z.string().optional() });
+export type ChatSessionCreateReq = z.infer<typeof ChatSessionCreateReqSchema>;
+
+export const ChatSessionDeleteReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatSessionDeleteReq = z.infer<typeof ChatSessionDeleteReqSchema>;
+
+export const ChatSendReqSchema = z.object({
+  sessionId: z.string().min(1),
+  text: z.string().trim().min(1),
+  providerId: z.string().optional(),
+});
+export type ChatSendReq = z.infer<typeof ChatSendReqSchema>;
+
+export const ChatStopReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatStopReq = z.infer<typeof ChatStopReqSchema>;
+
+export const ChatContinueReqSchema = z.object({ sessionId: z.string().min(1) });
+export type ChatContinueReq = z.infer<typeof ChatContinueReqSchema>;
+
+export const ChatChunkEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string(),
+  delta: z.string(),
+});
+export type ChatChunkEvent = z.infer<typeof ChatChunkEventSchema>;
+
+export const ChatToolEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string(),
+  toolCallId: z.string(),
+  name: z.string(),
+  status: z.enum(['running', 'done', 'error']),
+  args: z.unknown().optional(),
+  resultSummary: z.string().optional(),
+});
+export type ChatToolEvent = z.infer<typeof ChatToolEventSchema>;
+
+export const ChatStatusEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string().optional(),
+  status: z.enum(['running', 'retrying', 'failed']),
+  attempt: z.number().optional(),
+  error: z.string().optional(),
+});
+export type ChatStatusEvent = z.infer<typeof ChatStatusEventSchema>;
+
+export const ChatDoneEventSchema = z.object({ sessionId: z.string(), requestId: z.string() });
+export type ChatDoneEvent = z.infer<typeof ChatDoneEventSchema>;
+
+export const ChatErrorEventSchema = z.object({
+  sessionId: z.string(),
+  requestId: z.string().optional(),
+  error: z.string(),
+});
+export type ChatErrorEvent = z.infer<typeof ChatErrorEventSchema>;
+
+/** Main -> renderer chat push channels; separate from ai* event channels. */
+export const IpcChatEventChannels = [
+  Ipc.chatChunk,
+  Ipc.chatToolEvent,
+  Ipc.chatStatus,
+  Ipc.chatDone,
+  Ipc.chatError,
+] as const;
+
+export type ChatEvent =
+  | { channel: typeof Ipc.chatChunk; payload: ChatChunkEvent }
+  | { channel: typeof Ipc.chatToolEvent; payload: ChatToolEvent }
+  | { channel: typeof Ipc.chatStatus; payload: ChatStatusEvent }
+  | { channel: typeof Ipc.chatDone; payload: ChatDoneEvent }
+  | { channel: typeof Ipc.chatError; payload: ChatErrorEvent };
+
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
 // compile time (IpcInvokeHandlers in main, RendererApi in preload).
@@ -243,6 +326,31 @@ export const IpcInvokeContract = {
     req: AiAnalyzeReqSchema,
     res: null as unknown as { requestId: string },
   },
+  chatSessionsList: {
+    ch: Ipc.chatSessionsList,
+    res: null as unknown as ChatSession[],
+  },
+  chatSessionCreate: {
+    ch: Ipc.chatSessionCreate,
+    req: ChatSessionCreateReqSchema,
+    res: null as unknown as ChatSession,
+  },
+  chatSessionDelete: {
+    ch: Ipc.chatSessionDelete,
+    req: ChatSessionDeleteReqSchema,
+    res: null as unknown as ChatSession[],
+  },
+  chatSend: {
+    ch: Ipc.chatSend,
+    req: ChatSendReqSchema,
+    res: null as unknown as { requestId: string } | { error: string },
+  },
+  chatContinue: {
+    ch: Ipc.chatContinue,
+    req: ChatContinueReqSchema,
+    res: null as unknown as { requestId: string } | { error: string },
+  },
+  chatStop: { ch: Ipc.chatStop, req: ChatStopReqSchema, res: null as unknown as void },
 } as const;
 
 export type IpcInvokeKey = keyof typeof IpcInvokeContract;
