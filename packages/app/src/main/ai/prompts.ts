@@ -1,4 +1,4 @@
-import { type AppData, addDays } from '@tiny-schedule/shared';
+import { type AppData, addDays, localDate } from '@tiny-schedule/shared';
 
 export const DEFAULT_PROMPT = `你是一个效率分析助手。以下是用户 {{date}} 的任务与时间数据（JSON）：
 
@@ -27,12 +27,17 @@ export interface AnalysisScope {
 }
 
 export function touchesRange(
-  t: { timeSpentOnDay: Record<string, number>; dueDay?: string },
+  t: { timeSpentOnDay: Record<string, number>; dueDay?: string; doneAt?: number },
   from: string,
   to: string,
 ): boolean {
   for (const day of Object.keys(t.timeSpentOnDay)) {
     if (day >= from && day <= to) return true;
+  }
+  // 完成日在范围内也算命中（逾期完成的任务也能进入日报上下文）
+  if (t.doneAt !== undefined) {
+    const done = localDate(t.doneAt);
+    if (done >= from && done <= to) return true;
   }
   return !!t.dueDay && t.dueDay >= from && t.dueDay <= to;
 }
@@ -61,8 +66,9 @@ export function buildAnalysisData(data: AppData, scope: AnalysisScope): string {
     .map((t) => ({
       title: t.title,
       isDone: t.isDone,
-      project: data.projects[t.projectId]?.title ?? t.projectId,
-      tags: t.tagIds.map((id) => data.tags[id]?.title ?? id),
+      doneAt: t.doneAt !== undefined ? localDate(t.doneAt) : undefined,
+      project: t.projectTitle ?? data.projects[t.projectId]?.title ?? t.projectId,
+      tags: t.tagIds.map((id) => t.tagSnapshots?.[id]?.title ?? data.tags[id]?.title ?? id),
       dueDay: t.dueDay,
       timeEstimateMs: t.timeEstimate,
       timeSpentMs: t.timeSpent,

@@ -1,6 +1,6 @@
 export type DisplayMessage =
   | { kind: 'user'; text: string }
-  | { kind: 'assistant'; text: string }
+  | { kind: 'assistant'; text: string; stopReason?: string }
   | { kind: 'tool'; toolCallId: string; toolName: string; args?: unknown }
   | { kind: 'toolResult'; toolCallId: string; isError: boolean; text: string };
 
@@ -18,6 +18,7 @@ interface RawMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  stopReason?: string;
 }
 
 function textOf(content: string | RawBlock[] | undefined): string {
@@ -38,7 +39,10 @@ export function toDisplayMessages(raw: unknown[]): DisplayMessage[] {
       out.push({ kind: 'user', text: textOf(m.content) });
     } else if (m.role === 'assistant') {
       const text = textOf(m.content);
-      if (text) out.push({ kind: 'assistant', text });
+      // aborted（用户停止）的消息即使文本为空也要渲染，UI 展示占位 + 重试入口
+      if (text || m.stopReason === 'aborted') {
+        out.push({ kind: 'assistant', text, stopReason: m.stopReason });
+      }
       for (const b of Array.isArray(m.content) ? m.content : []) {
         if (b?.type === 'toolCall' && b.id && b.name) {
           out.push({ kind: 'tool', toolCallId: b.id, toolName: b.name, args: b.arguments });

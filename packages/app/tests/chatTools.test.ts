@@ -101,6 +101,21 @@ describe('queryTasks', () => {
     expect(rows.map((r) => r.id)).toEqual(['t1']);
     expect(rows[0]?.timeSpentInRangeMs).toBe(1800_000);
   });
+  test('filters by due-day range', () => {
+    const rows = queryTasks(fixture(), { dueFrom: '2026-08-04', dueTo: '2026-08-04' });
+    expect(rows.map((r) => r.id)).toEqual(['t2']);
+  });
+  test('filters by completion-date range and exposes doneAt', () => {
+    const d = fixture();
+    (d.tasks.t1 as { doneAt?: number }).doneAt = new Date('2026-08-04T10:00:00').getTime();
+    const rows = queryTasks(d, { doneFrom: '2026-08-04', doneTo: '2026-08-04' });
+    expect(rows.map((r) => r.id)).toEqual(['t1']);
+    expect(rows[0]?.doneAt).toBe('2026-08-04');
+  });
+  test('completion-date range excludes unfinished tasks', () => {
+    const rows = queryTasks(fixture(), { doneFrom: '1970-01-01' });
+    expect(rows.map((r) => r.id)).toEqual(['t1']);
+  });
 });
 
 describe('getSummary', () => {

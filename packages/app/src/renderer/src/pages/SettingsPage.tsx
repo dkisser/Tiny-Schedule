@@ -35,6 +35,7 @@ export function SettingsPage() {
         id: p.id,
         registryId: p.registryId,
         apiKey: '<unchanged>',
+        hasKey: p.hasApiKey === true,
         baseUrl: p.baseUrl,
         model: p.model,
         isDefault: p.isDefault,

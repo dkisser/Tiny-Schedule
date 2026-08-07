@@ -1,6 +1,7 @@
 import { INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
+import { api } from '../api';
 import { AddTaskInput } from '../components/AddTaskInput';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
@@ -9,6 +10,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../componen
 import { applyManualOrder, taskOrderFor, todayDoneTasks, todayTasks } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
+import { useUiStore } from '../stores/ui';
 
 function formatMs(ms: number): string {
   const m = Math.floor(ms / 60_000);
@@ -33,6 +35,25 @@ export function TodayPage() {
     0,
   );
   const finishedToday = data.misc.lastFinishDay === today;
+
+  const handleFinish = async () => {
+    const { aiProviders, autoAiAnalyzeOnFinishDay } = data.settings;
+    if (!autoAiAnalyzeOnFinishDay) {
+      setFinishOpen(true);
+      return;
+    }
+    // 设置里已开启「Finish Day 自动触发 AI 分析」：直接结束，不再弹窗询问
+    const next = await api().finishDay({ date: new Date().toISOString() });
+    useDataStore.setState({ data: next });
+    const def = aiProviders.find((p) => p.isDefault) ?? aiProviders[0];
+    if (def) {
+      useUiStore.setState({
+        aiAutoRun: { scope: 'today', providerId: def.id },
+        view: { type: 'ai' },
+        selectedTaskId: null,
+      });
+    }
+  };
 
   return (
     <div className="mx-auto max-w-3xl p-6">
@@ -66,7 +87,7 @@ export function TodayPage() {
         </Collapsible>
       )}
       <div className="mt-8 flex justify-center">
-        <Button variant="outline" disabled={finishedToday} onClick={() => setFinishOpen(true)}>
+        <Button variant="outline" disabled={finishedToday} onClick={() => void handleFinish()}>
           <CheckCircle2 className="mr-1 h-4 w-4" /> Finish Day
         </Button>
       </div>

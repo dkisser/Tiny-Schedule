@@ -47,18 +47,70 @@ describe('normalizeBackup', () => {
     expect(() => normalizeBackup({ data: {} })).toThrow('INVALID_BACKUP');
     expect(() => normalizeBackup({ data: { task: { entities: 'x' } } })).toThrow('INVALID_BACKUP');
   });
+
+  test('snapshots project/tag display names onto tasks', () => {
+    const { data } = normalizeBackup(fixture);
+    expect(data.tasks.t1?.projectTitle).toBe('工作');
+    expect(data.tasks.t1?.tagSnapshots?.TODAY?.title).toBe('Today');
+  });
 });
 
 describe('mergeImport', () => {
-  test('replaces tasks/projects/tags but keeps settings and timer', () => {
+  test('appends imported entities and keeps settings, timer and misc', () => {
     const current = emptyAppData();
     current.settings.userName = 'me';
     current.activeTimer = { taskId: 'x', startedAt: 1, accumulatedMs: 0, isPaused: false };
+    current.tasks.local1 = {
+      id: 'local1',
+      title: '本地任务',
+      projectId: 'INBOX_PROJECT',
+      tagIds: [],
+      subTaskIds: [],
+      isDone: false,
+      timeEstimate: 0,
+      timeSpent: 0,
+      timeSpentOnDay: {},
+      timeEntries: [],
+      notes: '',
+      created: 1,
+    };
+    current.misc.chatSessions = [
+      { id: 's1', title: '会话', createdAt: 1, updatedAt: 1, messages: [] },
+    ];
+    current.misc.aiHistory = [{ id: 'h1', content: 'x' }];
     const { data: imported } = normalizeBackup(fixture);
     const merged = mergeImport(current, imported);
     expect(merged.settings.userName).toBe('me');
     expect(merged.activeTimer?.taskId).toBe('x');
-    expect(Object.keys(merged.tasks)).toHaveLength(3);
+    // 3 imported + 1 existing local task
+    expect(Object.keys(merged.tasks)).toHaveLength(4);
+    expect(merged.tasks.local1?.title).toBe('本地任务');
+    expect(merged.projects.p1?.title).toBe('工作');
+    // AI sessions and history survive the import
+    expect((merged.misc.chatSessions as unknown[]).length).toBe(1);
+    expect((merged.misc.aiHistory as unknown[]).length).toBe(1);
+  });
+
+  test('imported entity wins on ID collision', () => {
+    const current = emptyAppData();
+    const { data: imported } = normalizeBackup(fixture);
+    current.tasks.t1 = {
+      id: 't1',
+      title: '旧标题',
+      projectId: 'INBOX_PROJECT',
+      tagIds: [],
+      subTaskIds: [],
+      isDone: false,
+      timeEstimate: 0,
+      timeSpent: 0,
+      timeSpentOnDay: {},
+      timeEntries: [],
+      notes: '',
+      created: 1,
+    };
+    current.projects.p1 = { id: 'p1', title: '旧项目', isArchived: false };
+    const merged = mergeImport(current, imported);
+    expect(merged.tasks.t1?.title).toBe('写周报');
     expect(merged.projects.p1?.title).toBe('工作');
   });
 });

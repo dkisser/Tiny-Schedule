@@ -7,6 +7,7 @@ export interface ProviderDraft {
   id: string;
   registryId: string;
   apiKey: string;
+  hasKey?: boolean;
   baseUrl?: string;
   model: string;
   isDefault: boolean;
@@ -20,7 +21,11 @@ interface DataState {
   deleteTask: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   createProject: (title: string) => Promise<void>;
+  updateProject: (id: string, title: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
   createTag: (title: string) => Promise<void>;
+  updateTag: (id: string, title: string) => Promise<void>;
+  deleteTag: (id: string) => Promise<void>;
   updateSettings: (
     patch: Omit<Partial<AppSettings>, 'aiProviders'> & { aiProviders?: ProviderDraft[] },
   ) => Promise<void>;
@@ -57,8 +62,24 @@ export const useDataStore = create<DataState>((set) => ({
     const data = await api().projectCreate({ title });
     set({ data });
   },
+  updateProject: async (id, title) => {
+    const data = await api().projectUpdate({ id, title });
+    set({ data });
+  },
+  deleteProject: async (id) => {
+    const data = await api().projectDelete({ id });
+    set({ data });
+  },
   createTag: async (title) => {
     const data = await api().tagCreate({ title });
+    set({ data });
+  },
+  updateTag: async (id, title) => {
+    const data = await api().tagUpdate({ id, title });
+    set({ data });
+  },
+  deleteTag: async (id) => {
+    const data = await api().tagDelete({ id });
     set({ data });
   },
   updateSettings: async (patch) => {

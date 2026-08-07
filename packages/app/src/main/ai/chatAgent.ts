@@ -45,6 +45,8 @@ export interface ChatManagerDeps {
   logger: Logger;
   /** 测试注入点：替换真实 provider 连接。 */
   createAgent?: (opts: CreateAgentOpts) => Agent;
+  /** 测试注入点：覆盖超时阈值（ms）。 */
+  timeouts?: { firstTokenMs?: number; idleMs?: number };
 }
 
 export interface CreateAgentOpts {
@@ -58,6 +60,8 @@ export class ChatAgentManager {
   private agentRunIds = new Map<Agent, string>(); // agent -> 正在其上执行的 run 的 requestId（订阅事件归属）
   private runPromises = new Map<string, Promise<void>>(); // sessionId -> 最近一次 run() 的 promise
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  // 用户主动 stop 的会话：run 失效分支需要 persist 部分回答（超时/抢占则不需要）
+  private userStops = new Set<string>();
 
   constructor(private deps: ChatManagerDeps) {}
 
@@ -83,6 +87,7 @@ export class ChatAgentManager {
 
   deleteSession(id: string): ChatSession[] {
     this.stop(id);
+    this.userStops.delete(id);
     this.agents.delete(id);
     this.runPromises.delete(id);
     return this.deps.deleteStoredSession(id);
@@ -103,6 +108,7 @@ export class ChatAgentManager {
         providers[0]);
     if (!cfg) return { error: 'NO_PROVIDER_CONFIGURED' };
 
+    this.userStops.delete(sessionId);
     const requestId = randomUUID();
     this.runIds.set(sessionId, requestId);
     if (session.title === '') {
@@ -117,7 +123,9 @@ export class ChatAgentManager {
   /** 真正的「继续」：复用 send() 的 run 机制，但不新增 user 消息（agent.continue()）。 */
   async continue(sessionId: string): Promise<{ requestId: string } | { error: string }> {
     const session = this.deps.getSessions().find((s) => s.id === sessionId);
-    if (!session || !this.agents.has(sessionId)) return { error: 'SESSION_NOT_FOUND' };
+    // 无缓存 agent 也允许继续（如 app 重启后对持久化的 aborted 会话点重试）：
+    // run() 会用 session.messages 重建 agent。
+    if (!session) return { error: 'SESSION_NOT_FOUND' };
     const providers = this.deps.getProviders();
     const cfg =
       providers.find((p) => p.id === session.providerId) ??
@@ -125,6 +133,7 @@ export class ChatAgentManager {
       providers[0];
     if (!cfg) return { error: 'NO_PROVIDER_CONFIGURED' };
 
+    this.userStops.delete(sessionId);
     const requestId = randomUUID();
     this.runIds.set(sessionId, requestId);
     const runPromise = this.run(sessionId, undefined, requestId, cfg);
@@ -134,9 +143,16 @@ export class ChatAgentManager {
   }
 
   stop(sessionId: string): void {
+    // 仅有在途 run 时标记：无 run 的 stop 不应给后续 run 留下陈旧标记
+    if (this.runIds.has(sessionId)) this.userStops.add(sessionId);
+    this.invalidateRun(sessionId);
+  }
+
+  /** 使当前 run 失效：被 abort 的 prompt/continue 以 stopReason 'aborted' 收尾并 resolve，
+   *  run 循环在 resolve 后的 runIds 校验里检测到失效。用户 stop 与超时共用此路径，
+   *  是否 persist 部分回答由 userStops 标记区分。 */
+  private invalidateRun(sessionId: string): void {
     this.clearTimer(sessionId);
-    // 使当前 run 失效：被 abort 的 prompt/continue 以 stopReason 'aborted' 收尾并 resolve，
-    // run 循环在 resolve 后的 runIds 校验里检测到失效，静默放弃（不发 done/error、不 persist）。
     this.runIds.delete(sessionId);
     this.agents.get(sessionId)?.abort();
   }
@@ -190,7 +206,7 @@ export class ChatAgentManager {
         case 'message_update': {
           const inner = event.assistantMessageEvent;
           if (inner.type === 'text_delta') {
-            this.armTimer(sessionId, IDLE_TIMEOUT_MS, 'IDLE_TIMEOUT');
+            this.armTimer(sessionId, this.deps.timeouts?.idleMs ?? IDLE_TIMEOUT_MS, 'IDLE_TIMEOUT');
             this.deps.sink.chunk(sessionId, requestId, inner.delta);
           }
           break;
@@ -232,7 +248,12 @@ export class ChatAgentManager {
     if (!session) return;
     const agent = this.getOrCreateAgent(session, cfg);
     this.deps.sink.status({ sessionId, requestId, status: 'running' });
-    this.armTimer(sessionId, FIRST_TOKEN_TIMEOUT_MS, 'FIRST_TOKEN_TIMEOUT', () => agent.abort());
+    this.armTimer(
+      sessionId,
+      this.deps.timeouts?.firstTokenMs ?? FIRST_TOKEN_TIMEOUT_MS,
+      'FIRST_TOKEN_TIMEOUT',
+      () => agent.abort(),
+    );
     // 事件归属：仅当 agent 空闲时把本次 run 的 requestId 绑定到订阅映射。
     // 若 agent 正忙（例如并发 send），本次 run 会立即失败，不应抢占当前执行中 run 的事件标签。
     if (!agent.state.isStreaming) this.agentRunIds.set(agent, requestId);
@@ -252,8 +273,10 @@ export class ChatAgentManager {
       } catch (err) {
         // 拒绝路径（agent 抛出的真实错误，如 "already processing"、监听器异常）
         if (this.runIds.get(sessionId) !== requestId) {
-          // run 已失效（用户 stop / 超时 / 新 send 抢占）：静默放弃
+          // run 已失效（用户 stop / 超时 / 新 send 抢占）：静默放弃。
+          // 用户 stop：先 persist（aborted 尾部含部分回答），再 strip 供 continue 重新生成。
           this.clearTimer(sessionId);
+          if (this.userStops.delete(sessionId)) this.persist(sessionId, agent);
           this.stripErrorTail(sessionId);
           return;
         }
@@ -275,9 +298,11 @@ export class ChatAgentManager {
       // pi-agent-core 在 abort / 流式失败时也会 RESOLVE（以 stopReason 'aborted'/'error'
       // 的 assistant 消息收尾），所以 resolve 后必须检查 run 是否仍有效 + 终态是否错误。
       if (this.runIds.get(sessionId) !== requestId) {
-        // run 已失效（用户 stop / 超时 / 新 send 抢占）：
-        // 不发 done/error、不 persist 被中止的尾部消息
+        // run 已失效（用户 stop / 超时 / 新 send 抢占）：不发 done/error。
+        // 用户 stop：persist 被中止的尾部消息（含部分回答），消息不丢；
+        // strip 后 transcript 以 user 消息收尾，continue() 可重新生成回答。
         this.clearTimer(sessionId);
+        if (this.userStops.delete(sessionId)) this.persist(sessionId, agent);
         this.stripErrorTail(sessionId);
         return;
       }
@@ -354,10 +379,11 @@ export class ChatAgentManager {
       setTimeout(() => {
         this.timers.delete(sessionId);
         const requestId = this.runIds.get(sessionId);
-        // 先使 run 失效：被 abort 的 prompt/continue 不再重试
+        // 先使 run 失效：被 abort 的 prompt/continue 不再重试。
+        // 走 invalidateRun 而非 stop()：超时不属于用户 stop，不 persist 部分回答。
         this.runIds.delete(sessionId);
         this.deps.sink.error({ sessionId, requestId, error: errorCode });
-        (onTimeout ?? (() => this.stop(sessionId)))();
+        (onTimeout ?? (() => this.invalidateRun(sessionId)))();
       }, ms),
     );
   }

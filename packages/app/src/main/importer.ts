@@ -103,6 +103,18 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
     };
   }
 
+  // Snapshot display names at import time (tasks are decoupled from entities).
+  for (const t of Object.values(tasks)) {
+    const project = projects[t.projectId];
+    if (project) t.projectTitle = project.title;
+    const snapshots: Record<string, { title: string; color?: string }> = {};
+    for (const tagId of t.tagIds) {
+      const tag = tags[tagId];
+      if (tag) snapshots[tagId] = { title: tag.title, ...(tag.color ? { color: tag.color } : {}) };
+    }
+    if (Object.keys(snapshots).length > 0) t.tagSnapshots = snapshots;
+  }
+
   const data: AppData = {
     version: 1,
     tasks,
@@ -135,10 +147,24 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
   };
 }
 
-/** Whole-library import: replace content, keep current settings + running timer. */
+/**
+ * Whole-library import: append imported content onto current data instead of
+ * replacing it. On ID collisions the imported entity wins; everything else
+ * (existing tasks, AI chat sessions/history in misc, settings, running timer)
+ * is preserved.
+ */
 export function mergeImport(current: AppData, imported: AppData): AppData {
   return {
-    ...imported,
+    ...current,
+    tasks: { ...current.tasks, ...imported.tasks },
+    projects: { ...current.projects, ...imported.projects },
+    tags: { ...current.tags, ...imported.tags },
+    timeTracking: imported.timeTracking ?? current.timeTracking,
+    notes: imported.notes ?? current.notes,
+    planner: imported.planner ?? current.planner,
+    metric: imported.metric ?? current.metric,
+    boards: imported.boards ?? current.boards,
+    misc: { ...current.misc, ...imported.misc },
     settings: current.settings,
     activeTimer: current.activeTimer,
   };

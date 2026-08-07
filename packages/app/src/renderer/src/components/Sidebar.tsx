@@ -1,20 +1,24 @@
-import { SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
+import { INBOX_PROJECT_ID, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
 import {
   Bot,
   CalendarDays,
   ChevronRight,
   Download,
   Inbox,
+  Pencil,
   Plus,
   Settings,
   Sun,
   Tag,
+  Trash2,
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { type SidebarGroup, useUiStore, type View } from '../stores/ui';
+import { Button } from './ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
 
 function NavItem({
@@ -40,21 +44,33 @@ function NavItem({
   );
 }
 
+type EntityRef = { group: SidebarGroup; id: string; title: string };
+
 export function Sidebar() {
   const data = useDataStore((s) => s.data);
   const createProject = useDataStore((s) => s.createProject);
+  const updateProject = useDataStore((s) => s.updateProject);
+  const deleteProject = useDataStore((s) => s.deleteProject);
   const createTag = useDataStore((s) => s.createTag);
+  const updateTag = useDataStore((s) => s.updateTag);
+  const deleteTag = useDataStore((s) => s.deleteTag);
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
   const collapsedGroups = useUiStore((s) => s.collapsedGroups);
   const toggleSidebarGroup = useUiStore((s) => s.toggleSidebarGroup);
   const [creating, setCreating] = useState<SidebarGroup | null>(null);
   const [draft, setDraft] = useState('');
+  const [renaming, setRenaming] = useState<EntityRef | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<EntityRef | null>(null);
   if (!data) return null;
 
   const openCountByProject = new Map<string, number>();
+  const taskCountByProject = new Map<string, number>();
   for (const t of Object.values(data.tasks)) {
-    if (!t.isDone && !t.parentTaskId) {
+    if (t.parentTaskId) continue;
+    taskCountByProject.set(t.projectId, (taskCountByProject.get(t.projectId) ?? 0) + 1);
+    if (!t.isDone) {
       openCountByProject.set(t.projectId, (openCountByProject.get(t.projectId) ?? 0) + 1);
     }
   }
@@ -85,6 +101,30 @@ export function Sidebar() {
     setDraft('');
   };
 
+  const beginRename = (e: EntityRef) => {
+    setRenaming(e);
+    setRenameDraft(e.title);
+  };
+
+  const submitRename = async () => {
+    const title = renameDraft.trim();
+    const target = renaming;
+    setRenaming(null);
+    setRenameDraft('');
+    if (!target || !title || title === target.title) return;
+    if (target.group === 'projects') await updateProject(target.id, title);
+    else await updateTag(target.id, title);
+  };
+
+  const confirmDelete = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target) return;
+    if ('id' in view && view.id === target.id) setView({ type: 'today' });
+    if (target.group === 'projects') await deleteProject(target.id);
+    else await deleteTag(target.id);
+  };
+
   const createInput = (
     <Input
       autoFocus
@@ -100,6 +140,52 @@ export function Sidebar() {
         else cancelCreate();
       }}
     />
+  );
+
+  const renameInput = (
+    <Input
+      autoFocus
+      value={renameDraft}
+      placeholder="名称，回车确认"
+      onChange={(e) => setRenameDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') void submitRename();
+        if (e.key === 'Escape') {
+          setRenaming(null);
+          setRenameDraft('');
+        }
+      }}
+      onBlur={() => void submitRename()}
+    />
+  );
+
+  const rowActions = (e: EntityRef, deletable: boolean) => (
+    <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-accent group-hover/row:flex">
+      <button
+        type="button"
+        aria-label="改名"
+        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        onClick={(ev) => {
+          ev.stopPropagation();
+          beginRename(e);
+        }}
+      >
+        <Pencil className="h-3 w-3" />
+      </button>
+      {deletable && (
+        <button
+          type="button"
+          aria-label="删除"
+          className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            setDeleteTarget(e);
+          }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      )}
+    </div>
   );
 
   const header = (group: SidebarGroup, title: string, addLabel: string) => (
@@ -140,19 +226,28 @@ export function Sidebar() {
           <div className="flex flex-col gap-1 pt-1">
             {creating === 'projects' && createInput}
             {projects.map((p) => (
-              <NavItem
-                key={p.id}
-                active={isActive({ type: 'project', id: p.id })}
-                onClick={() => setView({ type: 'project', id: p.id })}
-              >
-                <Inbox className="h-4 w-4" />
-                <span className="flex-1 truncate text-left">{p.title}</span>
-                {(openCountByProject.get(p.id) ?? 0) > 0 && (
-                  <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
-                    {openCountByProject.get(p.id)}
-                  </span>
+              <div key={p.id} className="group/row relative">
+                {renaming?.group === 'projects' && renaming.id === p.id ? (
+                  renameInput
+                ) : (
+                  <NavItem
+                    active={isActive({ type: 'project', id: p.id })}
+                    onClick={() => setView({ type: 'project', id: p.id })}
+                  >
+                    <Inbox className="h-4 w-4" />
+                    <span className="flex-1 truncate text-left">{p.title}</span>
+                    {(openCountByProject.get(p.id) ?? 0) > 0 && (
+                      <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
+                        {openCountByProject.get(p.id)}
+                      </span>
+                    )}
+                  </NavItem>
                 )}
-              </NavItem>
+                {rowActions(
+                  { group: 'projects', id: p.id, title: p.title },
+                  p.id !== INBOX_PROJECT_ID,
+                )}
+              </div>
             ))}
           </div>
         </CollapsibleContent>
@@ -164,14 +259,20 @@ export function Sidebar() {
           <div className="flex flex-col gap-1 pt-1">
             {creating === 'tags' && createInput}
             {customTags.map((t) => (
-              <NavItem
-                key={t.id}
-                active={isActive({ type: 'tag', id: t.id })}
-                onClick={() => setView({ type: 'tag', id: t.id })}
-              >
-                <Tag className="h-4 w-4" style={t.color ? { color: t.color } : undefined} />
-                <span className="truncate">{t.title}</span>
-              </NavItem>
+              <div key={t.id} className="group/row relative">
+                {renaming?.group === 'tags' && renaming.id === t.id ? (
+                  renameInput
+                ) : (
+                  <NavItem
+                    active={isActive({ type: 'tag', id: t.id })}
+                    onClick={() => setView({ type: 'tag', id: t.id })}
+                  >
+                    <Tag className="h-4 w-4" style={t.color ? { color: t.color } : undefined} />
+                    <span className="truncate">{t.title}</span>
+                  </NavItem>
+                )}
+                {rowActions({ group: 'tags', id: t.id, title: t.title }, true)}
+              </div>
             ))}
           </div>
         </CollapsibleContent>
@@ -191,6 +292,29 @@ export function Sidebar() {
           <Settings className="h-4 w-4" /> 设置
         </NavItem>
       </div>
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              删除{deleteTarget?.group === 'projects' ? '项目' : '标签'}「{deleteTarget?.title}」？
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {deleteTarget?.group === 'projects'
+              ? `该项目下 ${taskCountByProject.get(deleteTarget.id) ?? 0} 个任务将移入 Inbox，任务上显示的项目名保持不变。`
+              : '任务上已显示的历史标签名会保留，仅从侧栏移除该标签。'}
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={() => void confirmDelete()}>
+              删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </nav>
   );
 }

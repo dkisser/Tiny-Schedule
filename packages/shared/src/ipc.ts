@@ -7,7 +7,11 @@ export const Ipc = {
   taskDelete: 'task:delete',
   orderSet: 'order:set',
   projectCreate: 'project:create',
+  projectUpdate: 'project:update',
+  projectDelete: 'project:delete',
   tagCreate: 'tag:create',
+  tagUpdate: 'tag:update',
+  tagDelete: 'tag:delete',
   settingsUpdate: 'settings:update',
   finishDay: 'day:finish',
   timerSync: 'timer:sync',
@@ -16,6 +20,7 @@ export const Ipc = {
   selectAvatar: 'avatar:select',
   aiRegistry: 'ai:registry',
   aiTestProvider: 'ai:testProvider',
+  aiProviderKeyReveal: 'ai:providerKeyReveal',
   aiAnalyze: 'ai:analyze',
   aiChunk: 'ai:chunk',
   aiDone: 'ai:done',
@@ -47,6 +52,10 @@ export const TaskSchema = z.object({
   title: z.string(),
   projectId: z.string(),
   tagIds: z.array(z.string()),
+  projectTitle: z.string().optional(),
+  tagSnapshots: z
+    .record(z.string(), z.object({ title: z.string(), color: z.string().optional() }))
+    .optional(),
   subTaskIds: z.array(z.string()),
   parentTaskId: z.string().optional(),
   isDone: z.boolean(),
@@ -65,6 +74,7 @@ const AiProviderSchema = z.object({
   id: z.string(),
   registryId: z.string(),
   apiKeyEncrypted: z.string(),
+  hasApiKey: z.boolean().optional(),
   baseUrl: z.string().optional(),
   model: z.string(),
   isDefault: z.boolean(),
@@ -136,6 +146,25 @@ export const TagCreateReqSchema = z.object({
   color: z.string().optional(),
 });
 export type TagCreateReq = z.infer<typeof TagCreateReqSchema>;
+
+export const ProjectUpdateReqSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).max(100).optional(),
+});
+export type ProjectUpdateReq = z.infer<typeof ProjectUpdateReqSchema>;
+
+export const ProjectDeleteReqSchema = z.object({ id: z.string().min(1) });
+export type ProjectDeleteReq = z.infer<typeof ProjectDeleteReqSchema>;
+
+export const TagUpdateReqSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).max(50).optional(),
+  color: z.string().optional(),
+});
+export type TagUpdateReq = z.infer<typeof TagUpdateReqSchema>;
+
+export const TagDeleteReqSchema = z.object({ id: z.string().min(1) });
+export type TagDeleteReq = z.infer<typeof TagDeleteReqSchema>;
 
 // Settings updates from the renderer carry PLAIN-TEXT api keys in a separate
 // field; the main process encrypts them before persisting.
@@ -299,7 +328,19 @@ export const IpcInvokeContract = {
     req: ProjectCreateReqSchema,
     res: null as unknown as AppData,
   },
+  projectUpdate: {
+    ch: Ipc.projectUpdate,
+    req: ProjectUpdateReqSchema,
+    res: null as unknown as AppData,
+  },
+  projectDelete: {
+    ch: Ipc.projectDelete,
+    req: ProjectDeleteReqSchema,
+    res: null as unknown as AppData,
+  },
   tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as AppData },
+  tagUpdate: { ch: Ipc.tagUpdate, req: TagUpdateReqSchema, res: null as unknown as AppData },
+  tagDelete: { ch: Ipc.tagDelete, req: TagDeleteReqSchema, res: null as unknown as AppData },
   settingsUpdate: {
     ch: Ipc.settingsUpdate,
     req: SettingsUpdateReqSchema,
@@ -320,6 +361,11 @@ export const IpcInvokeContract = {
     ch: Ipc.aiTestProvider,
     req: AiTestReqSchema,
     res: null as unknown as { ok: boolean; error?: string },
+  },
+  aiProviderKeyReveal: {
+    ch: Ipc.aiProviderKeyReveal,
+    req: AiTestReqSchema,
+    res: null as unknown as { apiKey: string },
   },
   aiAnalyze: {
     ch: Ipc.aiAnalyze,
@@ -388,7 +434,11 @@ export function maskDataForRenderer(data: AppData): AppData {
     ...data,
     settings: {
       ...data.settings,
-      aiProviders: data.settings.aiProviders.map((p) => ({ ...p, apiKeyEncrypted: '' })),
+      aiProviders: data.settings.aiProviders.map((p) => ({
+        ...p,
+        apiKeyEncrypted: '',
+        hasApiKey: p.apiKeyEncrypted !== '',
+      })),
     },
   };
 }

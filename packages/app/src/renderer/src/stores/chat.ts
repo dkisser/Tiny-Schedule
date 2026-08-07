@@ -9,8 +9,6 @@ export interface ToolCard {
   toolCallId: string;
   name: string;
   status: 'running' | 'done' | 'error';
-  args?: unknown;
-  resultSummary?: string;
 }
 
 interface ChatState {
@@ -48,6 +46,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   create: async () => {
+    // 只允许存在一个空白会话：已有空会话时直接选中，不再新建
+    const blank = get().sessions.find((s) => s.messages.length === 0);
+    if (blank) {
+      set({ activeSessionId: blank.id });
+      return blank.id;
+    }
     const session = await api().chatSessionCreate({});
     set((s) => ({ sessions: [session, ...s.sessions], activeSessionId: session.id }));
     return session.id;
@@ -90,10 +94,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ requestId: res.requestId });
   },
 
-  // 失败后重试：走 chat:continue，不新增 user 消息（真正的 continue，而非再次 send）。
-  // 仅 failed 状态可发起：running/retrying 期间再次点击或误调直接忽略，避免抢占在途 run。
+  // 失败后重试 / 中断消息重新生成：走 chat:continue，不新增 user 消息。
+  // failed（错误横幅重试）或 idle（aborted 消息的 reload 按钮）可发起；
+  // running/retrying 期间再次点击或误调直接忽略，避免抢占在途 run。
   retry: async () => {
-    if (get().status !== 'failed') return;
+    const st = get().status;
+    if (st !== 'failed' && st !== 'idle') return;
     const { activeSessionId } = get();
     if (!activeSessionId) return;
     set({ streamText: '', toolCards: [], status: 'running', statusDetail: '' });
@@ -109,9 +115,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   stop: async () => {
-    const id = get().activeSessionId;
-    if (id) await api().chatStop({ sessionId: id });
-    set({ status: 'idle' });
+    const st = get();
+    if (st.status !== 'running' && st.status !== 'retrying') return;
+    const id = st.activeSessionId;
+    if (id) await api().chatStop({ sessionId: id }); // 主进程已 persist 中断内容后才返回
+    set({ status: 'idle', statusDetail: '', streamText: '', toolCards: [] });
+    await get().load(); // 提问与部分回答从持久化会话回显
   },
 }));
 
@@ -136,18 +145,14 @@ export function subscribeChatEvents(): () => void {
         }));
         break;
       case Ipc.chatToolEvent: {
+        // 主进程仍会带 args/resultSummary 字段，渲染端只关心状态
         const t = ev.payload as ToolCard & { sessionId: string };
         useChatStore.setState((s) => ({
           toolCards: s.toolCards.some((c) => c.toolCallId === t.toolCallId)
             ? s.toolCards.map((c) =>
-                c.toolCallId === t.toolCallId
-                  ? { ...c, status: t.status, resultSummary: t.resultSummary ?? c.resultSummary }
-                  : c,
+                c.toolCallId === t.toolCallId ? { ...c, status: t.status } : c,
               )
-            : [
-                ...s.toolCards,
-                { toolCallId: t.toolCallId, name: t.name, status: t.status, args: t.args },
-              ],
+            : [...s.toolCards, { toolCallId: t.toolCallId, name: t.name, status: t.status }],
         }));
         break;
       }

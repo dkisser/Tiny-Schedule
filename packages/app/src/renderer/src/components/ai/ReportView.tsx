@@ -1,12 +1,12 @@
 import type { AiSummary } from '@tiny-schedule/shared';
 import { Bot, Check, ChevronRight, Copy, MessageSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
 import { api } from '../../api';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { Button } from '../ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
+import { Markdown } from '../ui/markdown';
 
 function formatTime(ms: number): string {
   const d = new Date(ms);
@@ -42,6 +42,8 @@ export function ReportView() {
   const [output, setOutput] = useState('');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
+  // 历史总结默认展开；点击「开始分析」后自动收起，聚焦流式输出
+  const [historyOpen, setHistoryOpen] = useState(true);
   const requestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -68,6 +70,7 @@ export function ReportView() {
     setOutput('');
     setError('');
     setRunning(true);
+    setHistoryOpen(false);
     try {
       const { requestId } = await api().aiAnalyze({
         scope,
@@ -85,6 +88,7 @@ export function ReportView() {
     setOutput('');
     setError('');
     setRunning(true);
+    setHistoryOpen(false);
     try {
       const { requestId } = await api().aiAnalyze({ scope: s, providerId });
       requestIdRef.current = requestId;
@@ -133,7 +137,7 @@ export function ReportView() {
       )}
       <div className="mt-4 flex items-center gap-2">
         <select
-          className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm"
           value={scope}
           onChange={(e) => setScope(e.target.value as never)}
         >
@@ -143,7 +147,7 @@ export function ReportView() {
         </select>
         {scope === 'project' && (
           <select
-            className="rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+            className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
           >
@@ -165,41 +169,40 @@ export function ReportView() {
         {output && <CopyButton text={output} />}
       </div>
       {error && <div className="mt-3 text-sm text-destructive">{error}</div>}
-      {output && (
-        <div className="prose prose-sm dark:prose-invert mt-4 max-w-none rounded-lg border border-border p-4">
-          <ReactMarkdown>{output}</ReactMarkdown>
-        </div>
-      )}
+      {output && <Markdown text={output} className="mt-4 rounded-lg border border-border p-4" />}
 
       {history.length > 0 && (
-        <div className="mt-8">
-          <h2 className="mb-2 text-sm font-medium text-muted-foreground">历史总结</h2>
-          <div className="flex flex-col gap-2">
-            {history.map((s, i) => (
-              <Collapsible
-                key={s.id}
-                defaultOpen={i === 0}
-                className="rounded-lg border border-border bg-card"
-              >
-                <div className="flex items-center gap-2 px-3 py-2">
-                  <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
-                    <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
-                    <span className="shrink-0">{formatTime(s.createdAt)}</span>
-                    <span className="truncate rounded bg-secondary px-1.5 text-xs">
-                      {scopeLabel(s)}
-                    </span>
-                  </CollapsibleTrigger>
-                  <CopyButton text={s.content} />
-                </div>
-                <CollapsibleContent>
-                  <div className="prose prose-sm dark:prose-invert max-w-none border-t border-border p-4">
-                    <ReactMarkdown>{s.content}</ReactMarkdown>
+        <Collapsible open={historyOpen} onOpenChange={setHistoryOpen} className="mt-8">
+          <CollapsibleTrigger className="group mb-2 flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-foreground">
+            <ChevronRight className="h-4 w-4 transition-transform group-data-[state=open]:rotate-90" />
+            历史总结
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="flex flex-col gap-2">
+              {history.map((s, i) => (
+                <Collapsible
+                  key={s.id}
+                  defaultOpen={i === 0}
+                  className="rounded-lg border border-border bg-card"
+                >
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
+                      <ChevronRight className="h-4 w-4 shrink-0 transition-transform group-data-[state=open]:rotate-90" />
+                      <span className="shrink-0">{formatTime(s.createdAt)}</span>
+                      <span className="truncate rounded bg-secondary px-1.5 text-xs">
+                        {scopeLabel(s)}
+                      </span>
+                    </CollapsibleTrigger>
+                    <CopyButton text={s.content} />
                   </div>
-                </CollapsibleContent>
-              </Collapsible>
-            ))}
-          </div>
-        </div>
+                  <CollapsibleContent>
+                    <Markdown text={s.content} className="border-t border-border p-4" />
+                  </CollapsibleContent>
+                </Collapsible>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
   );

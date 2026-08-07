@@ -2,7 +2,7 @@ import type { AppData, Task } from '@tiny-schedule/shared';
 import { Check, GripVertical, Pause, Play, Trash2 } from 'lucide-react';
 import type { DragControls } from 'motion/react';
 import { useState } from 'react';
-import { isOverdue } from '../lib/tasks';
+import { isOverdue, taskTagLabel } from '../lib/tasks';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
@@ -13,6 +13,18 @@ function formatMs(ms: number): string {
   const m = Math.floor(ms / 60_000);
   const h = Math.floor(m / 60);
   return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+function formatDoneAt(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const today = new Date();
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  return sameDay ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 export function TaskCard({
@@ -57,9 +69,9 @@ export function TaskCard({
       onKeyDown={(e) => e.key === 'Enter' && selectTask(selected ? null : task.id)}
       className={cn(
         'group flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer',
-        selected && 'ring-2 ring-ring',
+        selected && (overdue ? 'ring-2 ring-amber-400/70' : 'ring-2 ring-ring'),
         active && 'border-pink-400 bg-pink-50 dark:bg-pink-950/30',
-        overdue && !active && 'border-amber-400/60',
+        overdue && !active && !selected && 'border-amber-400/60',
       )}
     >
       {dragControls && !task.isDone && (
@@ -100,22 +112,24 @@ export function TaskCard({
           {task.title}
         </div>
         <div className="mt-0.5 flex gap-1">
+          {task.isDone && task.doneAt !== undefined && (
+            <span className="rounded bg-emerald-500/15 px-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              完成于 {formatDoneAt(task.doneAt)}
+            </span>
+          )}
           {overdue && (
             <span className="rounded bg-amber-500/15 px-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
               逾期 {overdueDays} 天
             </span>
           )}
-          {task.tagIds.map(
-            (id) =>
-              data.tags[id] && (
-                <span
-                  key={id}
-                  className="rounded bg-secondary px-1.5 text-xs text-muted-foreground"
-                >
-                  {data.tags[id]?.title}
-                </span>
-              ),
-          )}
+          {task.tagIds.map((id) => {
+            const label = taskTagLabel(task, data, id);
+            return label ? (
+              <span key={id} className="rounded bg-secondary px-1.5 text-xs text-muted-foreground">
+                {label}
+              </span>
+            ) : null;
+          })}
         </div>
       </div>
       <div className="shrink-0 text-xs text-muted-foreground">

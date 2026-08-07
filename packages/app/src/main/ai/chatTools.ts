@@ -1,9 +1,13 @@
-import type { AppData } from '@tiny-schedule/shared';
+import { type AppData, localDate } from '@tiny-schedule/shared';
 import { scopeToRange, touchesRange } from './prompts';
 
 export interface QueryTasksParams {
   from?: string; // YYYY-MM-DD
   to?: string;
+  dueFrom?: string; // 截止日范围 YYYY-MM-DD
+  dueTo?: string;
+  doneFrom?: string; // 完成日范围 YYYY-MM-DD
+  doneTo?: string;
   projectId?: string;
   isDone?: boolean;
 }
@@ -12,6 +16,7 @@ export interface QueriedTask {
   id: string;
   title: string;
   isDone: boolean;
+  doneAt?: string; // YYYY-MM-DD
   project: string;
   tags: string[];
   dueDay?: string;
@@ -25,17 +30,31 @@ export function queryTasks(data: AppData, p: QueryTasksParams): QueriedTask[] {
   const hasRange = p.from !== undefined || p.to !== undefined;
   const from = p.from ?? '0000-01-01';
   const to = p.to ?? '9999-12-31';
+  const hasDueRange = p.dueFrom !== undefined || p.dueTo !== undefined;
+  const dueFrom = p.dueFrom ?? '0000-01-01';
+  const dueTo = p.dueTo ?? '9999-12-31';
+  const hasDoneRange = p.doneFrom !== undefined || p.doneTo !== undefined;
+  const doneFrom = p.doneFrom ?? '0000-01-01';
+  const doneTo = p.doneTo ?? '9999-12-31';
   return Object.values(data.tasks)
     .filter((t) => !t.parentTaskId)
     .filter((t) => (p.projectId ? t.projectId === p.projectId : true))
     .filter((t) => (p.isDone === undefined ? true : t.isDone === p.isDone))
     .filter((t) => (hasRange ? touchesRange(t, from, to) : true))
+    .filter((t) => (hasDueRange ? !!t.dueDay && t.dueDay >= dueFrom && t.dueDay <= dueTo : true))
+    .filter((t) => {
+      if (!hasDoneRange) return true;
+      if (t.doneAt === undefined) return false;
+      const done = localDate(t.doneAt);
+      return done >= doneFrom && done <= doneTo;
+    })
     .map((t) => ({
       id: t.id,
       title: t.title,
       isDone: t.isDone,
-      project: data.projects[t.projectId]?.title ?? t.projectId,
-      tags: t.tagIds.map((id) => data.tags[id]?.title ?? id),
+      doneAt: t.doneAt !== undefined ? localDate(t.doneAt) : undefined,
+      project: t.projectTitle ?? data.projects[t.projectId]?.title ?? t.projectId,
+      tags: t.tagIds.map((id) => t.tagSnapshots?.[id]?.title ?? data.tags[id]?.title ?? id),
       dueDay: t.dueDay,
       timeEstimateMs: t.timeEstimate,
       timeSpentMs: t.timeSpent,

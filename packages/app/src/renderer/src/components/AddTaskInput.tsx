@@ -1,4 +1,4 @@
-import { localDate } from '@tiny-schedule/shared';
+import { INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
 import { useState } from 'react';
 import { blankTask } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
@@ -12,12 +12,15 @@ export function AddTaskInput({
   addToToday?: boolean;
 }) {
   const [title, setTitle] = useState('');
+  const data = useDataStore((s) => s.data);
   const upsertTask = useDataStore((s) => s.upsertTask);
 
   const submit = async () => {
     const trimmed = title.trim();
-    if (!trimmed) return;
-    const task = blankTask(trimmed, projectId);
+    if (!trimmed || !data) return;
+    const project = data.projects[projectId] ?? data.projects[INBOX_PROJECT_ID];
+    if (!project) return;
+    const task = blankTask(trimmed, project);
     if (addToToday) task.dueDay = localDate(Date.now());
     await upsertTask(task);
     setTitle('');

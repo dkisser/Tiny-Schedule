@@ -1,14 +1,14 @@
 import type { AppData, Task } from '@tiny-schedule/shared';
 import { formatClock, formatDuration } from './duration';
 
-function tagLabel(data: AppData, tagId: string): string | null {
-  const tag = data.tags[tagId];
-  return tag ? `\`${tag.title}\`` : null;
+function tagLabel(data: AppData, t: Task, tagId: string): string | null {
+  const title = t.tagSnapshots?.[tagId]?.title ?? data.tags[tagId]?.title;
+  return title ? `\`${title}\`` : null;
 }
 
 function taskLine(data: AppData, t: Task): string {
   const parts: string[] = [];
-  const tags = t.tagIds.map((id) => tagLabel(data, id)).filter(Boolean);
+  const tags = t.tagIds.map((id) => tagLabel(data, t, id)).filter(Boolean);
   if (tags.length > 0) parts.push(tags.join(' '));
   if (t.dueDay) parts.push(`截止 ${t.dueDay}`);
   if (t.timeEstimate > 0) parts.push(`预估 ${formatDuration(t.timeEstimate)}`);

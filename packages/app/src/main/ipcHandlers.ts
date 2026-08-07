@@ -5,6 +5,7 @@ import {
   addDays,
   type ChatSession,
   type ImportRunResult,
+  INBOX_PROJECT_ID,
   Ipc,
   IpcInvokeContract,
   type IpcInvokeHandlers,
@@ -80,7 +81,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     dataLoad: () => masked(store.get()),
 
     taskUpsert: (task) => {
-      const next = store.update((d) => ({ ...d, tasks: { ...d.tasks, [task.id]: task } }));
+      // 规范化完成时间：任何入口标记完成都保证有 doneAt，重开则清除
+      const normalized = { ...task, doneAt: task.isDone ? (task.doneAt ?? Date.now()) : undefined };
+      const next = store.update((d) => ({
+        ...d,
+        tasks: { ...d.tasks, [normalized.id]: normalized },
+      }));
       logger.info({ action: 'task:upsert', taskId: task.id, title: task.title });
       return masked(next);
     },
@@ -130,12 +136,69 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       return masked(next);
     },
 
+    projectUpdate: (req) => {
+      const next = store.update((d) => {
+        const prev = d.projects[req.id];
+        if (!prev || req.title === undefined) return d;
+        return {
+          ...d,
+          projects: { ...d.projects, [req.id]: { ...prev, title: req.title } },
+        };
+      });
+      logger.info({ action: 'project:update', id: req.id, title: req.title });
+      return masked(next);
+    },
+
+    projectDelete: (req) => {
+      if (req.id === INBOX_PROJECT_ID) return masked(store.get());
+      const next = store.update((d) => {
+        if (!d.projects[req.id]) return d;
+        const projects = { ...d.projects };
+        delete projects[req.id];
+        // Tasks keep their projectTitle snapshot; only the grouping moves to Inbox.
+        const tasks = { ...d.tasks };
+        for (const t of Object.values(tasks)) {
+          if (t.projectId === req.id) tasks[t.id] = { ...t, projectId: INBOX_PROJECT_ID };
+        }
+        return { ...d, projects, tasks };
+      });
+      logger.info({ action: 'project:delete', id: req.id });
+      return masked(next);
+    },
+
     tagCreate: (req) => {
       const next = store.update((d) => {
         const id = `tag_${randomUUID()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
       logger.info({ action: 'tag:create', title: req.title });
+      return masked(next);
+    },
+
+    tagUpdate: (req) => {
+      const next = store.update((d) => {
+        const prev = d.tags[req.id];
+        if (!prev) return d;
+        const updated = {
+          ...prev,
+          ...(req.title !== undefined ? { title: req.title } : {}),
+          ...(req.color !== undefined ? { color: req.color } : {}),
+        };
+        return { ...d, tags: { ...d.tags, [req.id]: updated } };
+      });
+      logger.info({ action: 'tag:update', id: req.id, title: req.title });
+      return masked(next);
+    },
+
+    tagDelete: (req) => {
+      const next = store.update((d) => {
+        if (!d.tags[req.id]) return d;
+        const tags = { ...d.tags };
+        delete tags[req.id];
+        // Tasks keep tagIds + snapshot labels so their chips stay visible.
+        return { ...d, tags };
+      });
+      logger.info({ action: 'tag:delete', id: req.id });
       return masked(next);
     },
 
@@ -211,11 +274,11 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         if (taskCount > 0) {
           const confirm = await electronDialog.showMessageBox(win, {
             type: 'question',
-            buttons: ['覆盖', '取消'],
+            buttons: ['合并', '取消'],
             defaultId: 0,
             cancelId: 1,
             message: '本地已有数据',
-            detail: `导入将覆盖当前 ${taskCount} 个任务（导入前会自动备份当前数据）。`,
+            detail: `导入将追加合并到当前 ${taskCount} 个任务中（ID 相同时以导入数据为准，现有 AI 会话与其余任务保留）。`,
           });
           if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
         }
@@ -286,6 +349,12 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       return result;
     },
 
+    aiProviderKeyReveal: ({ providerId }) => {
+      const cfg = store.get().settings.aiProviders.find((p) => p.id === providerId);
+      if (!cfg) return { apiKey: '' };
+      return { apiKey: decryptKey(cfg.apiKeyEncrypted) };
+    },
+
     aiAnalyze: async (req) => {
       const requestId = randomUUID();
       const data = store.get();
@@ -348,8 +417,10 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     chatSessionDelete: (req) => chatManager.deleteSession(req.sessionId),
     chatSend: (req) => chatManager.send(req.sessionId, req.text, req.providerId),
     chatContinue: (req) => chatManager.continue(req.sessionId),
-    chatStop: (req) => {
+    chatStop: async (req) => {
       chatManager.stop(req.sessionId);
+      // 等 run 结算（含 aborted 尾部的 persist），渲染端随后 load() 才能看到中断内容
+      await chatManager.waitForIdle(req.sessionId);
     },
   };
 

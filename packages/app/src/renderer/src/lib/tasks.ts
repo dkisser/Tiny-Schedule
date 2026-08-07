@@ -1,4 +1,4 @@
-import { type AppData, localDate, type Task } from '@tiny-schedule/shared';
+import { type AppData, localDate, type Project, type Task } from '@tiny-schedule/shared';
 
 export function isTopLevel(t: Task): boolean {
   return !t.parentTaskId;
@@ -25,7 +25,12 @@ export function todayDoneTasks(data: AppData, now = Date.now()): Task[] {
   const today = localDate(now);
   return Object.values(data.tasks)
     .filter(isTopLevel)
-    .filter((t) => t.isDone && !!t.dueDay && t.dueDay <= today)
+    .filter((t) => t.isDone)
+    .filter((t) => {
+      // 今天完成的（含逾期完成/提前完成）+ 截止日不超过今天的已完成记录
+      if (t.doneAt !== undefined && localDate(t.doneAt) === today) return true;
+      return !!t.dueDay && t.dueDay <= today;
+    })
     .sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
 }
 
@@ -82,11 +87,12 @@ export function newTaskId(): string {
   return `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function blankTask(title: string, projectId: string): Task {
+export function blankTask(title: string, project: Project): Task {
   return {
     id: newTaskId(),
     title,
-    projectId,
+    projectId: project.id,
+    projectTitle: project.title,
     tagIds: [],
     subTaskIds: [],
     isDone: false,
@@ -97,4 +103,14 @@ export function blankTask(title: string, projectId: string): Task {
     notes: '',
     created: Date.now(),
   };
+}
+
+// Display names come from the task's snapshot first; only tasks created
+// before the snapshot fields existed fall back to the live entity lookup.
+export function taskProjectTitle(task: Task, data: AppData): string {
+  return task.projectTitle ?? data.projects[task.projectId]?.title ?? '';
+}
+
+export function taskTagLabel(task: Task, data: AppData, tagId: string): string {
+  return task.tagSnapshots?.[tagId]?.title ?? data.tags[tagId]?.title ?? '';
 }

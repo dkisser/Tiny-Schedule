@@ -19,8 +19,12 @@ function json(result: unknown): TextToolResult {
 }
 
 const queryTasksParams = Type.Object({
-  from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD' })),
-  to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD' })),
+  from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD（按工作/完成时间过滤）' })),
+  to: Type.Optional(Type.String({ description: '结束日期 YYYY-MM-DD（按工作/完成时间过滤）' })),
+  dueFrom: Type.Optional(Type.String({ description: '截止日起始日 YYYY-MM-DD' })),
+  dueTo: Type.Optional(Type.String({ description: '截止日结束日 YYYY-MM-DD' })),
+  doneFrom: Type.Optional(Type.String({ description: '完成日起始日 YYYY-MM-DD' })),
+  doneTo: Type.Optional(Type.String({ description: '完成日结束日 YYYY-MM-DD' })),
   projectId: Type.Optional(Type.String()),
   isDone: Type.Optional(Type.Boolean()),
 });
@@ -38,7 +42,7 @@ export function buildChatTools(getData: () => AppData, today: () => string): Age
     name: 'queryTasks',
     label: '查询任务',
     description:
-      '按条件查询任务列表及耗时。参数：from/to（日期范围 YYYY-MM-DD）、projectId、isDone。',
+      '按条件查询任务列表及耗时。参数：from/to（工作/完成时间范围）、dueFrom/dueTo（截止日范围）、doneFrom/doneTo（完成日范围，查"某天完成了什么"用它）、projectId、isDone。日期均为 YYYY-MM-DD。',
     parameters: queryTasksParams,
     execute: async (_toolCallId, params) => json(queryTasks(getData(), params)),
   };

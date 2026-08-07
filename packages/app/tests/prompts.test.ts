@@ -79,6 +79,23 @@ describe('buildAnalysisData', () => {
     expect(json.summary.totalSpentMs).toBe(100);
   });
 
+  test('today scope includes tasks completed today (overdue, no time entries)', () => {
+    const d = emptyAppData();
+    d.projects.p1 = { id: 'p1', title: '工作', isArchived: false };
+    d.tasks.t1 = task({
+      title: '逾期完成',
+      dueDay: '2026-08-01',
+      isDone: true,
+      doneAt: new Date('2026-08-04T18:30:00').getTime(),
+      timeSpent: 0,
+      timeSpentOnDay: {},
+    });
+    const json = JSON.parse(buildAnalysisData(d, { scope: 'today', date: '2026-08-04' }));
+    expect(json.tasks).toHaveLength(1);
+    expect(json.tasks[0]).toMatchObject({ title: '逾期完成', isDone: true, doneAt: '2026-08-04' });
+    expect(json.summary.doneCount).toBe(1);
+  });
+
   test('project scope filters by projectId', () => {
     const d = emptyAppData();
     d.projects.p1 = { id: 'p1', title: '工作', isArchived: false };

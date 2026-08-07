@@ -12,10 +12,12 @@ import { ChatAgentManager } from '../src/main/ai/chatAgent';
 type SetupOptions = {
   /** 'default': 工具调用 + 文本答案两轮；'error': 每次调用都返回 stopReason 'error'；'slow': 慢速流式响应（保持 run in-flight） */
   script?: 'default' | 'error' | 'slow';
+  /** 覆盖超时阈值（ms），用于快速触发超时路径 */
+  timeouts?: { firstTokenMs?: number; idleMs?: number };
 };
 
 function setup(options: SetupOptions = {}) {
-  const { script = 'default' } = options;
+  const { script = 'default', timeouts } = options;
   const sessions: ChatSession[] = [];
   const events: { kind: string; payload: unknown }[] = [];
   const sink: ChatEventSink = {
@@ -76,6 +78,7 @@ function setup(options: SetupOptions = {}) {
     }),
     sink,
     logger,
+    ...(timeouts ? { timeouts } : {}),
     // 测试注入：用 faux provider 替代真实 openai-completions 调用。
     // 脚本在钩子内部注入（两轮响应：先调 listProjects 工具，再给文本答案），
     // 测试通过返回的 faux 句柄追加/替换脚本（如 continue 恢复场景）。
@@ -150,11 +153,20 @@ describe('ChatAgentManager', () => {
     expect(sessions).toHaveLength(0);
   });
 
-  test('stop mid-run: no done event and no aborted tail persisted', async () => {
-    const { manager, sessions, events } = setup({ script: 'slow' });
+  test('stop mid-run: no done/error, 用户提问与部分回答被持久化，可 continue 重新生成', async () => {
+    const { manager, sessions, events, faux } = setup({ script: 'slow' });
     const s = manager.createSession();
     const res = await manager.send(s.id, '慢速响应，用于测试 stop');
     expect('requestId' in res).toBe(true);
+    // 等首个 chunk（流式已在途）再 stop；真实场景用户点停止时必然已开始流式
+    await new Promise<void>((resolve) => {
+      const t = setInterval(() => {
+        if (events.some((e) => e.kind === 'chunk')) {
+          clearInterval(t);
+          resolve();
+        }
+      }, 5);
+    });
     manager.stop(s.id);
     await manager.waitForIdle(s.id);
     const kinds = events.map((e) => e.kind);
@@ -165,7 +177,43 @@ describe('ChatAgentManager', () => {
       .filter((e) => e.kind === 'status')
       .map((e) => (e.payload as { status: string }).status);
     expect(statuses).toEqual(['running']);
-    // 中止的 assistant 尾部消息（stopReason 'aborted'）不得持久化进 session
+    // 消息不丢：用户提问 + aborted 尾部（含已流出的部分回答）持久化进 session
+    const msgs = (sessions[0]?.messages ?? []) as { role?: string; stopReason?: string }[];
+    expect(msgs.filter((m) => m.role === 'user')).toHaveLength(1);
+    const last = msgs[msgs.length - 1];
+    expect(last?.role).toBe('assistant');
+    expect(last?.stopReason).toBe('aborted');
+
+    // reload（continue）重新生成：strip aborted 尾部，不新增 user 消息
+    faux.setResponses([fauxAssistantMessage('重新生成成功')]);
+    const continueRes = await manager.continue(s.id);
+    expect('requestId' in continueRes).toBe(true);
+    await manager.waitForIdle(s.id);
+    const allKinds = events.map((e) => e.kind);
+    expect(allKinds[allKinds.length - 1]).toBe('done');
+    const msgs2 = (sessions[0]?.messages ?? []) as { role?: string; stopReason?: string }[];
+    expect(msgs2.filter((m) => m.role === 'user')).toHaveLength(1);
+    const last2 = msgs2[msgs2.length - 1];
+    expect(last2?.role).toBe('assistant');
+    expect(last2?.stopReason).not.toBe('aborted');
+  });
+
+  test('timeout mid-run: 发 error 但不持久化中断内容（区别于用户 stop）', async () => {
+    const { manager, sessions, events } = setup({
+      script: 'slow',
+      timeouts: { firstTokenMs: 5, idleMs: 20 },
+    });
+    const s = manager.createSession();
+    const res = await manager.send(s.id, '慢速响应，用于测试超时');
+    expect('requestId' in res).toBe(true);
+    await manager.waitForIdle(s.id);
+    const errors = events.filter((e) => e.kind === 'error');
+    expect(errors).toHaveLength(1);
+    expect(['FIRST_TOKEN_TIMEOUT', 'IDLE_TIMEOUT']).toContain(
+      (errors[0]?.payload as { error: string }).error,
+    );
+    expect(events.some((e) => e.kind === 'done')).toBe(false);
+    // 超时不属于用户 stop：中断内容不落盘
     expect(sessions[0]?.messages ?? []).toHaveLength(0);
   });
 
@@ -195,11 +243,10 @@ describe('ChatAgentManager', () => {
     expect((sessions[0]?.messages ?? []).length).toBeGreaterThan(0);
   });
 
-  test('continue without an agent returns SESSION_NOT_FOUND', async () => {
+  test('continue with unknown session returns SESSION_NOT_FOUND', async () => {
     const { manager } = setup();
-    const s = manager.createSession();
-    // 从未 send 过，agent 尚未创建
-    expect(await manager.continue(s.id)).toEqual({ error: 'SESSION_NOT_FOUND' });
+    // 会话不存在（无缓存 agent 不再报错：run() 会用持久化消息重建 agent）
+    expect(await manager.continue('nonexistent')).toEqual({ error: 'SESSION_NOT_FOUND' });
   });
 
   test('continue after a failed run emits running -> done and adds no user message', async () => {

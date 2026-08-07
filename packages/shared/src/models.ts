@@ -12,6 +12,10 @@ export interface Task {
   title: string;
   projectId: string;
   tagIds: string[];
+  // Snapshots of project/tag display names at assignment time; later renames
+  // or deletions of projects/tags must not propagate into existing tasks.
+  projectTitle?: string;
+  tagSnapshots?: Record<string, { title: string; color?: string }>;
   subTaskIds: string[];
   parentTaskId?: string;
   isDone: boolean;
@@ -60,6 +64,8 @@ export interface AiProviderConfig {
   id: string; // unique instance id
   registryId: string; // id in PROVIDER_REGISTRY
   apiKeyEncrypted: string; // base64 of safeStorage-encrypted key (main process only)
+  // Renderer-facing flag computed by maskDataForRenderer; never persisted.
+  hasApiKey?: boolean;
   baseUrl?: string; // for custom providers; empty/absent means use registry default
   model: string;
   isDefault: boolean;

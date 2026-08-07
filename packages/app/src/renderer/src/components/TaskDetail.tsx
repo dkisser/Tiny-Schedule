@@ -1,14 +1,16 @@
-import type { Task } from '@tiny-schedule/shared';
-import { Plus, X } from 'lucide-react';
+import { INBOX_PROJECT_ID, SYSTEM_TAG_IDS, type Task } from '@tiny-schedule/shared';
+import { ChevronLeft, Pencil, Plus, X } from 'lucide-react';
 import { useState } from 'react';
-import { blankTask } from '../lib/tasks';
+import { blankTask, taskProjectTitle, taskTagLabel } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
+import { MarkdownEditor } from './MarkdownEditor';
 import { Button } from './ui/button';
+import { Combobox } from './ui/combobox';
 import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
+import { Markdown } from './ui/markdown';
 
 function hoursToMs(h: number): number {
   return Math.round(h * 3_600_000);
@@ -22,86 +24,108 @@ export function TaskDetail({ task }: { task: Task }) {
   const activeTaskId = useTimerStore((s) => s.timer?.taskId ?? null);
   const [subTitle, setSubTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
+  const [editingNotes, setEditingNotes] = useState(false);
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
   const projects = Object.values(data.projects).filter((p) => !p.isArchived);
-  const tags = Object.values(data.tags);
+  const systemTagIds = Object.values(SYSTEM_TAG_IDS) as string[];
+  const tags = Object.values(data.tags).filter((t) => !systemTagIds.includes(t.id));
   const subTasks = task.subTaskIds.map((id) => data.tasks[id]).filter(Boolean) as Task[];
 
   const addSubTask = async () => {
     const title = subTitle.trim();
     if (!title) return;
-    const sub = { ...blankTask(title, task.projectId), parentTaskId: task.id };
+    const project = data.projects[task.projectId] ?? data.projects[INBOX_PROJECT_ID];
+    if (!project) return;
+    const sub = { ...blankTask(title, project), parentTaskId: task.id };
     await upsertTask(sub);
     await upsertTask({ ...task, subTaskIds: [...task.subTaskIds, sub.id] });
     setSubTitle('');
   };
 
+  const toggleTag = (tagId: string) => {
+    const on = task.tagIds.includes(tagId);
+    if (on) {
+      const snapshots = { ...task.tagSnapshots };
+      delete snapshots[tagId];
+      save({
+        tagIds: task.tagIds.filter((id) => id !== tagId),
+        tagSnapshots: Object.keys(snapshots).length > 0 ? snapshots : undefined,
+      });
+    } else {
+      const tag = data.tags[tagId];
+      save({
+        tagIds: [...task.tagIds, tagId],
+        tagSnapshots: {
+          ...task.tagSnapshots,
+          ...(tag
+            ? { [tagId]: { title: tag.title, ...(tag.color ? { color: tag.color } : {}) } }
+            : {}),
+        },
+      });
+    }
+  };
+
   return (
     <div className="flex h-full w-[380px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-4">
-      <div className="flex items-start justify-between gap-2">
-        <Input
-          defaultValue={task.title}
-          onBlur={(e) => e.target.value.trim() && save({ title: e.target.value.trim() })}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
-        <Button variant="ghost" size="icon" aria-label="关闭" onClick={() => selectTask(null)}>
-          <X className="h-4 w-4" />
+      <div>
+        <Button variant="ghost" size="sm" className="-ml-2" onClick={() => selectTask(null)}>
+          <ChevronLeft className="mr-1 h-4 w-4" />
+          关闭
         </Button>
       </div>
 
-      <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={task.isDone}
-          onChange={(e) =>
-            save({ isDone: e.target.checked, doneAt: e.target.checked ? Date.now() : undefined })
-          }
-        />
-        已完成
-      </label>
+      <Input
+        defaultValue={task.title}
+        onBlur={(e) => e.target.value.trim() && save({ title: e.target.value.trim() })}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      />
 
       <div>
         <div className="mb-1 text-xs text-muted-foreground">项目</div>
-        <select
-          className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
-          value={task.projectId}
-          onChange={(e) => save({ projectId: e.target.value })}
-        >
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
-          ))}
-        </select>
+        <Combobox
+          options={projects.map((p) => ({ id: p.id, title: p.title }))}
+          value={data.projects[task.projectId] ? task.projectId : undefined}
+          display={taskProjectTitle(task, data) || undefined}
+          placeholder="选择项目"
+          onSelect={(id) => {
+            const p = data.projects[id];
+            if (p) save({ projectId: id, projectTitle: p.title });
+          }}
+        />
       </div>
 
       <div>
         <div className="mb-1 text-xs text-muted-foreground">标签</div>
-        <div className="flex flex-wrap gap-1">
-          {tags.map((t) => {
-            const on = task.tagIds.includes(t.id);
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() =>
-                  save({
-                    tagIds: on ? task.tagIds.filter((id) => id !== t.id) : [...task.tagIds, t.id],
-                  })
-                }
-                className={
-                  on
-                    ? 'rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground'
-                    : 'rounded-full bg-secondary px-2 py-0.5 text-xs'
-                }
+        <Combobox
+          options={tags.map((t) => ({ id: t.id, title: t.title, color: t.color }))}
+          selectedIds={task.tagIds}
+          onToggle={toggleTag}
+          placeholder="搜索并选择标签"
+          display={task.tagIds.length > 0 ? `已选 ${task.tagIds.length} 个标签` : undefined}
+        />
+        {task.tagIds.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {task.tagIds.map((id) => (
+              <span
+                key={id}
+                className="flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs"
               >
-                {t.title}
-              </button>
-            );
-          })}
-        </div>
+                {taskTagLabel(task, data, id) || id}
+                {!data.tags[id] && <span className="text-muted-foreground">（已删除）</span>}
+                <button
+                  type="button"
+                  aria-label="移除标签"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => toggleTag(id)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -168,13 +192,34 @@ export function TaskDetail({ task }: { task: Task }) {
       </div>
 
       <div>
-        <div className="mb-1 text-xs text-muted-foreground">备注</div>
-        <Textarea
-          rows={6}
-          defaultValue={task.notes}
-          onBlur={(e) => save({ notes: e.target.value })}
-          placeholder="支持 Markdown"
-        />
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">备注</span>
+          {!editingNotes && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-1.5 text-xs"
+              onClick={() => setEditingNotes(true)}
+            >
+              <Pencil className="mr-1 h-3 w-3" />
+              编辑
+            </Button>
+          )}
+        </div>
+        {editingNotes ? (
+          <MarkdownEditor
+            initialValue={task.notes}
+            onDone={(text) => {
+              setEditingNotes(false);
+              if (text !== task.notes) save({ notes: text });
+            }}
+            onCancel={() => setEditingNotes(false)}
+          />
+        ) : task.notes ? (
+          <Markdown text={task.notes} className="rounded-md border border-border p-2" />
+        ) : (
+          <div className="text-sm text-muted-foreground">暂无备注</div>
+        )}
       </div>
 
       <DeleteTaskDialog
