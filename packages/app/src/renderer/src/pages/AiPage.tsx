@@ -1,4 +1,3 @@
-import { MessageSquare, ScrollText } from 'lucide-react';
 import { ChatView } from '../components/ai/ChatView';
 import { ReportView } from '../components/ai/ReportView';
 import { Button } from '../components/ui/button';
