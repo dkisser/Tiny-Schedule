@@ -21,16 +21,13 @@ export function todayTasks(data: AppData, now = Date.now()): Task[] {
     .sort((a, b) => (a.dueDay ?? '').localeCompare(b.dueDay ?? ''));
 }
 
+// 只展示今天完成的任务（含提前完成/逾期完成，它们的 doneAt 都是今天）；
+// 过去几天完成的任务随日期滚动消失，历史已完成任务在各项目页查看。
 export function todayDoneTasks(data: AppData, now = Date.now()): Task[] {
   const today = localDate(now);
   return Object.values(data.tasks)
     .filter(isTopLevel)
-    .filter((t) => t.isDone)
-    .filter((t) => {
-      // 今天完成的（含逾期完成/提前完成）+ 截止日不超过今天的已完成记录
-      if (t.doneAt !== undefined && localDate(t.doneAt) === today) return true;
-      return !!t.dueDay && t.dueDay <= today;
-    })
+    .filter((t) => t.isDone && t.doneAt !== undefined && localDate(t.doneAt) === today)
     .sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
 }
 

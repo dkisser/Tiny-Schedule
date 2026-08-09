@@ -13,6 +13,9 @@
     "check:ipc": "bun scripts/check-ipc-literals.ts",
     "typecheck": "tsc -b"
   },
+  "trustedDependencies": [
+    "electron"
+  ],
   "devDependencies": {
     "@biomejs/biome": "^2.0.0",
     "@types/bun": "^1.3.14",

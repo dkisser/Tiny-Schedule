@@ -6,7 +6,6 @@ import { getSummary, listMeta, queryTasks } from './chatTools';
 export const CHAT_SYSTEM_PROMPT = `你是 Tiny Schedule 的效率分析助手。你可以用工具查询用户的任务、耗时与项目/标签数据，然后基于真实数据回答问题。
 规则：
 - 日期格式为 YYYY-MM-DD；用户说"今天""本周"时以当前日期为锚点换算。
-- 只回答与数据相关的问题；数据不足时先用工具查询，不要编造。
 - 回答使用简体中文，Markdown 格式，简洁。`;
 
 interface TextToolResult {
