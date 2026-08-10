@@ -1,0 +1,49 @@
+appId: com.dkisser.tinyschedule
+productName: Tiny Schedule
+copyright: Copyright © 2026 dkisser
+asar: true
+directories:
+  output: release                       # 相对 packages/app → packages/app/release
+  buildResources: build                 # 图标、entitlements 等（暂不创建）
+
+# electron-vite 已经把 main/preload/renderer 全部打入 out/，这里只打包必要文件
+files:
+  - "out/**/*"
+  - "package.json"
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/*.d.ts"
+  - "!**/node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+  - "!.editorconfig"
+  - "!**/._*"
+  - "!**/{.DS_Store,.git,.hg,.svn,CVS,RCS,SCCS,.gitignore,.gitattributes}"
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 dkisser
+
+dmg:
+  title: ${productName} ${version}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+  window:
+    width: 540
+    height: 380
+  writeUpdateInfo: false
+
+# 发布到 GitHub Releases（CI 中通过 --publish always 启用）
+publish:
+  provider: github
+  releaseType: release
