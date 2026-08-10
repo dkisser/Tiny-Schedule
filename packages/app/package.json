@@ -1,6 +1,6 @@
 {
   "name": "@tiny-schedule/app",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Tiny Schedule - 本地优先的任务管理 + AI 分析桌面应用",
