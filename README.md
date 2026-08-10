@@ -35,8 +35,16 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 **首次安装（个人未签名）**：
 
-未做 Apple Developer ID 签名与公证，macOS Gatekeeper 默认会拦截。
-下载 `.dmg` 后，挂载 → **右键** `Tiny Schedule.app` → **打开** → 在弹窗中再次确认"打开"。后续双击即可正常启动。
+未做 Apple Developer ID 签名与公证，macOS Gatekeeper 会拦截。可任选其一：
+
+- **右键打开（推荐）**：挂载 `.dmg` → 把 `Tiny Schedule.app` 拖入 Applications → 在 Applications 中 **右键** `Tiny Schedule.app` → **打开** → 在弹窗中再次确认"打开"。后续双击即可正常启动。
+- **清除隔离属性（更彻底）**：若右键仍被拦截，先在 Applications 退出 app，然后执行：
+
+  ```bash
+  sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"
+  ```
+
+  之后双击即可正常启动。
 
 **本地冒烟打包**：
 
