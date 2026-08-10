@@ -43,11 +43,5 @@ dmg:
     height: 380
   writeUpdateInfo: false
 
-# 发布到 GitHub Releases（CI 中通过 --publish always 启用）
-# vPrefixedTagName 默认来自 package.json 的 version（即 v${version}），
-# 但我们想用 push 进来的 tag（如 v0.1.0、v0.2.0-beta 等）作为 GitHub Release 的 tag，
-# 因此用 GITHUB_REF_NAME 覆盖。本地跑 release（无 GITHUB_REF_NAME）时回退到 v${version}。
-publish:
-  provider: github
-  vPrefixedTagName: ${env.GITHUB_REF_NAME}
-  releaseType: release
+# 发布由 CI 中的 softprops/action-gh-release 单独处理（避免 electron-builder
+# 用 package.json version 强制覆盖 pushed tag）。本配置仅负责产出 dmg。

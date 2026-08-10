@@ -47,13 +47,25 @@ jobs:
       - name: Build macOS artifacts (electron-builder)
         working-directory: packages/app
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # CSC_LINK / APPLE_ID 等故意不设置 → 不签名 / 不公证
+          # 不设置 GH_TOKEN / --publish never → 不让 electron-builder 自己发布，
+          # 改由下一步 softprops/action-gh-release 用 pushed tag 创建 Release
         run: |
-          bunx electron-builder --mac --publish always \
+          bunx electron-builder --mac --publish never \
             --config electron-builder.yml
 
-      - name: Upload release artifacts
+      - name: Create GitHub Release & upload artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            packages/app/release/*.dmg
+            packages/app/release/*.blockmap
+            packages/app/release/latest-mac.yml
+
+      - name: Upload workflow artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
