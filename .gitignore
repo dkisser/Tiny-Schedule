@@ -11,6 +11,7 @@ graphify-out/
 
 # local tooling
 .qoder/
+.claude/
 .superpowers/
 docs/superpowers/
 # git worktrees

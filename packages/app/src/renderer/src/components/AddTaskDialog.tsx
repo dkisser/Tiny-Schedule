@@ -16,6 +16,10 @@ interface AddTaskDialogProps {
   defaultDueDay?: string;
 }
 
+function hoursToMs(h: number): number {
+  return Math.round(h * 3_600_000);
+}
+
 export function AddTaskDialog({
   open,
   onClose,
@@ -27,6 +31,7 @@ export function AddTaskDialog({
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueDay, setDueDay] = useState('');
+  const [estimate, setEstimate] = useState('');
   const [projectId, setProjectId] = useState(defaultProjectId);
   const [tagIds, setTagIds] = useState<string[]>([]);
 
@@ -35,6 +40,7 @@ export function AddTaskDialog({
     setTitle('');
     setNotes('');
     setDueDay(defaultDueDay ?? '');
+    setEstimate('');
     setProjectId(defaultProjectId);
     setTagIds([]);
   }, [open, defaultProjectId, defaultDueDay]);
@@ -66,6 +72,7 @@ export function AddTaskDialog({
       projectTitle: project.title,
       notes: notes.trim(),
       dueDay: dueDay || undefined,
+      timeEstimate: hoursToMs(Number(estimate) || 0),
       tagIds,
       tagSnapshots: Object.keys(tagSnapshots).length > 0 ? tagSnapshots : undefined,
     });
@@ -92,9 +99,22 @@ export function AddTaskDialog({
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
-          <div>
-            <div className="mb-1 text-xs text-muted-foreground">截止日</div>
-            <Input type="date" value={dueDay} onChange={(e) => setDueDay(e.target.value)} />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">截止日</div>
+              <Input type="date" value={dueDay} onChange={(e) => setDueDay(e.target.value)} />
+            </div>
+            <div>
+              <div className="mb-1 text-xs text-muted-foreground">预估（小时）</div>
+              <Input
+                type="number"
+                min="0"
+                step="0.5"
+                placeholder="0"
+                value={estimate}
+                onChange={(e) => setEstimate(e.target.value)}
+              />
+            </div>
           </div>
           <div>
             <div className="mb-1 text-xs text-muted-foreground">项目</div>
