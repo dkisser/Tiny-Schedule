@@ -6,6 +6,7 @@ import {
   IpcChatEventChannels,
   IpcEventChannels,
   IpcInvokeContract,
+  IpcUiEventChannels,
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import type { DataStore } from '../src/main/dataStore';
@@ -69,7 +70,7 @@ beforeAll(async () => {
 
 const contractChannels = Object.values(IpcInvokeContract).map((e) => e.ch);
 const allChannels = Object.values(Ipc);
-const eventChannels = [...IpcEventChannels, ...IpcChatEventChannels];
+const eventChannels = [...IpcEventChannels, ...IpcChatEventChannels, ...IpcUiEventChannels];
 
 describe('IPC contract', () => {
   test('every channel preload invokes has a handler registered in main (S1)', () => {
@@ -103,7 +104,7 @@ describe('IPC contract', () => {
 
   test('preload api exposes every contract method plus event subscribers', () => {
     const keys = Object.keys(exposedApi as object);
-    const expected = [...Object.keys(IpcInvokeContract), 'onAiEvent', 'onChatEvent'];
+    const expected = [...Object.keys(IpcInvokeContract), 'onAiEvent', 'onChatEvent', 'onNewTask'];
     expect(keys.sort()).toEqual(expected.sort());
   });
 });

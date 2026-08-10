@@ -1,6 +1,7 @@
 import {
   type AiStreamEvent,
   type ChatEvent,
+  Ipc,
   IpcChatEventChannels,
   IpcEventChannels,
   IpcInvokeContract,
@@ -55,6 +56,11 @@ const api: RendererApi = {
     return () => {
       for (const ch of IpcEventChannels) ipcRenderer.removeListener(ch, listener as never);
     };
+  },
+  onNewTask: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on(Ipc.uiNewTask, listener);
+    return () => ipcRenderer.removeListener(Ipc.uiNewTask, listener);
   },
 };
 

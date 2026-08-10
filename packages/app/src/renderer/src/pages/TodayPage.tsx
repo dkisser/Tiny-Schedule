@@ -1,8 +1,7 @@
-import { INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
+import { localDate } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
-import { AddTaskInput } from '../components/AddTaskInput';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
@@ -69,9 +68,6 @@ export function TodayPage() {
       )}
       <div className="mt-4">
         <TaskList tasks={tasks} data={data} activeTaskId={activeTaskId} viewKey="today" />
-      </div>
-      <div className="mt-4">
-        <AddTaskInput projectId={INBOX_PROJECT_ID} addToToday />
       </div>
       {doneTasks.length > 0 && (
         <Collapsible className="mt-4">

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { applySettlement, settleTimer } from '@tiny-schedule/shared';
-import { app, BrowserWindow, dialog } from 'electron';
+import { applySettlement, Ipc, settleTimer } from '@tiny-schedule/shared';
+import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
 import type { Logger } from 'pino';
 import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
@@ -89,6 +89,25 @@ function trackWindow(window: BrowserWindow): void {
   });
 }
 
+function buildMenu(sendNewTask: () => void): Menu {
+  const isMac = process.platform === 'darwin';
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: '文件',
+      submenu: [isMac ? { role: 'close' } : { role: 'quit' }],
+    },
+    {
+      label: '任务',
+      submenu: [{ label: '新建任务', accelerator: 'CmdOrCtrl+N', click: sendNewTask }],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 // macOS Cmd+Q / application-quit paths emit before-quit first; make sure the
 // running-timer confirmation also applies there by routing through the window
 // close handler (or settling directly when no window exists).
@@ -114,6 +133,11 @@ app.whenReady().then(() => {
   if (migrated !== store.get()) store.save(migrated);
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   registerIpcHandlers({ store, logger, getWindow: () => win });
+  Menu.setApplicationMenu(
+    buildMenu(() => {
+      if (win && !win.isDestroyed()) win.webContents.send(Ipc.uiNewTask);
+    }),
+  );
   trackWindow(createWindow());
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

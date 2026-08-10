@@ -36,6 +36,7 @@ export const Ipc = {
   chatStatus: 'chat:status',
   chatDone: 'chat:done',
   chatError: 'chat:error',
+  uiNewTask: 'ui:newTask',
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -427,6 +428,9 @@ export type IpcInvokeHandlers = {
 
 /** Main -> renderer push channels; preload subscribes, main sends. */
 export const IpcEventChannels = [Ipc.aiChunk, Ipc.aiDone, Ipc.aiError] as const;
+
+/** UI push channels (global hotkeys); separate so ai/chat subscribers stay typed. */
+export const IpcUiEventChannels = [Ipc.uiNewTask] as const;
 
 /** AppData sent to the renderer never contains real keys. */
 export function maskDataForRenderer(data: AppData): AppData {

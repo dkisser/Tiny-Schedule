@@ -4,7 +4,7 @@
 
 ## 开发
 
-要求：Node.js >= 20、Bun >= 1.1
+要求：Node.js >= 20、Bun >= 1.2
 
 ```bash
 bun install

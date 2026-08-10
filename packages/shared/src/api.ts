@@ -7,6 +7,7 @@ export type RendererApi = {
 } & {
   onAiEvent(cb: (ev: AiStreamEvent) => void): () => void;
   onChatEvent(cb: (ev: ChatEvent) => void): () => void;
+  onNewTask(cb: () => void): () => void;
 };
 
 export const RENDERER_API_KEY = 'tinyApi';

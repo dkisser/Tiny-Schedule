@@ -1,7 +1,5 @@
-import { INBOX_PROJECT_ID } from '@tiny-schedule/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
-import { AddTaskInput } from './components/AddTaskInput';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
 import { TaskDetail } from './components/TaskDetail';
@@ -33,9 +31,6 @@ function ProjectPage({ projectId }: { projectId: string }) {
           groupDone
           viewKey={viewKey}
         />
-      </div>
-      <div className="mt-4">
-        <AddTaskInput projectId={projectId} />
       </div>
     </div>
   );
@@ -75,9 +70,6 @@ function UpcomingPage() {
           activeTaskId={activeTaskId}
           viewKey="upcoming"
         />
-      </div>
-      <div className="mt-4">
-        <AddTaskInput projectId={INBOX_PROJECT_ID} />
       </div>
     </div>
   );
