@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Tiny Schedule - 本地优先的任务管理 + AI 分析桌面应用",
+  "author": {
+    "name": "dkisser",
+    "email": "noreply@dkisser.dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dkisser/Tiny-Schedule.git"
+  },
+  "homepage": "https://github.com/dkisser/Tiny-Schedule",
   "main": "./out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
