@@ -44,10 +44,10 @@ dmg:
   writeUpdateInfo: false
 
 # 发布到 GitHub Releases（CI 中通过 --publish always 启用）
-# tagName 默认来自 package.json 的 version（即 v${version}），
+# vPrefixedTagName 默认来自 package.json 的 version（即 v${version}），
 # 但我们想用 push 进来的 tag（如 v0.1.0、v0.2.0-beta 等）作为 GitHub Release 的 tag，
 # 因此用 GITHUB_REF_NAME 覆盖。本地跑 release（无 GITHUB_REF_NAME）时回退到 v${version}。
 publish:
   provider: github
-  tagName: ${env.GITHUB_REF_NAME}
+  vPrefixedTagName: ${env.GITHUB_REF_NAME}
   releaseType: release
