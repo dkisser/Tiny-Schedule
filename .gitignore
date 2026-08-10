@@ -15,3 +15,10 @@ graphify-out/
 docs/superpowers/
 # git worktrees
 .worktrees/
+
+# electron-builder 产物
+packages/app/release/
+*.dmg
+*.zip
+*.blockmap
+*.app

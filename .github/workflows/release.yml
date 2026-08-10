@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write                       # 必须：创建 Release + 上传资产
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false             # tag 触发的 job 不应被取消
+
+jobs:
+  release-macos:
+    name: Build & release macOS
+    runs-on: macos-latest               # 必须 mac runner（hdiutil + Xcode CLT）
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+      - name: Build (electron-vite)
+        working-directory: packages/app
+        run: bun run build
+
+      - name: Build macOS artifacts (electron-builder)
+        working-directory: packages/app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # CSC_LINK / APPLE_ID 等故意不设置 → 不签名 / 不公证
+        run: |
+          bunx electron-builder --mac --publish always \
+            --config electron-builder.yml
+
+      - name: Upload release artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tiny-schedule-macos-${{ github.ref_name }}
+          path: packages/app/release/*
+          if-no-files-found: warn
+          retention-days: 30

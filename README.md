@@ -20,6 +20,36 @@ bun run typecheck  # TypeScript 项目引用构建
 bun run build      # 产出 packages/app/out
 ```
 
+## 发布（macOS GitHub Releases）
+
+通过 [electron-builder](https://www.electron.build/) 打包 macOS `.dmg`，由 GitHub Actions 在推送 `v*` tag 时自动发布到 [Releases](https://github.com/dkisser/Tiny-Schedule/releases)。
+
+**打 tag 触发**：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typecheck/test → 用 electron-vite 编译 → 用 electron-builder 产出 `Tiny Schedule-<version>-arm64.dmg` 与 `Tiny Schedule-<version>-x64.dmg` → 自动创建同名 GitHub Release 并上传。
+
+**首次安装（个人未签名）**：
+
+未做 Apple Developer ID 签名与公证，macOS Gatekeeper 默认会拦截。
+下载 `.dmg` 后，挂载 → **右键** `Tiny Schedule.app` → **打开** → 在弹窗中再次确认"打开"。后续双击即可正常启动。
+
+**本地冒烟打包**：
+
+```bash
+bun install
+bun run build
+bun run release:dir   # 仅展开 .app 到 packages/app/release/
+# 或
+bun run release       # 产出 .dmg 到 packages/app/release/，不发布
+```
+
+> `release` 脚本默认 `--publish never`，仅做本地验证；上传到 GitHub Releases 的逻辑只在 CI 中以 `--publish always` 执行。
+
 ## 功能
 
 - 任务管理：项目 / 标签 / 今日 / Upcoming / 子任务 / 计时
