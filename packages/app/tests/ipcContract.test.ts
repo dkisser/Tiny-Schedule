@@ -49,6 +49,7 @@ mock.module('electron', () => ({
     decryptString: (b: Buffer) => b.toString('utf8'),
   },
   dialog: {},
+  shell: { openExternal: async () => {} },
 }));
 
 beforeAll(async () => {
@@ -59,7 +60,7 @@ beforeAll(async () => {
     update: (fn: (current: AppData) => AppData) => fn(data),
   } as unknown as DataStore;
   const logger = { info: () => {}, error: () => {} } as unknown as Logger;
-  registerIpcHandlers({ store, logger, getWindow: () => null });
+  registerIpcHandlers({ store, logger, getWindow: () => null, getVersion: () => '0.0.0' });
   await import('../src/preload/index');
   expect(exposedApi).not.toBeNull();
   // Exercise every exposed method so all preload channels get recorded.
@@ -104,7 +105,13 @@ describe('IPC contract', () => {
 
   test('preload api exposes every contract method plus event subscribers', () => {
     const keys = Object.keys(exposedApi as object);
-    const expected = [...Object.keys(IpcInvokeContract), 'onAiEvent', 'onChatEvent', 'onNewTask'];
+    const expected = [
+      ...Object.keys(IpcInvokeContract),
+      'onAiEvent',
+      'onChatEvent',
+      'onNewTask',
+      'onUpdateAvailable',
+    ];
     expect(keys.sort()).toEqual(expected.sort());
   });
 });

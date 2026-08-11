@@ -37,6 +37,8 @@ const api: RendererApi = {
   chatSend: (req) => ipcRenderer.invoke(IpcInvokeContract.chatSend.ch, req),
   chatContinue: (req) => ipcRenderer.invoke(IpcInvokeContract.chatContinue.ch, req),
   chatStop: (req) => ipcRenderer.invoke(IpcInvokeContract.chatStop.ch, req),
+  appCheckUpdate: () => ipcRenderer.invoke(IpcInvokeContract.appCheckUpdate.ch),
+  appOpenExternal: (req) => ipcRenderer.invoke(IpcInvokeContract.appOpenExternal.ch, req),
   onChatEvent: (cb) => {
     // check-ipc: ok — ch iterates IpcChatEventChannels
     const subs = IpcChatEventChannels.map((ch) => {
@@ -61,6 +63,11 @@ const api: RendererApi = {
     const listener = () => cb();
     ipcRenderer.on(Ipc.uiNewTask, listener);
     return () => ipcRenderer.removeListener(Ipc.uiNewTask, listener);
+  },
+  onUpdateAvailable: (cb) => {
+    const listener = (_e: unknown, result: Parameters<typeof cb>[0]) => cb(result);
+    ipcRenderer.on(Ipc.uiUpdateAvailable, listener);
+    return () => ipcRenderer.removeListener(Ipc.uiUpdateAvailable, listener);
   },
 };
 

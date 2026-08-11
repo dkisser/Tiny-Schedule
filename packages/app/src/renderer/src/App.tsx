@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
+import { api } from './api';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
 import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
+import { UpdateDialog } from './components/UpdateDialog';
 import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks } from './lib/tasks';
 import { AiPage } from './pages/AiPage';
 import { ExportPage } from './pages/ExportPage';
@@ -13,6 +15,7 @@ import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
 import { useTimerStore } from './stores/timer';
 import { useUiStore } from './stores/ui';
+import { useUpdateStore } from './stores/update';
 import { applyTheme } from './theme';
 
 function ProjectPage({ projectId }: { projectId: string }) {
@@ -93,6 +96,9 @@ export default function App() {
     if (theme) applyTheme(theme);
   }, [theme]);
 
+  // Startup update check pushes from main once the renderer is subscribed.
+  useEffect(() => api().onUpdateAvailable((r) => useUpdateStore.getState().notify(r)), []);
+
   if (!data) return <div className="p-4">加载中…</div>;
 
   const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
@@ -115,26 +121,29 @@ export default function App() {
     );
 
   return (
-    <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
-      <div className="flex h-full">
-        <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
-        {/* Animate the panel width so the list reflows in step with it instead
-            of snapping while cards lag behind on their layout animation. */}
-        <AnimatePresence initial={false}>
-          {selectedTask && (
-            <motion.div
-              key="task-detail"
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 380, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
-              className="shrink-0 overflow-hidden"
-            >
-              <TaskDetail key={selectedTask.id} task={selectedTask} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-    </Layout>
+    <>
+      <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
+        <div className="flex h-full">
+          <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
+          {/* Animate the panel width so the list reflows in step with it instead
+              of snapping while cards lag behind on their layout animation. */}
+          <AnimatePresence initial={false}>
+            {selectedTask && (
+              <motion.div
+                key="task-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <TaskDetail key={selectedTask.id} task={selectedTask} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </Layout>
+      <UpdateDialog />
+    </>
   );
 }

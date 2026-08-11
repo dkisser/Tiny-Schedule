@@ -7,10 +7,15 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import { type ProviderDraft, useDataStore } from '../stores/data';
+import { useUpdateStore } from '../stores/update';
 
 export function SettingsPage() {
   const data = useDataStore((s) => s.data);
   const updateSettings = useDataStore((s) => s.updateSettings);
+  const updateStatus = useUpdateStore((s) => s.status);
+  const updateResult = useUpdateStore((s) => s.result);
+  const checkUpdate = useUpdateStore((s) => s.check);
+  const openDialog = useUpdateStore((s) => s.openDialog);
   const [registry, setRegistry] = useState<ProviderInfo[]>([]);
   const [drafts, setDrafts] = useState<ProviderDraft[]>([]);
   const [avatarBroken, setAvatarBroken] = useState(false);
@@ -190,6 +195,33 @@ export function SettingsPage() {
           />
           Finish Day 时自动触发 AI 分析
         </label>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium text-muted-foreground">关于与更新</h2>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <span className="text-sm">当前版本 v{updateResult?.current ?? '—'}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={updateStatus === 'checking'}
+            onClick={() => void checkUpdate()}
+          >
+            {updateStatus === 'checking' ? '检查中…' : '检查更新'}
+          </Button>
+          {updateStatus === 'upToDate' && (
+            <span className="text-sm text-muted-foreground">已是最新版本</span>
+          )}
+          {updateStatus === 'error' && <span className="text-sm text-destructive">检查失败</span>}
+          {updateStatus === 'available' && updateResult && (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              发现新版本 v{updateResult.latest}
+              <Button variant="ghost" size="xs" onClick={() => openDialog()}>
+                查看
+              </Button>
+            </span>
+          )}
+        </div>
       </section>
     </div>
   );

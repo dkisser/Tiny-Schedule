@@ -13,7 +13,7 @@ import {
   localDate,
   maskDataForRenderer,
 } from '@tiny-schedule/shared';
-import { type BrowserWindow, dialog as electronDialog, ipcMain } from 'electron';
+import { type BrowserWindow, dialog as electronDialog, ipcMain, shell } from 'electron';
 import type { Logger } from 'pino';
 import { ChatAgentManager } from './ai/chatAgent';
 import { streamChat, testConnection } from './ai/client';
@@ -24,11 +24,13 @@ import { exportProjectTaskList, exportWorklog } from './exporter';
 import { mergeImport, normalizeBackup } from './importer';
 import { decryptKey, encryptKey } from './keys';
 import { migrateRemoveTodayTag } from './migrations';
+import { checkForUpdate } from './updater';
 
 export interface IpcDeps {
   store: DataStore;
   logger: Logger;
   getWindow: () => BrowserWindow | null;
+  getVersion: () => string;
 }
 
 function masked(data: AppData): AppData {
@@ -41,7 +43,7 @@ function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown):
 }
 
 export function registerIpcHandlers(deps: IpcDeps): void {
-  const { store, logger, getWindow } = deps;
+  const { store, logger, getWindow, getVersion } = deps;
 
   const chatManager = new ChatAgentManager({
     getSessions: () => (store.get().misc.chatSessions ?? []) as ChatSession[],
@@ -421,6 +423,19 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       chatManager.stop(req.sessionId);
       // 等 run 结算（含 aborted 尾部的 persist），渲染端随后 load() 才能看到中断内容
       await chatManager.waitForIdle(req.sessionId);
+    },
+
+    appCheckUpdate: () => checkForUpdate(getVersion()),
+
+    appOpenExternal: async ({ url }) => {
+      // Only https: reaches shell.openExternal; other schemes (file:,
+      // javascript:, ...) are refused so this channel cannot launch local apps.
+      if (!url.startsWith('https://')) {
+        logger.warn({ action: 'app:openExternal', url, blocked: true });
+        return;
+      }
+      await shell.openExternal(url);
+      logger.info({ action: 'app:openExternal', url });
     },
   };
 

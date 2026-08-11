@@ -7,6 +7,7 @@ import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
 import { createLogger } from './logger';
 import { migrateRemoveTodayTag } from './migrations';
+import { startupUpdateCheck } from './updater';
 
 let win: BrowserWindow | null = null;
 let store: DataStore | null = null;
@@ -132,13 +133,31 @@ app.whenReady().then(() => {
   const migrated = migrateRemoveTodayTag(store.get());
   if (migrated !== store.get()) store.save(migrated);
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
-  registerIpcHandlers({ store, logger, getWindow: () => win });
+  registerIpcHandlers({
+    store,
+    logger,
+    getWindow: () => win,
+    getVersion: () => app.getVersion(),
+  });
   Menu.setApplicationMenu(
     buildMenu(() => {
       if (win && !win.isDestroyed()) win.webContents.send(Ipc.uiNewTask);
     }),
   );
-  trackWindow(createWindow());
+  const window = createWindow();
+  trackWindow(window);
+  // did-finish-load anchors the check so the renderer's subscription is up in
+  // dev cold starts; the 5s delay keeps startup traffic off the critical path.
+  window.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (!logger) return;
+      void startupUpdateCheck({
+        getVersion: () => app.getVersion(),
+        getWindow: () => win,
+        logger,
+      });
+    }, 5000);
+  });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       trackWindow(createWindow());

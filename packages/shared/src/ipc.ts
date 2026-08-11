@@ -37,6 +37,9 @@ export const Ipc = {
   chatDone: 'chat:done',
   chatError: 'chat:error',
   uiNewTask: 'ui:newTask',
+  appCheckUpdate: 'app:checkUpdate',
+  appOpenExternal: 'app:openExternal',
+  uiUpdateAvailable: 'ui:updateAvailable',
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -216,6 +219,19 @@ export const ImportRunResultSchema = z.object({
   counts: z.object({ tasks: z.number(), projects: z.number(), tags: z.number() }).optional(),
 });
 export type ImportRunResult = z.infer<typeof ImportRunResultSchema>;
+
+export const CheckUpdateResultSchema = z.object({
+  current: z.string(), // app.getVersion(), present even when offline
+  hasUpdate: z.boolean(),
+  latest: z.string().nullable(), // normalized (no v prefix)
+  url: z.string().nullable(), // release page html_url
+  notes: z.string().nullable(), // release notes, truncated
+  error: z.string().optional(),
+});
+export type CheckUpdateResult = z.infer<typeof CheckUpdateResultSchema>;
+
+export const OpenExternalReqSchema = z.object({ url: z.string().url() });
+export type OpenExternalReq = z.infer<typeof OpenExternalReqSchema>;
 
 export const ProviderInfoSchema = z.object({
   id: z.string(),
@@ -398,6 +414,12 @@ export const IpcInvokeContract = {
     res: null as unknown as { requestId: string } | { error: string },
   },
   chatStop: { ch: Ipc.chatStop, req: ChatStopReqSchema, res: null as unknown as void },
+  appCheckUpdate: { ch: Ipc.appCheckUpdate, res: null as unknown as CheckUpdateResult },
+  appOpenExternal: {
+    ch: Ipc.appOpenExternal,
+    req: OpenExternalReqSchema,
+    res: null as unknown as void,
+  },
 } as const;
 
 export type IpcInvokeKey = keyof typeof IpcInvokeContract;
@@ -430,7 +452,7 @@ export type IpcInvokeHandlers = {
 export const IpcEventChannels = [Ipc.aiChunk, Ipc.aiDone, Ipc.aiError] as const;
 
 /** UI push channels (global hotkeys); separate so ai/chat subscribers stay typed. */
-export const IpcUiEventChannels = [Ipc.uiNewTask] as const;
+export const IpcUiEventChannels = [Ipc.uiNewTask, Ipc.uiUpdateAvailable] as const;
 
 /** AppData sent to the renderer never contains real keys. */
 export function maskDataForRenderer(data: AppData): AppData {
