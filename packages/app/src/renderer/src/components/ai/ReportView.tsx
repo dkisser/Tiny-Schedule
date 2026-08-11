@@ -28,7 +28,7 @@ function CopyButton({ text }: { text: string }) {
         });
       }}
     >
-      {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+      {copied ? <Check /> : <Copy />}
     </Button>
   );
 }
@@ -124,7 +124,7 @@ export function ReportView() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">分析</h1>
         <Button variant="ghost" size="icon" aria-label="对话" onClick={() => setAiView('chat')}>
-          <MessageSquare className="h-4 w-4" />
+          <MessageSquare />
         </Button>
       </div>
       {!hasProvider && (
@@ -163,7 +163,7 @@ export function ReportView() {
           disabled={!hasProvider || running || (scope === 'project' && !projectId)}
           onClick={() => void run()}
         >
-          <Bot className="mr-1 h-4 w-4" />
+          <Bot />
           {running ? '分析中…' : '开始分析'}
         </Button>
         {output && <CopyButton text={output} />}

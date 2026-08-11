@@ -136,35 +136,33 @@ export function ChatView({ onBack }: { onBack: () => void }) {
             aria-label="返回报告"
             onClick={onBack}
           >
-            <ScrollText className="mr-1 h-4 w-4" />
+            <ScrollText />
             报告
           </Button>
-          <div className="flex items-center rounded-md hover:bg-secondary">
-            <button
-              type="button"
+          <div className="flex items-center">
+            <Button
+              variant="ghost"
+              size="sm"
               title="新建会话"
-              className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-sm"
+              className="min-w-0 flex-1 justify-start"
               onClick={() => {
                 // 新建（空白会话复用）后展开列表，确保能看到选中的会话
                 setListOpen(true);
                 void create();
               }}
             >
-              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <Plus />
               <span>会话</span>
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label={listOpen ? '收起会话列表' : '展开会话列表'}
-              className="p-1.5 text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground"
               onClick={() => setListOpen((v) => !v)}
             >
-              {listOpen ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-            </button>
+              {listOpen ? <ChevronDown /> : <ChevronRight />}
+            </Button>
           </div>
         </div>
         {listOpen && (
@@ -178,10 +176,11 @@ export function ChatView({ onBack }: { onBack: () => void }) {
                 onClick={() => select(s.id)}
               >
                 <span className="min-w-0 flex-1 truncate">{s.title || '新会话'}</span>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label="删除会话"
-                  className="hidden text-muted-foreground hover:text-destructive group-hover:block"
+                  className="hidden text-muted-foreground hover:text-destructive group-hover:inline-flex"
                   onClick={(e) => {
                     e.stopPropagation();
                     // 空会话没有可丢失的内容，直接删除
@@ -189,8 +188,8 @@ export function ChatView({ onBack }: { onBack: () => void }) {
                     else setDeleteTarget(s);
                   }}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                  <Trash2 />
+                </Button>
               </div>
             ))}
           </div>
@@ -222,15 +221,16 @@ export function ChatView({ onBack }: { onBack: () => void }) {
                       )}
                     </div>
                     {aborted && isLast && status === 'idle' && (
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         aria-label="重新生成回答"
-                        className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground"
+                        className="self-start text-muted-foreground"
                         onClick={() => void retry()}
                       >
-                        <RotateCw className="h-3.5 w-3.5" />
+                        <RotateCw />
                         重试
-                      </button>
+                      </Button>
                     )}
                   </div>
                 );
@@ -270,12 +270,12 @@ export function ChatView({ onBack }: { onBack: () => void }) {
             />
             {isBusy ? (
               <Button variant="outline" onClick={() => setStopConfirmOpen(true)}>
-                <Square className="mr-1 h-4 w-4" />
+                <Square />
                 停止
               </Button>
             ) : (
               <Button disabled={!hasProvider || !input.trim()} onClick={submit}>
-                <Bot className="mr-1 h-4 w-4" />
+                <Bot />
                 发送
               </Button>
             )}

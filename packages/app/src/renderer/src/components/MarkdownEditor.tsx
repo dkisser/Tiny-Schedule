@@ -79,11 +79,7 @@ export function MarkdownEditor({
           onClick={() => setFullscreen((f) => !f)}
           aria-label={fullscreen ? '退出全屏' : '全屏编辑'}
         >
-          {fullscreen ? (
-            <Minimize2 className="mr-1 h-3 w-3" />
-          ) : (
-            <Maximize2 className="mr-1 h-3 w-3" />
-          )}
+          {fullscreen ? <Minimize2 /> : <Maximize2 />}
           {fullscreen ? '退出全屏' : '全屏'}
         </Button>
         <div className="ml-auto flex gap-2">

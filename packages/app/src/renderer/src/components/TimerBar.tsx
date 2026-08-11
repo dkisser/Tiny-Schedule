@@ -38,7 +38,7 @@ export function TimerBar() {
       aria-label="新建任务"
       onClick={() => setCreateOpen(true)}
     >
-      <Plus className="h-4 w-4" />
+      <Plus />
     </Button>
   );
 
@@ -70,11 +70,11 @@ export function TimerBar() {
       <div className="flex h-12 items-center gap-3 bg-pink-50 px-4 dark:bg-pink-950/40">
         {timer.isPaused ? (
           <Button size="icon-sm" aria-label="继续" onClick={resume}>
-            <Play className="h-4 w-4" />
+            <Play />
           </Button>
         ) : (
           <Button size="icon-sm" aria-label="暂停" onClick={pause}>
-            <Pause className="h-4 w-4" />
+            <Pause />
           </Button>
         )}
         <Button
@@ -83,7 +83,7 @@ export function TimerBar() {
           aria-label="停止并结算"
           onClick={() => void stop()}
         >
-          <Square className="h-3.5 w-3.5" />
+          <Square />
         </Button>
         <div className="min-w-0 flex-1 truncate text-sm font-medium">
           {task?.title ?? timer.taskId}

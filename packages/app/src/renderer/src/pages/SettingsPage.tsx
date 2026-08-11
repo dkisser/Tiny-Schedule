@@ -163,7 +163,7 @@ export function SettingsPage() {
           <div className="flex flex-wrap gap-2">
             {registry.map((r) => (
               <Button key={r.id} variant="outline" size="sm" onClick={() => addProvider(r.id)}>
-                <Plus className="mr-1 h-3 w-3" />
+                <Plus />
                 {r.name}
               </Button>
             ))}

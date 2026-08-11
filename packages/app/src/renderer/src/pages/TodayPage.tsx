@@ -84,7 +84,7 @@ export function TodayPage() {
       )}
       <div className="mt-8 flex justify-center">
         <Button variant="outline" disabled={finishedToday} onClick={() => void handleFinish()}>
-          <CheckCircle2 className="mr-1 h-4 w-4" /> Finish Day
+          <CheckCircle2 /> Finish Day
         </Button>
       </div>
       <FinishDayDialog open={finishOpen} onClose={() => setFinishOpen(false)} />

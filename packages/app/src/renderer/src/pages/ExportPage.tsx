@@ -56,7 +56,7 @@ export function ExportPage() {
           整库导入，将覆盖当前任务/项目/标签数据（设置保留）。导入前会自动备份当前数据。
         </p>
         <Button className="mt-3" onClick={() => void runImport()}>
-          <Upload className="mr-1 h-4 w-4" />
+          <Upload />
           选择备份 JSON
         </Button>
       </section>
@@ -77,7 +77,7 @@ export function ExportPage() {
             ))}
           </select>
           <Button disabled={!projectId} onClick={() => void runExport('projectList')}>
-            <Download className="mr-1 h-4 w-4" />
+            <Download />
             导出 .md
           </Button>
         </div>
@@ -86,7 +86,7 @@ export function ExportPage() {
       <section className="mt-4 rounded-lg border border-border p-4">
         <h2 className="text-sm font-medium">导出工作日志（全部时间）</h2>
         <Button className="mt-3" onClick={() => void runExport('worklog')}>
-          <Download className="mr-1 h-4 w-4" />
+          <Download />
           导出 .md
         </Button>
       </section>

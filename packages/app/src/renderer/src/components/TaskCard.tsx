@@ -8,6 +8,7 @@ import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
+import { Button } from './ui/button';
 
 function formatMs(ms: number): string {
   const m = Math.floor(ms / 60_000);
@@ -75,20 +76,24 @@ export function TaskCard({
       )}
     >
       {dragControls && !task.isDone && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           aria-label="拖动排序"
           onPointerDown={(e) => dragControls.start(e)}
           onClick={(e) => e.stopPropagation()}
-          className="-ml-1 shrink-0 touch-none cursor-grab rounded p-0.5 text-muted-foreground/40 transition-all duration-300 hover:bg-accent/60 hover:text-muted-foreground hover:shadow-md active:cursor-grabbing"
+          className="-ml-1 shrink-0 touch-none cursor-grab text-muted-foreground/40 transition-all duration-300 hover:text-muted-foreground hover:shadow-md active:cursor-grabbing"
         >
-          <GripVertical className="h-4 w-4" />
-        </button>
+          <GripVertical />
+        </Button>
       )}
       <button
         type="button"
         aria-label="完成"
-        className="text-muted-foreground hover:text-foreground"
+        className={cn(
+          'flex size-4 shrink-0 items-center justify-center rounded-full border text-muted-foreground transition-colors hover:text-foreground',
+          task.isDone && 'border-primary bg-primary text-primary-foreground',
+        )}
         onClick={(e) => {
           e.stopPropagation();
           void upsertTask({
@@ -98,12 +103,7 @@ export function TaskCard({
           });
         }}
       >
-        <Check
-          className={cn(
-            'h-4 w-4 rounded-full border p-0.5',
-            task.isDone && 'bg-primary text-primary-foreground',
-          )}
-        />
+        <Check className="h-3 w-3" />
       </button>
       <div className="min-w-0 flex-1">
         <div
@@ -144,8 +144,9 @@ export function TaskCard({
       <div className={cn('flex shrink-0 gap-1', !active && 'opacity-0 group-hover:opacity-100')}>
         {active ? (
           timerPaused ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="继续"
               className="text-pink-500"
               onClick={(e) => {
@@ -153,11 +154,12 @@ export function TaskCard({
                 resumeTimer();
               }}
             >
-              <Play className="h-4 w-4" />
-            </button>
+              <Play />
+            </Button>
           ) : (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon-xs"
               aria-label="暂停"
               className="text-pink-500"
               onClick={(e) => {
@@ -165,12 +167,13 @@ export function TaskCard({
                 pauseTimer();
               }}
             >
-              <Pause className="h-4 w-4" />
-            </button>
+              <Pause />
+            </Button>
           )
         ) : (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
             aria-label="开始计时"
             className="hover:text-pink-500"
             onClick={(e) => {
@@ -178,13 +181,14 @@ export function TaskCard({
               void startTimer(task.id);
             }}
           >
-            <Play className="h-4 w-4" />
-          </button>
+            <Play />
+          </Button>
         )}
         {/* A running timer must not be deleted out from under itself. */}
         {!active && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-xs"
             aria-label="删除"
             className="hover:text-destructive"
             onClick={(e) => {
@@ -193,8 +197,8 @@ export function TaskCard({
               else void deleteTask(task.id);
             }}
           >
-            <Trash2 className="h-4 w-4" />
-          </button>
+            <Trash2 />
+          </Button>
         )}
       </div>
       <DeleteTaskDialog

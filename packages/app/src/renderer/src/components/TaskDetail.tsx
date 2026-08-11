@@ -71,7 +71,7 @@ export function TaskDetail({ task }: { task: Task }) {
     <div className="flex h-full w-[380px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border p-4">
       <div>
         <Button variant="ghost" size="sm" className="-ml-2" onClick={() => selectTask(null)}>
-          <ChevronLeft className="mr-1 h-4 w-4" />
+          <ChevronLeft />
           关闭
         </Button>
       </div>
@@ -163,8 +163,9 @@ export function TaskDetail({ task }: { task: Task }) {
                 {s.title}
               </span>
               {activeTaskId !== s.id && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
                   aria-label="删除子任务"
                   className="ml-auto text-muted-foreground hover:text-destructive"
                   onClick={() => {
@@ -172,8 +173,8 @@ export function TaskDetail({ task }: { task: Task }) {
                     else void deleteTask(s.id);
                   }}
                 >
-                  <X className="h-3 w-3" />
-                </button>
+                  <X />
+                </Button>
               )}
             </div>
           ))}
@@ -186,7 +187,7 @@ export function TaskDetail({ task }: { task: Task }) {
             onKeyDown={(e) => e.key === 'Enter' && void addSubTask()}
           />
           <Button variant="outline" size="icon" aria-label="添加" onClick={() => void addSubTask()}>
-            <Plus className="h-4 w-4" />
+            <Plus />
           </Button>
         </div>
       </div>
@@ -195,13 +196,8 @@ export function TaskDetail({ task }: { task: Task }) {
         <div className="mb-1 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">备注</span>
           {!editingNotes && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-1.5 text-xs"
-              onClick={() => setEditingNotes(true)}
-            >
-              <Pencil className="mr-1 h-3 w-3" />
+            <Button variant="ghost" size="xs" onClick={() => setEditingNotes(true)}>
+              <Pencil />
               编辑
             </Button>
           )}

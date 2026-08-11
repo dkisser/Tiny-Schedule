@@ -161,29 +161,31 @@ export function Sidebar() {
 
   const rowActions = (e: EntityRef, deletable: boolean) => (
     <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-accent group-hover/row:flex">
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon-xs"
         aria-label="改名"
-        className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        className="text-muted-foreground hover:text-foreground"
         onClick={(ev) => {
           ev.stopPropagation();
           beginRename(e);
         }}
       >
-        <Pencil className="h-3 w-3" />
-      </button>
+        <Pencil />
+      </Button>
       {deletable && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="icon-xs"
           aria-label="删除"
-          className="rounded p-0.5 text-muted-foreground hover:text-destructive"
+          className="text-muted-foreground hover:text-destructive"
           onClick={(ev) => {
             ev.stopPropagation();
             setDeleteTarget(e);
           }}
         >
-          <Trash2 className="h-3 w-3" />
-        </button>
+          <Trash2 />
+        </Button>
       )}
     </div>
   );
@@ -194,14 +196,15 @@ export function Sidebar() {
         <ChevronRight className="h-3.5 w-3.5 transition-transform group-data-[state=open]/trig:rotate-90" />
         {title}
       </CollapsibleTrigger>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="icon-xs"
         aria-label={addLabel}
         onClick={() => beginCreate(group)}
-        className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover:opacity-100"
+        className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
       >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
+        <Plus />
+      </Button>
     </div>
   );
 
