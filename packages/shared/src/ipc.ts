@@ -15,6 +15,7 @@ export const Ipc = {
   settingsUpdate: 'settings:update',
   finishDay: 'day:finish',
   timerSync: 'timer:sync',
+  timerChanged: 'timer:changed',
   importRun: 'import:run',
   exportMarkdown: 'export:markdown',
   selectAvatar: 'avatar:select',
@@ -91,6 +92,9 @@ const SettingsSchema = z.object({
   aiProviders: z.array(AiProviderSchema),
   aiPrompt: z.string(),
   autoAiAnalyzeOnFinishDay: z.boolean(),
+  // Defaults backfill legacy persisted settings that predate idle auto-pause.
+  idlePauseEnabled: z.boolean().default(true),
+  idlePauseMinutes: z.number().default(5),
 });
 
 const ActiveTimerSchema = z.object({
@@ -99,6 +103,8 @@ const ActiveTimerSchema = z.object({
   accumulatedMs: z.number(),
   isPaused: z.boolean(),
   pausedAt: z.number().optional(),
+  sessionStartedAt: z.number().optional(),
+  autoPausedBy: z.enum(['sleep', 'idle']).optional(),
 });
 
 const ProjectSchema = z.object({
@@ -189,12 +195,18 @@ export const SettingsUpdateReqSchema = z
     ),
     aiPrompt: z.string(),
     autoAiAnalyzeOnFinishDay: z.boolean(),
+    idlePauseEnabled: z.boolean(),
+    idlePauseMinutes: z.number().int().min(1).max(1440),
   })
   .partial();
 export type SettingsUpdateReq = z.infer<typeof SettingsUpdateReqSchema>;
 
 export const TimerSyncReqSchema = z.object({ timer: ActiveTimerSchema.nullable() });
 export type TimerSyncReq = z.infer<typeof TimerSyncReqSchema>;
+
+/** Main -> renderer push after the main process changes the timer itself. */
+export const TimerChangedEventSchema = ActiveTimerSchema.nullable();
+export type TimerChangedEvent = z.infer<typeof TimerChangedEventSchema>;
 
 export const FinishDayReqSchema = z.object({ date: z.string() });
 export type FinishDayReq = z.infer<typeof FinishDayReqSchema>;
@@ -451,8 +463,8 @@ export type IpcInvokeHandlers = {
 /** Main -> renderer push channels; preload subscribes, main sends. */
 export const IpcEventChannels = [Ipc.aiChunk, Ipc.aiDone, Ipc.aiError] as const;
 
-/** UI push channels (global hotkeys); separate so ai/chat subscribers stay typed. */
-export const IpcUiEventChannels = [Ipc.uiNewTask, Ipc.uiUpdateAvailable] as const;
+/** UI push channels (hotkeys, timer updates); separate so ai/chat subscribers stay typed. */
+export const IpcUiEventChannels = [Ipc.uiNewTask, Ipc.uiUpdateAvailable, Ipc.timerChanged] as const;
 
 /** AppData sent to the renderer never contains real keys. */
 export function maskDataForRenderer(data: AppData): AppData {

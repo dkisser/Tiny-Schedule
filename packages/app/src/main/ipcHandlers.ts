@@ -214,6 +214,10 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         if (patch.autoAiAnalyzeOnFinishDay !== undefined) {
           settings.autoAiAnalyzeOnFinishDay = patch.autoAiAnalyzeOnFinishDay;
         }
+        if (patch.idlePauseEnabled !== undefined)
+          settings.idlePauseEnabled = patch.idlePauseEnabled;
+        if (patch.idlePauseMinutes !== undefined)
+          settings.idlePauseMinutes = patch.idlePauseMinutes;
         if (patch.aiProviders !== undefined) {
           settings.aiProviders = patch.aiProviders.map((p) => {
             const prev = d.settings.aiProviders.find((x) => x.id === p.id);

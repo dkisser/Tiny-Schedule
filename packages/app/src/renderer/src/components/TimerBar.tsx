@@ -88,6 +88,11 @@ export function TimerBar() {
         <div className="min-w-0 flex-1 truncate text-sm font-medium">
           {task?.title ?? timer.taskId}
         </div>
+        {timer.isPaused && timer.autoPausedBy && (
+          <div className="shrink-0 text-xs text-muted-foreground">
+            {timer.autoPausedBy === 'idle' ? '已因空闲自动暂停' : '已因睡眠自动暂停'}
+          </div>
+        )}
         <div className="font-mono text-base tabular-nums text-pink-600 dark:text-pink-400">
           {formatElapsed(elapsed)}
         </div>

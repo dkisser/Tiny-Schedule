@@ -69,6 +69,12 @@ const api: RendererApi = {
     ipcRenderer.on(Ipc.uiUpdateAvailable, listener);
     return () => ipcRenderer.removeListener(Ipc.uiUpdateAvailable, listener);
   },
+  onTimerChanged: (cb) => {
+    const listener = (_e: unknown, timer: Parameters<typeof cb>[0]) => cb(timer);
+    // check-ipc: ok — Ipc.timerChanged constant
+    ipcRenderer.on(Ipc.timerChanged, listener as never);
+    return () => ipcRenderer.removeListener(Ipc.timerChanged, listener as never);
+  },
 };
 
 contextBridge.exposeInMainWorld(RENDERER_API_KEY, api);

@@ -111,6 +111,7 @@ describe('IPC contract', () => {
       'onChatEvent',
       'onNewTask',
       'onUpdateAvailable',
+      'onTimerChanged',
     ];
     expect(keys.sort()).toEqual(expected.sort());
   });

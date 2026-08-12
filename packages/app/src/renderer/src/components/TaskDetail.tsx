@@ -1,11 +1,20 @@
-import { INBOX_PROJECT_ID, SYSTEM_TAG_IDS, type Task } from '@tiny-schedule/shared';
-import { ChevronLeft, Pencil, Plus, X } from 'lucide-react';
+import {
+  applyEntryChange,
+  INBOX_PROJECT_ID,
+  localDate,
+  SYSTEM_TAG_IDS,
+  type Task,
+  type TimeEntry,
+} from '@tiny-schedule/shared';
+import { ChevronLeft, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { blankTask, taskProjectTitle, taskTagLabel } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
+import { DeleteTimeEntryDialog } from './DeleteTimeEntryDialog';
+import { EditTimeEntryDialog } from './EditTimeEntryDialog';
 import { MarkdownEditor } from './MarkdownEditor';
 import { Button } from './ui/button';
 import { Combobox } from './ui/combobox';
@@ -25,6 +34,8 @@ export function TaskDetail({ task }: { task: Task }) {
   const [subTitle, setSubTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
   const [editingNotes, setEditingNotes] = useState(false);
+  const [editEntry, setEditEntry] = useState<TimeEntry | null>(null);
+  const [deleteEntry, setDeleteEntry] = useState<TimeEntry | null>(null);
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
@@ -32,6 +43,17 @@ export function TaskDetail({ task }: { task: Task }) {
   const systemTagIds = Object.values(SYSTEM_TAG_IDS) as string[];
   const tags = Object.values(data.tags).filter((t) => !systemTagIds.includes(t.id));
   const subTasks = task.subTaskIds.map((id) => data.tasks[id]).filter(Boolean) as Task[];
+  const entries = [...task.timeEntries].sort((a, b) => b.end - a.end);
+  const today = localDate(Date.now());
+  const fmtClock = (ts: number) => {
+    const d = new Date(ts);
+    return `${`${d.getHours()}`.padStart(2, '0')}:${`${d.getMinutes()}`.padStart(2, '0')}`;
+  };
+  const fmtDur = (ms: number) => {
+    const m = Math.floor(ms / 60_000);
+    const h = Math.floor(m / 60);
+    return h > 0 ? `${h}h ${m % 60}m` : `${m}m`;
+  };
 
   const addSubTask = async () => {
     const title = subTitle.trim();
@@ -193,6 +215,43 @@ export function TaskDetail({ task }: { task: Task }) {
       </div>
 
       <div>
+        <div className="mb-1 text-xs text-muted-foreground">计时记录</div>
+        {entries.length === 0 ? (
+          <div className="text-sm text-muted-foreground">暂无计时记录</div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            {entries.map((e) => (
+              <div key={`${e.start}-${e.end}`} className="flex items-center gap-2 text-sm">
+                <span className="text-muted-foreground">
+                  {e.date === today ? '今天' : e.date} {fmtClock(e.start)}–{fmtClock(e.end)}
+                </span>
+                <span>{fmtDur(e.ms)}</span>
+                <div className="ml-auto flex gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="编辑计时记录"
+                    onClick={() => setEditEntry(e)}
+                  >
+                    <Pencil />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="删除计时记录"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setDeleteEntry(e)}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
         <div className="mb-1 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">备注</span>
           {!editingNotes && (
@@ -226,6 +285,24 @@ export function TaskDetail({ task }: { task: Task }) {
           if (confirmDelete) void deleteTask(confirmDelete.id);
         }}
         onClose={() => setConfirmDelete(null)}
+      />
+
+      <EditTimeEntryDialog
+        open={editEntry !== null}
+        entry={editEntry}
+        onSave={(next) => {
+          if (editEntry) void upsertTask(applyEntryChange(task, editEntry, next));
+        }}
+        onClose={() => setEditEntry(null)}
+      />
+
+      <DeleteTimeEntryDialog
+        open={deleteEntry !== null}
+        entry={deleteEntry}
+        onConfirm={() => {
+          if (deleteEntry) void upsertTask(applyEntryChange(task, deleteEntry, null));
+        }}
+        onClose={() => setDeleteEntry(null)}
       />
     </div>
   );

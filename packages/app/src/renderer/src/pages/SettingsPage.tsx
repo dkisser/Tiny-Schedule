@@ -5,6 +5,7 @@ import { api } from '../api';
 import { ProviderEditor } from '../components/ProviderEditor';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { Switch } from '../components/ui/switch';
 import { Textarea } from '../components/ui/textarea';
 import { type ProviderDraft, useDataStore } from '../stores/data';
 import { useUpdateStore } from '../stores/update';
@@ -146,6 +147,39 @@ export function SettingsPage() {
               {mode === 'light' ? '浅色' : mode === 'dark' ? '深色' : '跟随系统'}
             </Button>
           ))}
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-sm font-medium text-muted-foreground">计时</h2>
+        <div className="mt-2 flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <Switch
+              checked={settings.idlePauseEnabled}
+              onCheckedChange={(v) => void updateSettings({ idlePauseEnabled: v })}
+            />
+            长时间无操作时自动暂停计时（合盖睡眠时始终自动暂停）
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            无操作超过
+            <Input
+              type="number"
+              min={1}
+              max={1440}
+              className="w-20"
+              disabled={!settings.idlePauseEnabled}
+              defaultValue={settings.idlePauseMinutes}
+              onBlur={(e) => {
+                const v = Number.parseInt(e.target.value, 10);
+                if (Number.isFinite(v) && v >= 1 && v <= 1440) {
+                  void updateSettings({ idlePauseMinutes: v });
+                } else {
+                  e.target.value = String(settings.idlePauseMinutes);
+                }
+              }}
+            />
+            分钟后自动暂停
+          </label>
         </div>
       </section>
 

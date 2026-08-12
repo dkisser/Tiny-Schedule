@@ -1,4 +1,5 @@
 import type { AiStreamEvent, ChatEvent, CheckUpdateResult, IpcInvokeFn, IpcInvokeKey } from './ipc';
+import type { ActiveTimer } from './models';
 
 // Derived from IpcInvokeContract so the renderer-facing signatures can never
 // drift from the request schemas or response types declared in the contract.
@@ -9,6 +10,7 @@ export type RendererApi = {
   onChatEvent(cb: (ev: ChatEvent) => void): () => void;
   onNewTask(cb: () => void): () => void;
   onUpdateAvailable(cb: (result: CheckUpdateResult) => void): () => void;
+  onTimerChanged(cb: (timer: ActiveTimer | null) => void): () => void;
 };
 
 export const RENDERER_API_KEY = 'tinyApi';

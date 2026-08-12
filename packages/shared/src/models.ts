@@ -78,6 +78,8 @@ export interface AppSettings {
   aiProviders: AiProviderConfig[];
   aiPrompt: string; // empty string = use built-in default prompt
   autoAiAnalyzeOnFinishDay: boolean;
+  idlePauseEnabled: boolean;
+  idlePauseMinutes: number;
 }
 
 export interface ActiveTimer {
@@ -86,6 +88,8 @@ export interface ActiveTimer {
   accumulatedMs: number; // ms accumulated from previous segments
   isPaused: boolean;
   pausedAt?: number; // epoch ms when paused
+  sessionStartedAt?: number; // epoch ms of the very first segment; absent in legacy data
+  autoPausedBy?: 'sleep' | 'idle'; // set only by automatic pauses
 }
 
 export interface AppData {
@@ -119,6 +123,8 @@ export function defaultSettings(): AppSettings {
     aiProviders: [],
     aiPrompt: '',
     autoAiAnalyzeOnFinishDay: false,
+    idlePauseEnabled: true,
+    idlePauseMinutes: 5,
   };
 }
 

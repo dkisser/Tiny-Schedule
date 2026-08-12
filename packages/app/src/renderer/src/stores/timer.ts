@@ -46,8 +46,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       if (t) void sync(t);
     }, 30_000);
     const clock = setInterval(() => set({ now: Date.now() }), 1_000);
+    // Main-process auto-pauses (sleep/idle) are authoritative; apply them
+    // immediately so the heartbeat never resyncs a stale running timer.
+    const timerChanged = api().onTimerChanged((timer) => set({ timer, now: Date.now() }));
     void heartbeat;
     void clock; // intervals live for app lifetime
+    void timerChanged;
   },
 
   start: async (taskId) => {

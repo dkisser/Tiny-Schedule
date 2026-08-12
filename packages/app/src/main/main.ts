@@ -7,6 +7,7 @@ import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
 import { createLogger } from './logger';
 import { migrateRemoveTodayTag } from './migrations';
+import { startPowerTimerWatcher } from './powerTimer';
 import { startupUpdateCheck } from './updater';
 
 let win: BrowserWindow | null = null;
@@ -139,6 +140,7 @@ app.whenReady().then(() => {
     getWindow: () => win,
     getVersion: () => app.getVersion(),
   });
+  startPowerTimerWatcher({ store, logger, getWindow: () => win });
   Menu.setApplicationMenu(
     buildMenu(() => {
       if (win && !win.isDestroyed()) win.webContents.send(Ipc.uiNewTask);

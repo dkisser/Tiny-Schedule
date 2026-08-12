@@ -68,6 +68,8 @@ function fixture(): AppData {
       aiProviders: [],
       aiPrompt: '',
       autoAiAnalyzeOnFinishDay: false,
+      idlePauseEnabled: true,
+      idlePauseMinutes: 5,
     },
     activeTimer: null,
   };
