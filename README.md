@@ -1,6 +1,8 @@
-# Tiny-Schedule — Local-First Task Manager with AI Insights
+# Tiny-Schedule
 
 > 本地优先的任务管理 + AI 分析桌面应用，基于 Electron，可一键导入 Super Productivity 备份。
+
+[English](./README.en.md) · [简体中文](#)
 
 [![GitHub release](https://img.shields.io/github/v/release/dkisser/Tiny-Schedule?include_prereleases&sort=semver)](https://github.com/dkisser/Tiny-Schedule/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
@@ -11,33 +13,29 @@
 [![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.2-000000?logo=bun&logoColor=white)](https://bun.sh/)
 [![GitHub stars](https://img.shields.io/github/stars/dkisser/Tiny-Schedule)](https://github.com/dkisser/Tiny-Schedule/stargazers)
 
-[English](#why-tiny-schedule) · [简体中文](#为什么选择-tiny-schedule)
+---
+
+## 目录
+
+- [为什么选择 Tiny-Schedule？](#为什么选择-tiny-schedule)
+- [功能特性](#功能特性)
+- [截图](#截图)
+- [技术栈](#技术栈)
+- [快速上手](#快速上手)
+- [从 Super Productivity 导入](#从-super-productivity-导入)
+- [AI Provider 与自定义 Prompt](#ai-provider-与自定义-prompt)
+- [开发指南](#开发指南)
+- [构建与发布](#构建与发布)
+- [路线图](#路线图)
+- [贡献](#贡献)
+- [许可证](#许可证)
+- [致谢](#致谢)
 
 ---
 
-## Table of Contents
+## 为什么选择 Tiny-Schedule？
 
-- [Why Tiny-Schedule?](#why-tiny-schedule)
-- [Features](#features)
-- [Screenshots](#screenshots)
-- [Tech Stack](#tech-stack)
-- [Quick Start](#quick-start)
-- [Importing from Super Productivity](#importing-from-super-productivity)
-- [AI Providers & Custom Prompts](#ai-providers--custom-prompts)
-- [Development](#development)
-- [Build & Release](#build--release)
-- [Roadmap](#roadmap)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
-
----
-
-## Why Tiny-Schedule?
-
-A local-first Electron desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
-
-如果你想要一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器，Tiny-Schedule 就是为这个场景设计的：
+一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器。
 
 - 📦 **本地优先**：所有任务数据保存在本机 SQLite，不依赖任何云服务（除你显式配置的 AI Provider）。
 - ⌨️ **键盘流**：参考 Super Productivity / Things 的快捷键体验。
@@ -45,7 +43,7 @@ A local-first Electron desktop app for people who want **complete ownership of t
 - 🔁 **可迁移**：完整支持 Super Productivity 备份 JSON 整库导入 + 自动备份，避免数据被锁死。
 - 📤 **可导出**：Markdown 工作日志与项目任务清单，方便贴入 Notion、Obsidian、博客。
 
-### 对比同类产品
+### 与同类产品对比
 
 | 维度 | Tiny-Schedule | Super Productivity | Things 3 | TickTick |
 |---|---|---|---|---|
@@ -58,7 +56,7 @@ A local-first Electron desktop app for people who want **complete ownership of t
 
 ---
 
-## Features
+## 功能特性
 
 ### 📋 任务管理
 - 项目（Project）/ 标签（Tag）/ 今日（Today）/ Upcoming / 子任务
@@ -94,20 +92,20 @@ A local-first Electron desktop app for people who want **complete ownership of t
 
 ---
 
-## Screenshots
+## 截图
 
 > 📌 **截图位**：待补图。提交 PR 时建议放入 `docs/screenshots/` 目录并在此处引用。
 > 推荐尺寸：1280×800 PNG 或 WebP，命名 `today.png` / `ai.png` / `settings.png` / `export.png`。
 
 ```markdown
 <!-- 解除注释后即可生效 -->
-<!-- ![Today](docs/screenshots/today.png) -->
-<!-- ![AI Daily Report](docs/screenshots/ai.png) -->
+<!-- ![今日页](docs/screenshots/today.png) -->
+<!-- ![AI 日报](docs/screenshots/ai.png) -->
 ```
 
 ---
 
-## Tech Stack
+## 技术栈
 
 | 层 | 技术 |
 |---|---|
@@ -120,11 +118,11 @@ A local-first Electron desktop app for people who want **complete ownership of t
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
 | 打包 | electron-builder（DMG, macOS arm64 + x64） |
 | 工具链 | Bun ≥ 1.2 · Biome 2 · TypeScript Project References |
-| 测试 | Bun Test（vitest 风格） |
+| 测试 | Bun Test |
 
 ---
 
-## Quick Start
+## 快速上手
 
 > 仅支持 macOS（GitHub Releases 提供 arm64 / x64 DMG）。其他平台需自行从源码构建。
 
@@ -135,11 +133,11 @@ A local-first Electron desktop app for people who want **complete ownership of t
    - **彻底**：先退出 app，再执行 `sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"`。
 4. 启动后进入 **设置页** → 填入你的 AI Provider（API key、base URL、模型），即可使用 AI 分析。
 
-> 📥 如果你已经在用 Super Productivity，参见下一节 [Importing from Super Productivity](#importing-from-super-productivity)。
+> 📥 如果你已经在用 Super Productivity，参见下一节 [从 Super Productivity 导入](#从-super-productivity-导入)。
 
 ---
 
-## Importing from Super Productivity
+## 从 Super Productivity 导入
 
 Tiny-Schedule 支持 **整库覆盖导入** Super Productivity 的备份 JSON：
 
@@ -152,7 +150,7 @@ Tiny-Schedule 支持 **整库覆盖导入** Super Productivity 的备份 JSON：
 
 ---
 
-## AI Providers & Custom Prompts
+## AI Provider 与自定义 Prompt
 
 在 **设置 → AI Provider** 中可配置：
 
@@ -165,7 +163,7 @@ Tiny-Schedule 支持 **整库覆盖导入** Super Productivity 的备份 JSON：
 
 ---
 
-## Development
+## 开发指南
 
 环境要求：**Node.js ≥ 20**、**Bun ≥ 1.2**
 
@@ -191,7 +189,7 @@ Tiny-Schedule/
 
 ---
 
-## Build & Release
+## 构建与发布
 
 ### 本地构建
 
@@ -231,7 +229,7 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 ---
 
-## Roadmap
+## 路线图
 
 - [ ] Windows / Linux 打包（electron-builder 配置已留位）
 - [ ] 同步层（可选，用户自托管 WebDAV / S3）
@@ -241,7 +239,7 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 ---
 
-## Contributing
+## 贡献
 
 欢迎贡献。开发前请阅读：
 
@@ -253,13 +251,13 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 ---
 
-## License
+## 许可证
 
 [Apache-2.0](./LICENSE) © 2026 dkisser
 
 ---
 
-## Acknowledgments
+## 致谢
 
 - [Super Productivity](https://github.com/johannesjo/super-productivity) — 数据模型与 UX 灵感来源
 - [Electron](https://www.electronjs.org/) · [electron-vite](https://electron-vite.org/) · [electron-builder](https://www.electron.build/)
