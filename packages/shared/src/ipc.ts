@@ -41,6 +41,8 @@ export const Ipc = {
   appCheckUpdate: 'app:checkUpdate',
   appOpenExternal: 'app:openExternal',
   uiUpdateAvailable: 'ui:updateAvailable',
+  notifyPhaseComplete: 'notify:phaseComplete',
+  setAlwaysOnTopWindow: 'window:setAlwaysOnTop',
 } as const;
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
@@ -105,6 +107,12 @@ const ActiveTimerSchema = z.object({
   pausedAt: z.number().optional(),
   sessionStartedAt: z.number().optional(),
   autoPausedBy: z.enum(['sleep', 'idle']).optional(),
+  mode: z.enum(['free', 'pomodoro']).optional(),
+  phase: z.enum(['focus', 'break']).optional(),
+  phaseStartedAt: z.number().optional(),
+  phaseAccumulatedMs: z.number().optional(),
+  phaseDurationMs: z.number().optional(),
+  cyclesCompleted: z.number().int().min(0).optional(),
 });
 
 const ProjectSchema = z.object({
@@ -244,6 +252,18 @@ export type CheckUpdateResult = z.infer<typeof CheckUpdateResultSchema>;
 
 export const OpenExternalReqSchema = z.object({ url: z.string().url() });
 export type OpenExternalReq = z.infer<typeof OpenExternalReqSchema>;
+
+export const NotifyPhaseCompleteReqSchema = z.object({
+  phase: z.enum(['focus', 'break']),
+  title: z.string().min(1),
+  body: z.string().min(1),
+});
+export type NotifyPhaseCompleteReq = z.infer<typeof NotifyPhaseCompleteReqSchema>;
+
+export const SetAlwaysOnTopWindowReqSchema = z.object({
+  enabled: z.boolean(),
+});
+export type SetAlwaysOnTopWindowReq = z.infer<typeof SetAlwaysOnTopWindowReqSchema>;
 
 export const ProviderInfoSchema = z.object({
   id: z.string(),
@@ -430,6 +450,16 @@ export const IpcInvokeContract = {
   appOpenExternal: {
     ch: Ipc.appOpenExternal,
     req: OpenExternalReqSchema,
+    res: null as unknown as void,
+  },
+  notifyPhaseComplete: {
+    ch: Ipc.notifyPhaseComplete,
+    req: NotifyPhaseCompleteReqSchema,
+    res: null as unknown as void,
+  },
+  setAlwaysOnTopWindow: {
+    ch: Ipc.setAlwaysOnTopWindow,
+    req: SetAlwaysOnTopWindowReqSchema,
     res: null as unknown as void,
   },
 } as const;

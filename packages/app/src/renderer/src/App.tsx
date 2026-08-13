@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
+import { Toaster } from 'sonner';
 import { api } from './api';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
 import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
+import { PomodoroPhaseDialog } from './components/timer/PomodoroPhaseDialog';
 import { UpdateDialog } from './components/UpdateDialog';
 import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks } from './lib/tasks';
 import { AiPage } from './pages/AiPage';
@@ -144,6 +146,12 @@ export default function App() {
         </div>
       </Layout>
       <UpdateDialog />
+      <PomodoroPhaseDialog />
+      <Toaster
+        position="bottom-right"
+        theme={theme === 'dark' ? 'dark' : 'light'}
+        toastOptions={{ className: 'text-sm' }}
+      />
     </>
   );
 }

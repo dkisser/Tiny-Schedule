@@ -82,6 +82,9 @@ export interface AppSettings {
   idlePauseMinutes: number;
 }
 
+export type TimerMode = 'free' | 'pomodoro';
+export type PomodoroPhase = 'focus' | 'break';
+
 export interface ActiveTimer {
   taskId: string;
   startedAt: number; // epoch ms of current running segment
@@ -90,6 +93,13 @@ export interface ActiveTimer {
   pausedAt?: number; // epoch ms when paused
   sessionStartedAt?: number; // epoch ms of the very first segment; absent in legacy data
   autoPausedBy?: 'sleep' | 'idle'; // set only by automatic pauses
+  // Pomodoro fields (all optional; absent => free-mode timer).
+  mode?: TimerMode; // absent on legacy data => treated as 'free'
+  phase?: PomodoroPhase; // current phase when mode === 'pomodoro'
+  phaseStartedAt?: number; // epoch ms when the current phase segment started (mirrors startedAt)
+  phaseAccumulatedMs?: number; // ms accumulated in current phase from previous segments (mirrors accumulatedMs)
+  phaseDurationMs?: number; // target length of the current phase
+  cyclesCompleted?: number; // number of focus phases completed in this session
 }
 
 export interface AppData {

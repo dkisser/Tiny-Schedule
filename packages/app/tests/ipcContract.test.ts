@@ -50,6 +50,12 @@ mock.module('electron', () => ({
   },
   dialog: {},
   shell: { openExternal: async () => {} },
+  Notification: class {
+    static isSupported() {
+      return false;
+    }
+    show() {}
+  },
 }));
 
 beforeAll(async () => {

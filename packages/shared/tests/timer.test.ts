@@ -1,16 +1,24 @@
 import { describe, expect, test } from 'bun:test';
-import type { Task } from '../src/models';
+import type { ActiveTimer, Task } from '../src/models';
 import {
   addDays,
+  advancePomodoroPhase,
   applyEntryChange,
   applySettlement,
   autoPauseTimer,
   computeElapsed,
+  computePhaseElapsed,
   idleThresholdReached,
+  isPhaseComplete,
+  isPomodoro,
   localDate,
+  POMODORO_BREAK_MS,
+  POMODORO_CYCLES_PER_SET,
+  POMODORO_FOCUS_MS,
   pauseTimer,
   resumeTimer,
   settleTimer,
+  startPomodoroFocus,
   startTimer,
 } from '../src/timer';
 
@@ -255,5 +263,116 @@ describe('idleThresholdReached', () => {
   test('true at and above the threshold', () => {
     expect(idleThresholdReached(settings, 5 * 60_000)).toBe(true);
     expect(idleThresholdReached(settings, 60 * 60_000)).toBe(true);
+  });
+});
+
+describe('pomodoro', () => {
+  test('startPomodoroFocus sets focus phase and counter 0', () => {
+    const t = startPomodoroFocus('task1', T0);
+    expect(t.mode).toBe('pomodoro');
+    expect(t.phase).toBe('focus');
+    expect(t.phaseStartedAt).toBe(T0);
+    expect(t.phaseAccumulatedMs).toBe(0);
+    expect(t.phaseDurationMs).toBe(POMODORO_FOCUS_MS);
+    expect(t.cyclesCompleted).toBe(0);
+    expect(isPomodoro(t)).toBe(true);
+  });
+
+  test('isPomodoro returns false for free and legacy timers', () => {
+    expect(isPomodoro(startTimer('task1', T0))).toBe(false);
+    // legacy data without mode field
+    expect(isPomodoro({ ...startTimer('task1', T0) } as ActiveTimer)).toBe(false);
+  });
+
+  test('isPhaseComplete flips true after the focus duration elapses', () => {
+    const t = startPomodoroFocus('task1', T0);
+    expect(isPhaseComplete(t, T0 + POMODORO_FOCUS_MS - 1)).toBe(false);
+    expect(isPhaseComplete(t, T0 + POMODORO_FOCUS_MS)).toBe(true);
+    expect(isPhaseComplete(t, T0 + POMODORO_FOCUS_MS + 60_000)).toBe(true);
+  });
+
+  test('computePhaseElapsed excludes paused time', () => {
+    let t = startPomodoroFocus('task1', T0);
+    // run 10 min, pause, wait 5 min, resume, run 3 min => phase elapsed = 13 min
+    t = pauseTimer(t, T0 + 10 * 60_000);
+    expect(computePhaseElapsed(t, T0 + 15 * 60_000)).toBe(10 * 60_000);
+    t = resumeTimer(t, T0 + 15 * 60_000);
+    expect(computePhaseElapsed(t, T0 + 18 * 60_000)).toBe(13 * 60_000);
+  });
+
+  test('pause folds phase clock the same way as segment clock', () => {
+    const t = startPomodoroFocus('task1', T0);
+    const paused = pauseTimer(t, T0 + 5 * 60_000);
+    expect(paused.phaseAccumulatedMs).toBe(5 * 60_000);
+    expect(paused.phaseStartedAt).toBe(T0 + 5 * 60_000);
+    // frozen during pause
+    expect(computePhaseElapsed(paused, T0 + 30 * 60_000)).toBe(5 * 60_000);
+    // resumes from where it left off
+    const resumed = resumeTimer(paused, T0 + 6 * 60_000);
+    expect(resumed.phaseAccumulatedMs).toBe(5 * 60_000);
+    expect(resumed.phaseStartedAt).toBe(T0 + 6 * 60_000);
+    expect(computePhaseElapsed(resumed, T0 + 9 * 60_000)).toBe(8 * 60_000);
+  });
+
+  test('pause on a free-mode timer does not touch phase fields', () => {
+    const t = startTimer('task1', T0);
+    const paused = pauseTimer(t, T0 + 30_000);
+    expect(paused.phaseStartedAt).toBeUndefined();
+    expect(paused.phaseAccumulatedMs).toBeUndefined();
+  });
+
+  test('advance focus→break increments cyclesCompleted and resets only the phase clock', () => {
+    const t = startPomodoroFocus('task1', T0);
+    const r = advancePomodoroPhase(t, T0 + POMODORO_FOCUS_MS);
+    expect(r.setComplete).toBe(false);
+    expect(r.finishedPhase).toBe('focus');
+    expect(r.next.phase).toBe('break');
+    expect(r.next.cyclesCompleted).toBe(1);
+    expect(r.next.phaseDurationMs).toBe(POMODORO_BREAK_MS);
+    expect(r.next.phaseStartedAt).toBe(T0 + POMODORO_FOCUS_MS);
+    expect(r.next.phaseAccumulatedMs).toBe(0);
+    // Session clock keeps running so the entire pomodoro span settles as one entry.
+    expect(r.next.startedAt).toBe(T0);
+    expect(r.next.accumulatedMs).toBe(0);
+    expect(r.next.isPaused).toBe(false);
+  });
+
+  test('advance break→focus does not change cyclesCompleted', () => {
+    let t = startPomodoroFocus('task1', T0);
+    t = advancePomodoroPhase(t, T0 + POMODORO_FOCUS_MS).next; // → break, cycles=1
+    const r = advancePomodoroPhase(t, T0 + POMODORO_FOCUS_MS + POMODORO_BREAK_MS);
+    expect(r.setComplete).toBe(false);
+    expect(r.finishedPhase).toBe('break');
+    expect(r.next.phase).toBe('focus');
+    expect(r.next.cyclesCompleted).toBe(1); // unchanged
+  });
+
+  test('after the 4th focus the timer pauses with setComplete=true', () => {
+    let t = startPomodoroFocus('task1', T0);
+    let now = T0;
+    for (let i = 0; i < POMODORO_CYCLES_PER_SET - 1; i++) {
+      now += POMODORO_FOCUS_MS;
+      t = advancePomodoroPhase(t, now).next; // → break (i < 3)
+      now += POMODORO_BREAK_MS;
+      t = advancePomodoroPhase(t, now).next; // → focus
+    }
+    // We're now at the start of the 4th focus. Run it to completion.
+    now += POMODORO_FOCUS_MS;
+    const r = advancePomodoroPhase(t, now);
+    expect(r.setComplete).toBe(true);
+    expect(r.finishedPhase).toBe('focus');
+    expect(r.next.phase).toBe('focus'); // stays on focus; renderer decides
+    expect(r.next.cyclesCompleted).toBe(POMODORO_CYCLES_PER_SET);
+    expect(r.next.isPaused).toBe(true);
+    expect(r.next.pausedAt).toBe(now);
+  });
+
+  test('legacy timer (no mode field) ignores pomodoro helpers', () => {
+    const legacy = startTimer('task1', T0);
+    expect(isPhaseComplete(legacy, T0 + 1_000_000)).toBe(false);
+    expect(computePhaseElapsed(legacy, T0 + 1_000_000)).toBe(0);
+    const r = advancePomodoroPhase(legacy, T0 + 1_000_000);
+    expect(r.next).toBe(legacy);
+    expect(r.setComplete).toBe(false);
   });
 });

@@ -8,6 +8,7 @@ import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
 import { DeleteTaskDialog } from './DeleteTaskDialog';
+import { openStartModeToast } from './timer/StartTimerModeToast';
 import { Button } from './ui/button';
 
 function formatMs(ms: number): string {
@@ -43,7 +44,6 @@ export function TaskCard({
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
-  const startTimer = useTimerStore((s) => s.start);
   const pauseTimer = useTimerStore((s) => s.pause);
   const resumeTimer = useTimerStore((s) => s.resume);
   const timerPaused = useTimerStore((s) => (active ? (s.timer?.isPaused ?? false) : false));
@@ -178,7 +178,7 @@ export function TaskCard({
             className="hover:text-pink-500"
             onClick={(e) => {
               e.stopPropagation();
-              void startTimer(task.id);
+              openStartModeToast(task.id);
             }}
           >
             <Play />

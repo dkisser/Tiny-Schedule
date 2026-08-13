@@ -39,6 +39,8 @@ const api: RendererApi = {
   chatStop: (req) => ipcRenderer.invoke(IpcInvokeContract.chatStop.ch, req),
   appCheckUpdate: () => ipcRenderer.invoke(IpcInvokeContract.appCheckUpdate.ch),
   appOpenExternal: (req) => ipcRenderer.invoke(IpcInvokeContract.appOpenExternal.ch, req),
+  notifyPhaseComplete: (req) => ipcRenderer.invoke(IpcInvokeContract.notifyPhaseComplete.ch, req),
+  setAlwaysOnTopWindow: (req) => ipcRenderer.invoke(IpcInvokeContract.setAlwaysOnTopWindow.ch, req),
   onChatEvent: (cb) => {
     // check-ipc: ok — ch iterates IpcChatEventChannels
     const subs = IpcChatEventChannels.map((ch) => {

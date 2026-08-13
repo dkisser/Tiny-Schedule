@@ -13,7 +13,13 @@ import {
   localDate,
   maskDataForRenderer,
 } from '@tiny-schedule/shared';
-import { type BrowserWindow, dialog as electronDialog, ipcMain, shell } from 'electron';
+import {
+  type BrowserWindow,
+  dialog as electronDialog,
+  ipcMain,
+  Notification,
+  shell,
+} from 'electron';
 import type { Logger } from 'pino';
 import { ChatAgentManager } from './ai/chatAgent';
 import { streamChat, testConnection } from './ai/client';
@@ -440,6 +446,30 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       }
       await shell.openExternal(url);
       logger.info({ action: 'app:openExternal', url });
+    },
+
+    notifyPhaseComplete: ({ phase, title, body }) => {
+      // Use the OS notification so the user gets a sound + center-screen
+      // banner even if the renderer is hidden or the user is on another
+      // desktop. Notification is supported on macOS/Windows out of the box;
+      // on Linux it depends on libnotify.
+      if (!Notification.isSupported()) {
+        logger.warn({ action: 'notify:phaseComplete', phase, supported: false });
+        return;
+      }
+      const n = new Notification({ title, body, silent: false });
+      n.show();
+      logger.info({ action: 'notify:phaseComplete', phase });
+    },
+
+    setAlwaysOnTopWindow: ({ enabled }) => {
+      const win = getWindow();
+      if (!win || win.isDestroyed()) return;
+      // 'screen-saver' floats above full-screen apps on macOS; 'floating'
+      // is sufficient on Windows / Linux and avoids stealing focus.
+      win.setAlwaysOnTop(enabled, enabled ? 'floating' : 'normal');
+      if (enabled) win.show();
+      logger.info({ action: 'window:setAlwaysOnTop', enabled });
     },
   };
 
