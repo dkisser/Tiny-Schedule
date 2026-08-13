@@ -1,8 +1,8 @@
 # Tiny-Schedule
 
-> 本地优先的任务管理 + AI 分析桌面应用，基于 Electron，可一键导入 Super Productivity 备份。
+> A local-first task manager + AI-powered desktop app built on Electron. One-click import from Super Productivity backups.
 
-[English](./README.en.md) · [简体中文](#)
+[简体中文](./README.zh-CN.md) · [English](#)
 
 [![GitHub release](https://img.shields.io/github/v/release/dkisser/Tiny-Schedule?include_prereleases&sort=semver)](https://github.com/dkisser/Tiny-Schedule/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
@@ -15,255 +15,255 @@
 
 ---
 
-## 目录
+## Table of Contents
 
-- [为什么选择 Tiny-Schedule？](#为什么选择-tiny-schedule)
-- [功能特性](#功能特性)
-- [截图](#截图)
-- [技术栈](#技术栈)
-- [快速上手](#快速上手)
-- [从 Super Productivity 导入](#从-super-productivity-导入)
-- [AI Provider 与自定义 Prompt](#ai-provider-与自定义-prompt)
-- [开发指南](#开发指南)
-- [构建与发布](#构建与发布)
-- [路线图](#路线图)
-- [贡献](#贡献)
-- [许可证](#许可证)
-- [致谢](#致谢)
+- [Why Tiny-Schedule?](#why-tiny-schedule)
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [Importing from Super Productivity](#importing-from-super-productivity)
+- [AI Providers & Custom Prompts](#ai-providers--custom-prompts)
+- [Development](#development)
+- [Build & Release](#build--release)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ---
 
-## 为什么选择 Tiny-Schedule？
+## Why Tiny-Schedule?
 
-一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器。
+A local-first Electron desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
 
-- 📦 **本地优先**：所有任务数据保存在本机 SQLite，不依赖任何云服务（除你显式配置的 AI Provider）。
-- ⌨️ **键盘流**：参考 Super Productivity / Things 的快捷键体验。
-- 🤖 **AI 复盘**：多 Provider OpenAI 兼容接口（OpenAI / DeepSeek / 任意兼容 endpoint），一键生成日报、周报。
-- 🔁 **可迁移**：完整支持 Super Productivity 备份 JSON 整库导入 + 自动备份，避免数据被锁死。
-- 📤 **可导出**：Markdown 工作日志与项目任务清单，方便贴入 Notion、Obsidian、博客。
+- 📦 **Local-first**: All task data lives in a local SQLite database. No cloud required (except your explicitly configured AI provider).
+- ⌨️ **Keyboard-driven**: Inspired by Super Productivity and Things.
+- 🤖 **AI insights**: Multiple OpenAI-compatible providers (OpenAI, DeepSeek, Azure, self-hosted, Ollama). One-click daily/weekly reports.
+- 🔁 **Portable**: Full backup-JSON import from Super Productivity with auto-backup. Never get locked in.
+- 📤 **Exportable**: Markdown worklogs and project task lists — drop into Notion, Obsidian, or your blog.
 
-### 与同类产品对比
+### Comparison
 
-| 维度 | Tiny-Schedule | Super Productivity | Things 3 | TickTick |
+| Aspect | Tiny-Schedule | Super Productivity | Things 3 | TickTick |
 |---|---|---|---|---|
-| 本地优先 | ✅ | ✅ | ✅ | ❌（强制云） |
-| AI 日报/周报 | ✅ 多 Provider | ❌ | ❌ | ⚠️ 限定云 |
-| Super Productivity 迁移 | ✅ 整库导入 | — | ❌ | ❌ |
-| Markdown 导出 | ✅ | ⚠️ | ⚠️ | ⚠️ |
-| 开源 | ✅ Apache-2.0 | ✅ MIT | ❌ | ❌ |
-| 平台 | macOS | 全平台 | macOS / iOS | 全平台 |
+| Local-first | ✅ | ✅ | ✅ | ❌ Cloud-only |
+| AI daily/weekly reports | ✅ Multi-provider | ❌ | ❌ | ⚠️ Cloud-only |
+| Super Productivity migration | ✅ Full import | — | ❌ | ❌ |
+| Markdown export | ✅ | ⚠️ | ⚠️ | ⚠️ |
+| Open source | ✅ Apache-2.0 | ✅ MIT | ❌ | ❌ |
+| Platform | macOS | Cross-platform | macOS / iOS | Cross-platform |
 
 ---
 
-## 功能特性
+## Features
 
-### 📋 任务管理
-- 项目（Project）/ 标签（Tag）/ 今日（Today）/ Upcoming / 子任务
-- 子任务层级、子任务完成进度
-- 任务备注、重复任务
-- 拖拽排序
+### 📋 Task management
+- Projects / Tags / Today / Upcoming / Subtasks
+- Subtask hierarchy and completion progress
+- Notes and recurring tasks
+- Drag-to-reorder
 
-### ⏱ 计时 / 时间追踪
-- 单任务计时（Active Timer），窗口/系统休眠时自动暂停
-- 时间历史可回溯、可统计
+### ⏱ Time tracking
+- Per-task active timer; auto-pauses on window hide / system sleep
+- Time history with review and stats
 
-### 🤖 AI 分析
-- 日报、周期复盘
-- 多 OpenAI 兼容 Provider（设置页配置 API key、base URL、模型）
-- 自定义 Prompt 模板
-- 流式输出、对话视图
+### 🤖 AI analysis
+- Daily reports, periodic reviews
+- Multiple OpenAI-compatible providers (configure API key, base URL, model in Settings)
+- Custom prompt templates
+- Streaming output with chat-style view
 
-### 📥 导入
-- Super Productivity 备份 JSON 整库覆盖导入
-- 导入前自动备份当前数据
+### 📥 Import
+- Full Super Productivity backup-JSON import
+- Auto-backup before overwriting
 
-### 📤 导出
-- Markdown 项目任务清单
-- Markdown 工作日志（含计时明细）
+### 📤 Export
+- Markdown project task list
+- Markdown worklog (with timer details)
 
-### 🎨 主题
-- Light / Dark / 跟随系统
-- UI 规范统一（按钮、图标、间距，见 `docs/ui-guidelines.md`）
+### 🎨 Theme
+- Light / Dark / Follow system
+- Unified UI conventions (buttons, icons, spacing — see `docs/ui-guidelines.md`)
 
-### ⚙️ 其他
-- 设置页：用户信息、AI Provider、自定义 Prompt
-- 自动更新检查（macOS GitHub Releases）
+### ⚙️ Misc
+- Settings page: user info, AI providers, custom prompts
+- Auto-update checks against GitHub Releases
 
 ---
 
-## 截图
+## Screenshots
 
-> 📌 **截图位**：待补图。提交 PR 时建议放入 `docs/screenshots/` 目录并在此处引用。
-> 推荐尺寸：1280×800 PNG 或 WebP，命名 `today.png` / `ai.png` / `settings.png` / `export.png`。
+> 📌 **Screenshot placeholders.** When contributing, drop images into `docs/screenshots/` and reference them here.
+> Recommended size: 1280×800 PNG or WebP. Suggested names: `today.png` / `ai.png` / `settings.png` / `export.png`.
 
 ```markdown
-<!-- 解除注释后即可生效 -->
-<!-- ![今日页](docs/screenshots/today.png) -->
-<!-- ![AI 日报](docs/screenshots/ai.png) -->
+<!-- Uncomment after dropping images -->
+<!-- ![Today](docs/screenshots/today.png) -->
+<!-- ![AI Daily Report](docs/screenshots/ai.png) -->
 ```
 
 ---
 
-## 技术栈
+## Tech Stack
 
-| 层 | 技术 |
+| Layer | Tech |
 |---|---|
-| 桌面壳 | [Electron 43](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/) |
-| 渲染层 | React 19 + TypeScript 5.7 |
-| 样式 | Tailwind CSS 4 + Radix UI + lucide-react |
-| 状态 | Zustand 5 |
-| 数据 | 本机 SQLite（通过 IPC） |
-| AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)（多 Provider OpenAI 兼容） |
+| Desktop shell | [Electron 43](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/) |
+| Renderer | React 19 + TypeScript 5.7 |
+| Styling | Tailwind CSS 4 + Radix UI + lucide-react |
+| State | Zustand 5 |
+| Data | Local SQLite (via IPC) |
+| AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) (multi-provider, OpenAI-compatible) |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
-| 打包 | electron-builder（DMG, macOS arm64 + x64） |
-| 工具链 | Bun ≥ 1.2 · Biome 2 · TypeScript Project References |
-| 测试 | Bun Test |
+| Packaging | electron-builder (DMG, macOS arm64 + x64) |
+| Toolchain | Bun ≥ 1.2 · Biome 2 · TypeScript Project References |
+| Testing | Bun Test |
 
 ---
 
-## 快速上手
+## Quick Start
 
-> 仅支持 macOS（GitHub Releases 提供 arm64 / x64 DMG）。其他平台需自行从源码构建。
+> macOS only (GitHub Releases ship arm64 + x64 DMGs). Other platforms require building from source.
 
-1. 进入 [Releases](https://github.com/dkisser/Tiny-Schedule/releases) 下载最新 `.dmg`。
-2. 挂载 DMG，把 `Tiny Schedule.app` 拖入 Applications。
-3. 首次启动可能遇到 Gatekeeper 拦截：
-   - **推荐**：在 Applications 中 **右键** `Tiny Schedule.app` → **打开** → 确认"打开"。
-   - **彻底**：先退出 app，再执行 `sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"`。
-4. 启动后进入 **设置页** → 填入你的 AI Provider（API key、base URL、模型），即可使用 AI 分析。
+1. Go to [Releases](https://github.com/dkisser/Tiny-Schedule/releases) and download the latest `.dmg`.
+2. Mount the DMG and drag `Tiny Schedule.app` into Applications.
+3. On first launch, macOS Gatekeeper may block the unsigned app:
+   - **Recommended**: In Applications, **right-click** `Tiny Schedule.app` → **Open** → confirm.
+   - **Permanent fix**: Quit the app first, then run `sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"`.
+4. Open **Settings** → fill in your AI provider (API key, base URL, model) to enable AI analysis.
 
-> 📥 如果你已经在用 Super Productivity，参见下一节 [从 Super Productivity 导入](#从-super-productivity-导入)。
-
----
-
-## 从 Super Productivity 导入
-
-Tiny-Schedule 支持 **整库覆盖导入** Super Productivity 的备份 JSON：
-
-1. 在 Super Productivity 中导出备份 JSON（设置 → 备份）。
-2. 在 Tiny-Schedule 设置页选择"导入"，选择该 JSON。
-3. 应用会自动备份当前数据，再覆盖导入 SP 数据。
-4. 完成后任务、项目、标签、子任务、计时历史即可使用。
-
-> ⚠️ 导入为**整库覆盖**，不是增量合并；导入前会自动备份，必要时可回滚。
+> 📥 Already on Super Productivity? See [Importing from Super Productivity](#importing-from-super-productivity).
 
 ---
 
-## AI Provider 与自定义 Prompt
+## Importing from Super Productivity
 
-在 **设置 → AI Provider** 中可配置：
+Tiny-Schedule supports **full-database import** of Super Productivity backup JSON:
 
-- **多 Provider**：任意 OpenAI 兼容接口（OpenAI、DeepSeek、Azure OpenAI、自部署、Ollama 等）。
-- **API key / base URL / 模型** 自由组合。
-- **测试连接**：内置连通性测试按钮。
-- **自定义 Prompt**：日报、周报、复盘 prompt 均可自定义。
+1. In Super Productivity, export a backup JSON (Settings → Backup).
+2. In Tiny-Schedule, open Settings → Import and pick that JSON.
+3. Tiny-Schedule auto-backs up your current data, then overwrites with SP data.
+4. Tasks, projects, tags, subtasks, and timer history become available immediately.
 
-应用内置的 Chat 视图采用流式输出，逐块渲染，体验接近 ChatGPT。
+> ⚠️ Import is **whole-database replace**, not a merge. Auto-backup happens before the overwrite; you can roll back if needed.
 
 ---
 
-## 开发指南
+## AI Providers & Custom Prompts
 
-环境要求：**Node.js ≥ 20**、**Bun ≥ 1.2**
+In **Settings → AI Provider**:
+
+- **Multi-provider**: any OpenAI-compatible endpoint (OpenAI, DeepSeek, Azure OpenAI, self-hosted, Ollama).
+- **API key / base URL / model** combinations.
+- **Connection test** button built in.
+- **Custom prompts**: define your own daily/weekly/review templates.
+
+The built-in chat view streams output chunk-by-chunk, ChatGPT-style.
+
+---
+
+## Development
+
+Requires **Node.js ≥ 20** and **Bun ≥ 1.2**.
 
 ```bash
 bun install
-bun run dev        # 启动 Electron 开发环境
-bun test           # 运行全部测试
-bun run lint       # Biome 检查
-bun run typecheck  # TypeScript 项目引用构建
+bun run dev        # launch Electron dev environment
+bun test           # run all tests
+bun run lint       # Biome check
+bun run typecheck  # TypeScript project references
 ```
 
-仓库采用 monorepo 形式（bun workspaces）：
+This is a Bun-workspaces monorepo:
 
 ```
 Tiny-Schedule/
 ├── packages/
-│   ├── app/      # Electron 主进程 + 渲染层
-│   └── shared/   # 共享类型（Zod schemas）
-├── scripts/      # 仓库级脚本（IPC 字面量校验等）
-├── docs/         # UI 规范、设计稿
-└── .github/      # GitHub Actions（仅 release.yml）
+│   ├── app/      # Electron main + renderer
+│   └── shared/   # Shared types (Zod schemas)
+├── scripts/      # Repo-level scripts (e.g. IPC literal checks)
+├── docs/         # UI conventions, design notes
+└── .github/      # GitHub Actions (release.yml only)
 ```
 
 ---
 
-## 构建与发布
+## Build & Release
 
-### 本地构建
+### Local builds
 
 ```bash
-bun run build      # 产出 packages/app/out
-bun run release:dir   # 仅展开 .app 到 packages/app/release/
-bun run release      # 产出 .dmg 到 packages/app/release/，不发布
+bun run build      # produces packages/app/out
+bun run release:dir   # unpack .app into packages/app/release/
+bun run release      # build .dmg into packages/app/release/ (no publish)
 ```
 
-> `release` 脚本默认 `--publish never`，仅做本地验证；上传到 GitHub Releases 的逻辑只在 CI 中以 `--publish always` 执行。
+> `release` defaults to `--publish never` for local verification; the publish step only runs in CI with `--publish always`.
 
-### 发布到 GitHub Releases
+### Publishing to GitHub Releases
 
-通过 [electron-builder](https://www.electron.build/) 打包 macOS `.dmg`，由 GitHub Actions 在推送 `v*` tag 时自动发布到 [Releases](https://github.com/dkisser/Tiny-Schedule/releases)。
+Packaged by [electron-builder](https://www.electron.build/) and uploaded by GitHub Actions when you push a `v*` tag.
 
-**打 tag 触发**：
+**Trigger with a tag**:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typecheck/test → 用 electron-vite 编译 → 用 electron-builder 产出 `Tiny Schedule-<version>-arm64.dmg` 与 `Tiny Schedule-<version>-x64.dmg` → 自动创建同名 GitHub Release 并上传。
+`release.yml` runs on `macos-latest`: lint → typecheck → test → electron-vite build → electron-builder → produces `Tiny Schedule-<version>-arm64.dmg` and `Tiny Schedule-<version>-x64.dmg` → creates a GitHub Release and uploads the artifacts.
 
-**首次安装（个人未签名）**：
+**First-time install (unsigned)**:
 
-未做 Apple Developer ID 签名与公证，macOS Gatekeeper 会拦截。可任选其一：
+No Apple Developer ID signing or notarization, so Gatekeeper will block first launch. Pick one:
 
-- **右键打开（推荐）**：挂载 `.dmg` → 把 `Tiny Schedule.app` 拖入 Applications → 在 Applications 中 **右键** `Tiny Schedule.app` → **打开** → 在弹窗中再次确认"打开"。后续双击即可正常启动。
-- **清除隔离属性（更彻底）**：若右键仍被拦截，先在 Applications 退出 app，然后执行：
+- **Right-click to open (recommended)**: Mount the `.dmg` → drag `Tiny Schedule.app` to Applications → in Applications, **right-click** `Tiny Schedule.app` → **Open** → confirm. Subsequent double-clicks work normally.
+- **Strip the quarantine attribute (more thorough)**: Quit the app from Applications first, then run:
 
   ```bash
   sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"
   ```
 
-  之后双击即可正常启动。
+  After that, double-click works normally.
 
 ---
 
-## 路线图
+## Roadmap
 
-- [ ] Windows / Linux 打包（electron-builder 配置已留位）
-- [ ] 同步层（可选，用户自托管 WebDAV / S3）
-- [ ] 插件系统（自定义 Prompt / 自定义导出器）
-- [ ] 多语种 UI（i18n 框架预留）
-- [ ] Social preview 图片
-
----
-
-## 贡献
-
-欢迎贡献。开发前请阅读：
-
-- [`AGENTS.md`](./AGENTS.md) — UI 规范入口
-- [`docs/ui-guidelines.md`](./docs/ui-guidelines.md) — 按钮 / 图标 / 间距约定
-- [`CLAUDE.md`](./CLAUDE.md) — 项目专属 Claude Code 指令
-
-建议流程：fork → 新建分支 → 提交 PR（commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/)）。
+- [ ] Windows / Linux packaging (electron-builder config slot already reserved)
+- [ ] Optional sync layer (self-hosted WebDAV / S3)
+- [ ] Plugin system (custom prompts / custom exporters)
+- [ ] i18n framework
+- [ ] Social preview image
 
 ---
 
-## 许可证
+## Contributing
+
+Contributions welcome. Please read before opening a PR:
+
+- [`AGENTS.md`](./AGENTS.md) — UI conventions entry point
+- [`docs/ui-guidelines.md`](./docs/ui-guidelines.md) — buttons / icons / spacing
+- [`CLAUDE.md`](./CLAUDE.md) — Claude Code instructions for this repo
+
+Suggested flow: fork → new branch → PR (commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)).
+
+---
+
+## License
 
 [Apache-2.0](./LICENSE) © 2026 dkisser
 
 ---
 
-## 致谢
+## Acknowledgments
 
-- [Super Productivity](https://github.com/johannesjo/super-productivity) — 数据模型与 UX 灵感来源
+- [Super Productivity](https://github.com/johannesjo/super-productivity) — data model and UX inspiration
 - [Electron](https://www.electronjs.org/) · [electron-vite](https://electron-vite.org/) · [electron-builder](https://www.electron.build/)
 - [Radix UI](https://www.radix-ui.com/) · [Tailwind CSS](https://tailwindcss.com/) · [lucide-react](https://lucide.dev/)
 - [Zustand](https://github.com/pmndrs/zustand)
 - [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)
 - [Cherry Markdown](https://github.com/Tencent/cherry-markdown) · [react-markdown](https://github.com/remarkjs/react-markdown)
 
-如果这个项目对你有帮助，欢迎点 ⭐ 或在 [Issues](https://github.com/dkisser/Tiny-Schedule/issues) 反馈想法。
+If this project helps you, drop a ⭐ or share your thoughts in [Issues](https://github.com/dkisser/Tiny-Schedule/issues).
