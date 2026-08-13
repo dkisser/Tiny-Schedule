@@ -5,6 +5,7 @@ import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } fro
 import type { Logger } from 'pino';
 import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
+import { initKeyStore } from './keys';
 import { createLogger } from './logger';
 import { migrateRemoveTodayTag } from './migrations';
 import { startPowerTimerWatcher } from './powerTimer';
@@ -126,8 +127,11 @@ app.on('before-quit', (e) => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const userData = app.getPath('userData');
+  // Load or generate the local AES key BEFORE anything that might call
+  // encryptKey/decryptKey; the result is cached in-process.
+  await initKeyStore(userData);
   logger = createLogger(join(userData, 'logs'));
   store = new DataStore(userData);
   store.load();
