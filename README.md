@@ -3,7 +3,7 @@
 > 本地优先的任务管理 + AI 分析桌面应用，基于 Electron，可一键导入 Super Productivity 备份。
 
 [![GitHub release](https://img.shields.io/github/v/release/dkisser/Tiny-Schedule?include_prereleases&sort=semver)](https://github.com/dkisser/Tiny-Schedule/releases)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![License](https://img.shields.io/github/license/dkisser/Tiny-Schedule?cacheSeconds=0)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-blueviolet)](https://github.com/dkisser/Tiny-Schedule/releases)
 [![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
 [![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev/)
