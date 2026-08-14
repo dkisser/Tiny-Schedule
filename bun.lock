@@ -5,7 +5,7 @@
     "": {
       "name": "tiny-schedule",
       "devDependencies": {
-        "@biomejs/biome": "^2.0.0",
+        "@biomejs/biome": "2.5.7",
         "@types/bun": "^1.3.14",
         "@types/node": "^24.13.3",
         "typescript": "^5.7.0",
@@ -13,7 +13,7 @@
     },
     "packages/app": {
       "name": "@tiny-schedule/app",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "dependencies": {
         "@earendil-works/pi-agent-core": "^0.84.1",
         "@earendil-works/pi-ai": "^0.84.1",
