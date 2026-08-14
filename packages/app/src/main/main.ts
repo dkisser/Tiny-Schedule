@@ -7,7 +7,7 @@ import { DataStore } from './dataStore';
 import { registerIpcHandlers } from './ipcHandlers';
 import { initKeyStore } from './keys';
 import { createLogger } from './logger';
-import { migrateRemoveTodayTag } from './migrations';
+import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from './migrations';
 import { startPowerTimerWatcher } from './powerTimer';
 import { startupUpdateCheck } from './updater';
 
@@ -137,6 +137,8 @@ app.whenReady().then(async () => {
   store.load();
   const migrated = migrateRemoveTodayTag(store.get());
   if (migrated !== store.get()) store.save(migrated);
+  const migrated2 = migrateActiveTimerPomodoroFocus(store.get());
+  if (migrated2 !== store.get()) store.save(migrated2);
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   registerIpcHandlers({
     store,

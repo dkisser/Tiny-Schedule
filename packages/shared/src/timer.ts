@@ -34,6 +34,7 @@ export function startPomodoroFocus(
     phaseAccumulatedMs: 0,
     phaseDurationMs: focusMs,
     cyclesCompleted: 0,
+    focusAccumulatedMs: 0,
   };
 }
 
@@ -46,6 +47,17 @@ export function pauseTimer(t: ActiveTimer, now: number): ActiveTimer {
           phaseStartedAt: now,
         }
       : {};
+  // Pause folds the new segment delta (now - phaseStartedAt) into
+  // focusAccumulatedMs so the live computeFocusElapsed still reports the
+  // correct total during a pause. Resume just rebases phaseStartedAt, so the
+  // next fold is again a delta — no double counting.
+  const focusFold =
+    t.mode === 'pomodoro' && t.phase === 'focus' && t.phaseStartedAt !== undefined
+      ? {
+          focusAccumulatedMs:
+            (t.focusAccumulatedMs ?? 0) + Math.max(0, now - t.phaseStartedAt),
+        }
+      : {};
   return {
     ...t,
     accumulatedMs: t.accumulatedMs + Math.max(0, now - t.startedAt),
@@ -53,6 +65,7 @@ export function pauseTimer(t: ActiveTimer, now: number): ActiveTimer {
     pausedAt: now,
     autoPausedBy: undefined,
     ...phaseFold,
+    ...focusFold,
   };
 }
 
@@ -87,6 +100,18 @@ export function autoPauseTimer(
 
 export function computeElapsed(t: ActiveTimer, now: number): number {
   return t.accumulatedMs + (t.isPaused ? 0 : Math.max(0, now - t.startedAt));
+}
+
+/**
+ * Elapsed ms spent in `focus` phases only (pomodoro mode). Break time is
+ * excluded so the settled TimeEntry reflects actual focused work. For
+ * free-mode and legacy timers this falls back to the full `computeElapsed`.
+ */
+export function computeFocusElapsed(t: ActiveTimer, now: number): number {
+  if (t.mode !== 'pomodoro') return computeElapsed(t, now);
+  const acc = t.focusAccumulatedMs ?? 0;
+  if (t.isPaused || t.phase !== 'focus') return acc;
+  return acc + Math.max(0, now - (t.phaseStartedAt ?? now));
 }
 
 /** Elapsed ms within the current pomodoro phase (handles pause correctly). */
@@ -134,13 +159,21 @@ export function advancePomodoroPhase(
   if (t.mode !== 'pomodoro') {
     return { next: t, finishedPhase: t.phase ?? 'focus', setComplete: false };
   }
-  const focusMs = opts.focusMs ?? t.phaseDurationMs ?? POMODORO_FOCUS_MS;
+  const focusMs = opts.focusMs ?? POMODORO_FOCUS_MS;
   const breakMs = opts.breakMs ?? POMODORO_BREAK_MS;
   const finishedPhase: PomodoroPhase = t.phase ?? 'focus';
   const completed = t.cyclesCompleted ?? 0;
 
   if (finishedPhase === 'focus') {
     const nextCompleted = completed + 1;
+    // Fold only the post-last-fold delta so pause's earlier fold and
+    // advance's fold don't double-count the same segment. The pause path
+    // already rebased phaseStartedAt to the pause instant, so
+    // `now - phaseStartedAt` is the trailing delta only.
+    const focusFold = {
+      focusAccumulatedMs:
+        (t.focusAccumulatedMs ?? 0) + Math.max(0, now - (t.phaseStartedAt ?? now)),
+    };
     if (nextCompleted >= POMODORO_CYCLES_PER_SET) {
       // Last focus in this set ended: freeze both clocks at `now`, leave the
       // phase as `focus`, and let the renderer decide whether to start a
@@ -157,6 +190,7 @@ export function advancePomodoroPhase(
           accumulatedMs: segAcc,
           phaseStartedAt: now,
           phaseAccumulatedMs: phaseAcc,
+          ...focusFold,
         },
         finishedPhase: 'focus',
         setComplete: true,
@@ -171,6 +205,7 @@ export function advancePomodoroPhase(
         phaseAccumulatedMs: 0,
         phaseDurationMs: breakMs,
         cyclesCompleted: nextCompleted,
+        ...focusFold,
       },
       finishedPhase,
       setComplete: false,
@@ -215,7 +250,8 @@ export interface Settlement {
 }
 
 export function settleTimer(t: ActiveTimer, now: number): Settlement {
-  const ms = computeElapsed(t, now);
+  // Pomodoro timers settle with focus-only time; break is excluded.
+  const ms = isPomodoro(t) ? computeFocusElapsed(t, now) : computeElapsed(t, now);
   const end = t.isPaused ? (t.pausedAt ?? now) : now;
   return { ms, entry: { date: localDate(end), start: t.sessionStartedAt ?? t.startedAt, end, ms } };
 }

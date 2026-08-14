@@ -4,6 +4,7 @@ import {
   advancePomodoroPhase,
   applySettlement,
   computeElapsed,
+  computeFocusElapsed,
   isPhaseComplete,
   isPomodoro,
   POMODORO_FOCUS_MS,
@@ -172,7 +173,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       phase: 'focus',
       phaseStartedAt: now,
       phaseAccumulatedMs: 0,
-      phaseDurationMs: cur.phaseDurationMs ?? POMODORO_FOCUS_MS,
+      phaseDurationMs: POMODORO_FOCUS_MS,
       cyclesCompleted: 0,
       isPaused: false,
       pausedAt: undefined,
@@ -186,5 +187,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 }));
 
 export function elapsedOf(timer: ActiveTimer | null, now: number): number {
-  return timer ? computeElapsed(timer, now) : 0;
+  if (!timer) return 0;
+  // Pomodoro timers report focus-only time so the running display freezes
+  // during breaks (matches the value that will be settled into the
+  // TimeEntry). Free-mode timers keep the full session elapsed.
+  return isPomodoro(timer) ? computeFocusElapsed(timer, now) : computeElapsed(timer, now);
 }

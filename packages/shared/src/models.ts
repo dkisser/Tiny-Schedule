@@ -100,6 +100,10 @@ export interface ActiveTimer {
   phaseAccumulatedMs?: number; // ms accumulated in current phase from previous segments (mirrors accumulatedMs)
   phaseDurationMs?: number; // target length of the current phase
   cyclesCompleted?: number; // number of focus phases completed in this session
+  // ms accumulated in `focus` phases across pauses and phase boundaries. Only
+  // set on pomodoro timers; absent on legacy/free timers. Used to exclude
+  // break time from the settled TimeEntry.
+  focusAccumulatedMs?: number;
 }
 
 export interface AppData {
