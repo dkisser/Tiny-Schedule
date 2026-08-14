@@ -99,7 +99,6 @@ export function ReportView() {
   };
 
   // Finish Day 自动触发：Task 13 的 ui store 中的 aiAutoRun 交接
-  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only handoff
   useEffect(() => {
     const auto = useUiStore.getState().aiAutoRun;
     if (auto) {

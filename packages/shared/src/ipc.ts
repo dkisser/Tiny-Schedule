@@ -370,7 +370,6 @@ export const IpcInvokeContract = {
   dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
   taskUpsert: { ch: Ipc.taskUpsert, req: TaskSchema, res: null as unknown as AppData },
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
-  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
   orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
   projectCreate: {
     ch: Ipc.projectCreate,
@@ -396,7 +395,6 @@ export const IpcInvokeContract = {
     res: null as unknown as AppData,
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
-  // biome-ignore lint/suspicious/noConfusingVoidType: type-level placeholder for "no response payload"
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
   importRun: { ch: Ipc.importRun, res: null as unknown as ImportRunResult },
   exportMarkdown: {

@@ -84,7 +84,6 @@ function ReorderableOpenList({
     .map((t) => t.id)
     .sort()
     .join(',');
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reconcile only when membership changes, order state lives here
   useEffect(() => {
     setIds((prev) => {
       const current = openRef.current.map((t) => t.id);

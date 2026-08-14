@@ -54,8 +54,7 @@ export function pauseTimer(t: ActiveTimer, now: number): ActiveTimer {
   const focusFold =
     t.mode === 'pomodoro' && t.phase === 'focus' && t.phaseStartedAt !== undefined
       ? {
-          focusAccumulatedMs:
-            (t.focusAccumulatedMs ?? 0) + Math.max(0, now - t.phaseStartedAt),
+          focusAccumulatedMs: (t.focusAccumulatedMs ?? 0) + Math.max(0, now - t.phaseStartedAt),
         }
       : {};
   return {

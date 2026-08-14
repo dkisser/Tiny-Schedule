@@ -62,7 +62,6 @@ export function TaskCard({
     : 0;
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: card contains nested action buttons, cannot be a semantic <button>
     <div
       role="button"
       tabIndex={0}
