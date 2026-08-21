@@ -9,8 +9,8 @@ import {
 import type Cherry from 'cherry-markdown';
 import { ChevronLeft, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { blankTask, taskProjectTitle, taskTagLabel } from '../lib/tasks';
+import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
@@ -44,22 +44,16 @@ export function TaskDetail({ task }: { task: Task }) {
 
   // 标题/预估输入：受控 + 防抖自动提交 + 切换任务（initial 变化）时自动重新同步。
   // 这样用户在标题框里打字没失焦就切换任务，400 ms 后会自动落盘，不再丢失。
-  const [title, setTitle, flushTitle] = useDebouncedCommit(
-    task.title,
-    (v) => {
-      const trimmed = v.trim();
-      if (trimmed && trimmed !== task.title) void upsertTask({ ...task, title: trimmed });
-    },
-  );
+  const [title, setTitle, flushTitle] = useDebouncedCommit(task.title, (v) => {
+    const trimmed = v.trim();
+    if (trimmed && trimmed !== task.title) void upsertTask({ ...task, title: trimmed });
+  });
   const initialHours = task.timeEstimate > 0 ? task.timeEstimate / 3_600_000 : '';
-  const [hours, setHours, flushHours] = useDebouncedCommit<number | ''>(
-    initialHours,
-    (v) => {
-      const next = typeof v === 'number' ? v : 0;
-      const ms = hoursToMs(next);
-      if (ms !== task.timeEstimate) void upsertTask({ ...task, timeEstimate: ms });
-    },
-  );
+  const [hours, setHours, flushHours] = useDebouncedCommit<number | ''>(initialHours, (v) => {
+    const next = typeof v === 'number' ? v : 0;
+    const ms = hoursToMs(next);
+    if (ms !== task.timeEstimate) void upsertTask({ ...task, timeEstimate: ms });
+  });
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
