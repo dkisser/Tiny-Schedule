@@ -7,6 +7,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { Textarea } from '../components/ui/textarea';
+import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { type ProviderDraft, useDataStore } from '../stores/data';
 import { useUpdateStore } from '../stores/update';
 
@@ -21,6 +22,42 @@ export function SettingsPage() {
   const [drafts, setDrafts] = useState<ProviderDraft[]>([]);
   const [avatarBroken, setAvatarBroken] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 把 4 个 uncontrolled + onBlur 的文本字段改为受控 + 防抖自动提交，
+  // 避免在 SettingsPage 卸载（如切到 Today / AI 视图）时还没失焦的内容丢失。
+  const [userName, setUserName, flushUserName] = useDebouncedCommit(
+    data?.settings.userName ?? '',
+    (v) => {
+      const trimmed = v.trim();
+      if (trimmed !== (data?.settings.userName ?? '')) void updateSettings({ userName: trimmed });
+    },
+  );
+  const [avatarUrl, setAvatarUrl, flushAvatarUrl] = useDebouncedCommit(
+    data?.settings.avatar?.startsWith('http') ? data.settings.avatar : '',
+    (v) => {
+      const trimmed = v.trim();
+      const current = data?.settings.avatar ?? '';
+      if (trimmed !== current) void updateSettings({ avatar: trimmed || null });
+    },
+  );
+  const [idleMinutes, setIdleMinutes, flushIdleMinutes] = useDebouncedCommit<string>(
+    data ? String(data.settings.idlePauseMinutes) : '5',
+    (v) => {
+      const parsed = Number.parseInt(v, 10);
+      const safe = Number.isFinite(parsed) && parsed >= 1 && parsed <= 1440 ? parsed : 0;
+      if (safe > 0 && data && safe !== data.settings.idlePauseMinutes) {
+        void updateSettings({ idlePauseMinutes: safe });
+      }
+    },
+  );
+  const [aiPrompt, setAiPrompt, flushAiPrompt] = useDebouncedCommit(
+    data?.settings.aiPrompt ?? '',
+    (v) => {
+      const next = v;
+      const current = data?.settings.aiPrompt ?? '';
+      if (next !== current) void updateSettings({ aiPrompt: next });
+    },
+  );
 
   useEffect(() => {
     void api().aiRegistry().then(setRegistry);
@@ -95,8 +132,9 @@ export function SettingsPage() {
           <div className="flex flex-col gap-2">
             <Input
               placeholder="用户名"
-              defaultValue={settings.userName}
-              onBlur={(e) => void updateSettings({ userName: e.target.value })}
+              value={userName}
+              onChange={(e) => setUserName(e.target.value)}
+              onBlur={flushUserName}
             />
             <div className="flex gap-2">
               <Button
@@ -124,10 +162,9 @@ export function SettingsPage() {
             </div>
             <Input
               placeholder="或粘贴头像 URL"
-              defaultValue={settings.avatar?.startsWith('http') ? settings.avatar : ''}
-              onBlur={(e) =>
-                e.target.value.trim() && void updateSettings({ avatar: e.target.value.trim() })
-              }
+              value={avatarUrl}
+              onChange={(e) => setAvatarUrl(e.target.value)}
+              onBlur={flushAvatarUrl}
             />
           </div>
         </div>
@@ -166,15 +203,9 @@ export function SettingsPage() {
               max={1440}
               className="w-20"
               disabled={!settings.idlePauseEnabled}
-              defaultValue={settings.idlePauseMinutes}
-              onBlur={(e) => {
-                const v = Number.parseInt(e.target.value, 10);
-                if (Number.isFinite(v) && v >= 1 && v <= 1440) {
-                  void updateSettings({ idlePauseMinutes: v });
-                } else {
-                  e.target.value = String(settings.idlePauseMinutes);
-                }
-              }}
+              value={idleMinutes}
+              onChange={(e) => setIdleMinutes(e.target.value)}
+              onBlur={flushIdleMinutes}
             />
             分钟后自动暂停
           </label>
@@ -216,8 +247,9 @@ export function SettingsPage() {
           className="mt-2 font-mono text-xs"
           rows={6}
           placeholder={'支持占位符：{{date}} {{data}}'}
-          defaultValue={settings.aiPrompt}
-          onBlur={(e) => void updateSettings({ aiPrompt: e.target.value })}
+          value={aiPrompt}
+          onChange={(e) => setAiPrompt(e.target.value)}
+          onBlur={flushAiPrompt}
         />
         <label className="mt-3 flex items-center gap-2 text-sm">
           <input

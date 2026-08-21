@@ -9,10 +9,22 @@ export function MarkdownEditor({
   initialValue,
   onDone,
   onCancel,
+  onReady,
+  onUnmount,
 }: {
   initialValue: string;
   onDone: (text: string) => void;
   onCancel: () => void;
+  /**
+   * Cherry 实例就绪时回调（mount 时传入实例，cleanup 时传入 null）。
+   * 让父组件在切换上下文时能读取未通过 Done 按钮提交的编辑内容。
+   */
+  onReady?: (cherry: Cherry | null) => void;
+  /**
+   * Cherry 销毁前回调，传入最新文本。
+   * 父组件可在编辑器被卸载（如切换任务、关闭面板）前 flush 未保存的编辑。
+   */
+  onUnmount?: (latest: string) => void;
 }) {
   const holderRef = useRef<HTMLDivElement>(null);
   const cherryRef = useRef<Cherry | null>(null);
@@ -48,7 +60,12 @@ export function MarkdownEditor({
       },
     });
     cherryRef.current = cherry;
+    onReady?.(cherry);
     return () => {
+      // 先把最新文本交给父组件（父组件的 useEffect cleanup 会在子组件之后才跑，
+      // 所以这里需要在 destroy 之前同步给父组件一个读取的机会）。
+      onUnmount?.(cherry.getValue());
+      onReady?.(null);
       cherry.destroy();
       cherryRef.current = null;
     };

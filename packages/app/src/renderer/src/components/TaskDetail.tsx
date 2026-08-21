@@ -6,8 +6,10 @@ import {
   type Task,
   type TimeEntry,
 } from '@tiny-schedule/shared';
+import type Cherry from 'cherry-markdown';
 import { ChevronLeft, Pencil, Plus, Trash2, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { blankTask, taskProjectTitle, taskTagLabel } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
@@ -36,6 +38,28 @@ export function TaskDetail({ task }: { task: Task }) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [editEntry, setEditEntry] = useState<TimeEntry | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<TimeEntry | null>(null);
+  const cherryRef = useRef<Cherry | null>(null);
+  // 标记 Done / Cancel 已经处理过当前编辑会话，MarkdownEditor 卸载时不要重复 flush。
+  const notesHandledRef = useRef(false);
+
+  // 标题/预估输入：受控 + 防抖自动提交 + 切换任务（initial 变化）时自动重新同步。
+  // 这样用户在标题框里打字没失焦就切换任务，400 ms 后会自动落盘，不再丢失。
+  const [title, setTitle, flushTitle] = useDebouncedCommit(
+    task.title,
+    (v) => {
+      const trimmed = v.trim();
+      if (trimmed && trimmed !== task.title) void upsertTask({ ...task, title: trimmed });
+    },
+  );
+  const initialHours = task.timeEstimate > 0 ? task.timeEstimate / 3_600_000 : '';
+  const [hours, setHours, flushHours] = useDebouncedCommit<number | ''>(
+    initialHours,
+    (v) => {
+      const next = typeof v === 'number' ? v : 0;
+      const ms = hoursToMs(next);
+      if (ms !== task.timeEstimate) void upsertTask({ ...task, timeEstimate: ms });
+    },
+  );
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
@@ -99,8 +123,9 @@ export function TaskDetail({ task }: { task: Task }) {
       </div>
 
       <Input
-        defaultValue={task.title}
-        onBlur={(e) => e.target.value.trim() && save({ title: e.target.value.trim() })}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        onBlur={flushTitle}
         onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
       />
 
@@ -165,8 +190,12 @@ export function TaskDetail({ task }: { task: Task }) {
             type="number"
             min="0"
             step="0.5"
-            defaultValue={task.timeEstimate > 0 ? task.timeEstimate / 3_600_000 : ''}
-            onBlur={(e) => save({ timeEstimate: hoursToMs(Number(e.target.value) || 0) })}
+            value={hours}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setHours(raw === '' ? '' : Number(raw));
+            }}
+            onBlur={flushHours}
           />
         </div>
       </div>
@@ -265,10 +294,27 @@ export function TaskDetail({ task }: { task: Task }) {
           <MarkdownEditor
             initialValue={task.notes}
             onDone={(text) => {
+              // Done 已经保存；通知 onUnmount 不必再 flush。
+              notesHandledRef.current = true;
               setEditingNotes(false);
               if (text !== task.notes) save({ notes: text });
             }}
-            onCancel={() => setEditingNotes(false)}
+            onCancel={() => {
+              // 取消时不保存；通知 onUnmount 不必 flush。
+              notesHandledRef.current = true;
+              setEditingNotes(false);
+            }}
+            onReady={(cherry) => {
+              cherryRef.current = cherry;
+              // 新一轮编辑会话：尚未被 Done/Cancel 处理过。
+              notesHandledRef.current = false;
+            }}
+            onUnmount={(latest) => {
+              // 走到这里说明 MarkdownEditor 被卸载前没有经过 Done / Cancel，
+              // 即用户切到了别的任务或关闭了面板——这时把未提交的编辑当作按了 Done。
+              if (notesHandledRef.current) return;
+              if (latest !== task.notes) void upsertTask({ ...task, notes: latest });
+            }}
           />
         ) : task.notes ? (
           <Markdown text={task.notes} className="rounded-md border border-border p-2" />
