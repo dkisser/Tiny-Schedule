@@ -10,9 +10,11 @@ export default defineConfig({
   main: { plugins: [externalizeDepsPlugin({ exclude: ['@tiny-schedule/shared'] })] },
   preload: { plugins: [externalizeDepsPlugin({ exclude: ['@tiny-schedule/shared'] })] },
   renderer: {
+    root: fileURLToPath(new URL('./src/renderer', import.meta.url)),
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src/renderer/src', import.meta.url)) },
     },
+    publicDir: fileURLToPath(new URL('./assets/renderer', import.meta.url)),
     plugins: [react(), tailwindcss()],
   },
 });

@@ -42,6 +42,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     show: false,
+    icon: join(app.getAppPath(), 'assets', 'build', 'icon.png'),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       contextIsolation: true,
@@ -128,6 +129,11 @@ app.on('before-quit', (e) => {
 });
 
 app.whenReady().then(async () => {
+  // macOS dev 模式下没有 .app bundle，Dock 显示 Electron 默认 atom 图标。
+  // 显式覆盖为项目里的 icon.png，保证开发体验与打包后一致。
+  if (process.platform === 'darwin') {
+    app.dock?.setIcon(join(app.getAppPath(), 'assets', 'build', 'icon.png'));
+  }
   const userData = app.getPath('userData');
   // Load or generate the local AES key BEFORE anything that might call
   // encryptKey/decryptKey; the result is cached in-process.

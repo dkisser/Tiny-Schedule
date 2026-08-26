@@ -4,11 +4,12 @@ copyright: Copyright © 2026 dkisser
 asar: true
 directories:
   output: release                       # 相对 packages/app → packages/app/release
-  buildResources: build                 # 图标、entitlements 等（暂不创建）
+  buildResources: assets/build          # 图标、entitlements 等
 
 # electron-vite 已经把 main/preload/renderer 全部打入 out/，这里只打包必要文件
 files:
   - "out/**/*"
+  - "assets/build/**/*"
   - "package.json"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
   - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
