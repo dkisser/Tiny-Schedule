@@ -170,6 +170,8 @@ export const ProjectUpdateReqSchema = z.object({
   title: z.string().trim().min(1).max(100).optional(),
   // Explicit null clears the color; undefined leaves the existing one intact.
   primaryColor: z.string().nullable().optional(),
+  // Archive hides the project from the sidebar but keeps its tasks in stats.
+  isArchived: z.boolean().optional(),
 });
 export type ProjectUpdateReq = z.infer<typeof ProjectUpdateReqSchema>;
 

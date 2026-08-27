@@ -1,5 +1,7 @@
 import { hasProjectColor, INBOX_PROJECT_ID, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
 import {
+  Archive,
+  ArchiveRestore,
   Bot,
   CalendarDays,
   ChevronRight,
@@ -89,6 +91,7 @@ export function Sidebar() {
     v.type === view.type && ('id' in v ? v.id === (view as { id?: string }).id : true);
   const systemTagIds = Object.values(SYSTEM_TAG_IDS);
   const projects = Object.values(data.projects).filter((p) => !p.isArchived);
+  const archivedProjects = Object.values(data.projects).filter((p) => p.isArchived);
   const customTags = Object.values(data.tags).filter((t) => !systemTagIds.includes(t.id as never));
 
   const beginCreate = (group: SidebarGroup) => {
@@ -201,6 +204,56 @@ export function Sidebar() {
     </div>
   );
 
+  // Projects get an Archive button (hides from sidebar but keeps stats).
+  // Inbox is a system project and is never archivable.
+  const projectRowActions = (e: EntityRef, archivable: boolean) => {
+    const project = data?.projects[e.id];
+    const archived = !!project?.isArchived;
+    const onArchiveToggle = (ev: { stopPropagation: () => void }) => {
+      ev.stopPropagation();
+      void updateProject(e.id, { isArchived: !archived });
+    };
+    return (
+      <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-accent group-hover/row:flex">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="改名"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            beginRename(e);
+          }}
+        >
+          <Pencil />
+        </Button>
+        {archivable && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={archived ? '恢复项目' : '归档项目'}
+            className="text-muted-foreground hover:text-foreground"
+            onClick={onArchiveToggle}
+          >
+            {archived ? <ArchiveRestore /> : <Archive />}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="删除"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={(ev) => {
+            ev.stopPropagation();
+            setDeleteTarget(e);
+          }}
+        >
+          <Trash2 />
+        </Button>
+      </div>
+    );
+  };
+
   const header = (group: SidebarGroup, title: string, addLabel: string) => (
     <div className="group mt-3 flex items-center">
       <CollapsibleTrigger className="group/trig flex flex-1 items-center gap-1 px-2 text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -282,7 +335,7 @@ export function Sidebar() {
                     )}
                   </NavItem>
                 )}
-                {rowActions(
+                {projectRowActions(
                   { group: 'projects', id: p.id, title: p.title },
                   p.id !== INBOX_PROJECT_ID,
                 )}
@@ -291,6 +344,37 @@ export function Sidebar() {
           </div>
         </CollapsibleContent>
       </Collapsible>
+
+      {archivedProjects.length > 0 && (
+        <Collapsible
+          open={!collapsedGroups.archived}
+          onOpenChange={() => toggleSidebarGroup('archived')}
+        >
+          {header('archived', `已归档 (${archivedProjects.length})`, '')}
+          <CollapsibleContent>
+            <div className="flex flex-col gap-1 pt-1">
+              {archivedProjects.map((p) => (
+                <div key={p.id} className="group/row relative">
+                  {renaming?.group === 'projects' && renaming.id === p.id ? (
+                    renameInput
+                  ) : (
+                    <NavItem
+                      active={isActive({ type: 'project', id: p.id })}
+                      onClick={() => setView({ type: 'project', id: p.id })}
+                    >
+                      <Archive className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate text-left text-muted-foreground">
+                        {p.title}
+                      </span>
+                    </NavItem>
+                  )}
+                  {projectRowActions({ group: 'projects', id: p.id, title: p.title }, true)}
+                </div>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       <Collapsible open={!collapsedGroups.tags} onOpenChange={() => toggleSidebarGroup('tags')}>
         {header('tags', '标签', '新建标签')}

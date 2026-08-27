@@ -155,6 +155,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         const patch: Partial<typeof prev> = {};
         if (req.title !== undefined) patch.title = req.title;
         if (req.primaryColor !== undefined) patch.primaryColor = req.primaryColor;
+        if (req.isArchived !== undefined) patch.isArchived = req.isArchived;
         if (Object.keys(patch).length === 0) return d;
         return {
           ...d,

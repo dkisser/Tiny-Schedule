@@ -23,7 +23,7 @@ interface DataState {
   createProject: (title: string) => Promise<void>;
   updateProject: (
     id: string,
-    patch: { title?: string; primaryColor?: string | null },
+    patch: { title?: string; primaryColor?: string | null; isArchived?: boolean },
   ) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   createTag: (title: string) => Promise<void>;

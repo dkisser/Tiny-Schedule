@@ -14,7 +14,7 @@ export interface AiAutoRun {
   providerId: string;
 }
 
-export type SidebarGroup = 'projects' | 'tags';
+export type SidebarGroup = 'projects' | 'tags' | 'archived';
 
 interface UiState {
   view: View;
@@ -33,7 +33,7 @@ export const useUiStore = create<UiState>((set) => ({
   selectedTaskId: null,
   aiAutoRun: null,
   aiView: 'report',
-  collapsedGroups: { projects: false, tags: false },
+  collapsedGroups: { projects: false, tags: false, archived: true },
   setView: (view) => set({ view, selectedTaskId: null }),
   selectTask: (taskId) => set({ selectedTaskId: taskId }),
   setAiView: (aiView) => set({ aiView }),

@@ -57,7 +57,15 @@ export function TaskDetail({ task }: { task: Task }) {
   if (!data) return null;
 
   const save = (patch: Partial<Task>) => void upsertTask({ ...task, ...patch });
-  const projects = Object.values(data.projects).filter((p) => !p.isArchived);
+  // Hide archived projects from the picker by default, but always keep the
+  // task's own projectId visible even if it was archived after creation —
+  // otherwise editing such a task would silently drop its project selection.
+  const activeProjects = Object.values(data.projects).filter((p) => !p.isArchived);
+  const currentProject = data.projects[task.projectId];
+  const projects =
+    currentProject?.isArchived && !activeProjects.some((p) => p.id === currentProject.id)
+      ? [...activeProjects, currentProject]
+      : activeProjects;
   const systemTagIds = Object.values(SYSTEM_TAG_IDS) as string[];
   const tags = Object.values(data.tags).filter((t) => !systemTagIds.includes(t.id));
   const subTasks = task.subTaskIds.map((id) => data.tasks[id]).filter(Boolean) as Task[];

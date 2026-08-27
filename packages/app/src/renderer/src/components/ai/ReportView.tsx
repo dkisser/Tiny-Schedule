@@ -109,7 +109,10 @@ export function ReportView() {
 
   if (!data) return null;
   const hasProvider = data.settings.aiProviders.length > 0;
-  const projects = Object.values(data.projects).filter((p) => !p.isArchived);
+  // Stats must include archived projects (per requirement: archive ≠ delete,
+  // archived projects still need to be analyzable). Show all projects and
+  // sort by title for a stable dropdown order.
+  const projects = Object.values(data.projects).sort((a, b) => a.title.localeCompare(b.title));
   const history = (data.misc.aiHistory ?? []) as AiSummary[];
   const scopeLabel = (s: AiSummary) =>
     s.scope === 'today'

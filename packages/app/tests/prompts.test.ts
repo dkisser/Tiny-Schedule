@@ -117,4 +117,23 @@ describe('buildAnalysisData', () => {
     const json = JSON.parse(buildAnalysisData(d, { scope: 'today', date: '2026-08-04' }));
     expect(json.tasks[0].tags).toEqual(['Today']);
   });
+
+  // Regression guard: archive must NOT exclude a project from stats. The UI
+  // hides archived projects from the sidebar but their tasks must still be
+  // aggregated by buildAnalysisData, otherwise archiving silently drops data.
+  test('archived projects still surface in today + project scope', () => {
+    const d = emptyAppData();
+    d.projects.p1 = { id: 'p1', title: '已归档项目', isArchived: true };
+    d.tasks.t1 = task({ projectId: 'p1' });
+    const today = JSON.parse(buildAnalysisData(d, { scope: 'today', date: '2026-08-04' }));
+    expect(today.tasks).toHaveLength(1);
+    expect(today.tasks[0].project).toBe('已归档项目');
+    expect(today.summary.totalSpentMs).toBe(1_800_000);
+
+    const project = JSON.parse(
+      buildAnalysisData(d, { scope: 'project', date: '2026-08-04', projectId: 'p1' }),
+    );
+    expect(project.project).toBe('已归档项目');
+    expect(project.tasks).toHaveLength(1);
+  });
 });

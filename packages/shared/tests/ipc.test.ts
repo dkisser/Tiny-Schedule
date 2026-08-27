@@ -3,6 +3,7 @@ import {
   AppDataSchema,
   ExportMarkdownReqSchema,
   Ipc,
+  ProjectUpdateReqSchema,
   SettingsUpdateReqSchema,
   TaskSchema,
   TimerSyncReqSchema,
@@ -61,5 +62,27 @@ describe('schemas', () => {
       ExportMarkdownReqSchema.parse({ mode: 'worklog', from: '2026-08-01', to: '2026-08-04' }).mode,
     ).toBe('worklog');
     expect(() => ExportMarkdownReqSchema.parse({ mode: 'bogus' })).toThrow();
+  });
+
+  test('ProjectUpdateReqSchema accepts isArchived toggle and merges with title/color', () => {
+    const archived = ProjectUpdateReqSchema.parse({ id: 'p1', isArchived: true });
+    expect(archived.isArchived).toBe(true);
+
+    const restored = ProjectUpdateReqSchema.parse({ id: 'p1', isArchived: false });
+    expect(restored.isArchived).toBe(false);
+
+    // isArchived omitted leaves it undefined; other fields stay independent.
+    const mixed = ProjectUpdateReqSchema.parse({
+      id: 'p1',
+      title: '改名',
+      primaryColor: '#fff',
+    });
+    expect(mixed.isArchived).toBeUndefined();
+    expect(mixed.title).toBe('改名');
+    expect(mixed.primaryColor).toBe('#fff');
+  });
+
+  test('ProjectUpdateReqSchema rejects non-boolean isArchived', () => {
+    expect(() => ProjectUpdateReqSchema.parse({ id: 'p1', isArchived: 'yes' })).toThrow();
   });
 });

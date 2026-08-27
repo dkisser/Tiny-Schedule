@@ -11,7 +11,8 @@ export function ExportPage() {
   const [message, setMessage] = useState('');
 
   if (!data) return null;
-  const projects = Object.values(data.projects).filter((p) => !p.isArchived);
+  // Stats / exports must include archived projects; sort for a stable dropdown.
+  const projects = Object.values(data.projects).sort((a, b) => a.title.localeCompare(b.title));
 
   const runImport = async () => {
     setMessage('导入中…');
