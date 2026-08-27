@@ -1,4 +1,4 @@
-import { INBOX_PROJECT_ID, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
+import { hasProjectColor, INBOX_PROJECT_ID, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
 import {
   Bot,
   CalendarDays,
@@ -12,10 +12,11 @@ import {
   Tag,
   Trash2,
 } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useState } from 'react';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { type SidebarGroup, useUiStore, type View } from '../stores/ui';
+import { ProjectColorPicker } from './ProjectColorPicker';
 import { Button } from './ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
@@ -30,17 +31,27 @@ function NavItem({
   onClick: () => void;
   children: ReactNode;
 }) {
+  // Rendered as a div with role="button" (instead of <button>) so it can host
+  // nested interactive content such as the project's color picker trigger.
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onClick();
+    }
+  };
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
       className={cn(
-        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+        'flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm',
         active ? 'bg-accent text-accent-foreground font-medium' : 'hover:bg-accent/50',
       )}
     >
       {children}
-    </button>
+    </div>
   );
 }
 
@@ -112,7 +123,7 @@ export function Sidebar() {
     setRenaming(null);
     setRenameDraft('');
     if (!target || !title || title === target.title) return;
-    if (target.group === 'projects') await updateProject(target.id, title);
+    if (target.group === 'projects') await updateProject(target.id, { title });
     else await updateTag(target.id, title);
   };
 
@@ -237,7 +248,32 @@ export function Sidebar() {
                     active={isActive({ type: 'project', id: p.id })}
                     onClick={() => setView({ type: 'project', id: p.id })}
                   >
-                    <Inbox className="h-4 w-4" />
+                    {p.id === INBOX_PROJECT_ID ? (
+                      <Inbox className="h-4 w-4" />
+                    ) : (
+                      <ProjectColorPicker projectId={p.id} currentColor={p.primaryColor}>
+                        <button
+                          type="button"
+                          aria-label={
+                            hasProjectColor(p.primaryColor) ? '更改项目颜色' : '设置项目颜色'
+                          }
+                          // Prevent the picker click from also triggering the
+                          // parent NavItem's onClick (route change).
+                          onClick={(e) => e.stopPropagation()}
+                          className={cn(
+                            'h-4 w-4 shrink-0 rounded-[3px] border transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
+                            hasProjectColor(p.primaryColor)
+                              ? 'border-foreground/25'
+                              : 'border-dashed border-muted-foreground/40 opacity-0 group-hover/row:opacity-100',
+                          )}
+                          style={
+                            hasProjectColor(p.primaryColor)
+                              ? { backgroundColor: p.primaryColor }
+                              : undefined
+                          }
+                        />
+                      </ProjectColorPicker>
+                    )}
                     <span className="flex-1 truncate text-left">{p.title}</span>
                     {(openCountByProject.get(p.id) ?? 0) > 0 && (
                       <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">

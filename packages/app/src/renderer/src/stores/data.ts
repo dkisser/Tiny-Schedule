@@ -21,7 +21,10 @@ interface DataState {
   deleteTask: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   createProject: (title: string) => Promise<void>;
-  updateProject: (id: string, title: string) => Promise<void>;
+  updateProject: (
+    id: string,
+    patch: { title?: string; primaryColor?: string | null },
+  ) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
   createTag: (title: string) => Promise<void>;
   updateTag: (id: string, title: string) => Promise<void>;
@@ -62,8 +65,8 @@ export const useDataStore = create<DataState>((set) => ({
     const data = await api().projectCreate({ title });
     set({ data });
   },
-  updateProject: async (id, title) => {
-    const data = await api().projectUpdate({ id, title });
+  updateProject: async (id, patch) => {
+    const data = await api().projectUpdate({ id, ...patch });
     set({ data });
   },
   deleteProject: async (id) => {

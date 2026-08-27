@@ -1,4 +1,5 @@
 import type { AppData, Task } from '@tiny-schedule/shared';
+import { hasProjectColor } from '@tiny-schedule/shared';
 import { Check, GripVertical, Pause, Play, Trash2 } from 'lucide-react';
 import type { DragControls } from 'motion/react';
 import { useState } from 'react';
@@ -50,6 +51,9 @@ export function TaskCard({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const selected = selectedTaskId === task.id;
   const overdue = isOverdue(task);
+  const stripeColor = hasProjectColor(data.projects[task.projectId]?.primaryColor)
+    ? data.projects[task.projectId]?.primaryColor
+    : undefined;
   const overdueDays = overdue
     ? Math.max(
         1,
@@ -68,12 +72,19 @@ export function TaskCard({
       onClick={() => selectTask(selected ? null : task.id)}
       onKeyDown={(e) => e.key === 'Enter' && selectTask(selected ? null : task.id)}
       className={cn(
-        'group flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer',
+        'group relative flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 cursor-pointer',
         selected && (overdue ? 'ring-2 ring-amber-400/70' : 'ring-2 ring-ring'),
         active && 'border-pink-400 bg-pink-50 dark:bg-pink-950/30',
         overdue && !active && !selected && 'border-amber-400/60',
       )}
     >
+      {stripeColor && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-l-lg"
+          style={{ backgroundColor: stripeColor }}
+        />
+      )}
       {dragControls && !task.isDone && (
         <Button
           variant="ghost"

@@ -34,7 +34,9 @@ export interface Project {
   title: string;
   icon?: string;
   isArchived: boolean;
-  primaryColor?: string;
+  // `null` is a legitimate "unset" value (cleared via the color picker);
+  // `undefined` is the legacy "never set" state from older backups.
+  primaryColor?: string | null;
 }
 
 export interface Tag {

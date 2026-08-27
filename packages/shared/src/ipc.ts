@@ -168,6 +168,8 @@ export type TagCreateReq = z.infer<typeof TagCreateReqSchema>;
 export const ProjectUpdateReqSchema = z.object({
   id: z.string().min(1),
   title: z.string().trim().min(1).max(100).optional(),
+  // Explicit null clears the color; undefined leaves the existing one intact.
+  primaryColor: z.string().nullable().optional(),
 });
 export type ProjectUpdateReq = z.infer<typeof ProjectUpdateReqSchema>;
 

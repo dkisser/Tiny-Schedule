@@ -147,13 +147,25 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     projectUpdate: (req) => {
       const next = store.update((d) => {
         const prev = d.projects[req.id];
-        if (!prev || req.title === undefined) return d;
+        // Inbox is a system project: never accept updates through the IPC.
+        if (!prev || req.id === INBOX_PROJECT_ID) return d;
+        // Partial-merge: only apply fields that are explicitly present in the
+        // request. `null` clears (e.g. clearing a project color); `undefined`
+        // leaves the existing value untouched. Mirrors `tagUpdate`.
+        const patch: Partial<typeof prev> = {};
+        if (req.title !== undefined) patch.title = req.title;
+        if (req.primaryColor !== undefined) patch.primaryColor = req.primaryColor;
+        if (Object.keys(patch).length === 0) return d;
         return {
           ...d,
-          projects: { ...d.projects, [req.id]: { ...prev, title: req.title } },
+          projects: { ...d.projects, [req.id]: { ...prev, ...patch } },
         };
       });
-      logger.info({ action: 'project:update', id: req.id, title: req.title });
+      logger.info({
+        action: 'project:update',
+        id: req.id,
+        keys: Object.keys(req).filter((k) => k !== 'id'),
+      });
       return masked(next);
     },
 
