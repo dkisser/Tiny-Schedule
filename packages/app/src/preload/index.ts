@@ -38,6 +38,7 @@ const api: RendererApi = {
   chatContinue: (req) => ipcRenderer.invoke(IpcInvokeContract.chatContinue.ch, req),
   chatStop: (req) => ipcRenderer.invoke(IpcInvokeContract.chatStop.ch, req),
   appCheckUpdate: () => ipcRenderer.invoke(IpcInvokeContract.appCheckUpdate.ch),
+  calendarAddTask: (req) => ipcRenderer.invoke(IpcInvokeContract.calendarAddTask.ch, req),
   appOpenExternal: (req) => ipcRenderer.invoke(IpcInvokeContract.appOpenExternal.ch, req),
   notifyPhaseComplete: (req) => ipcRenderer.invoke(IpcInvokeContract.notifyPhaseComplete.ch, req),
   setAlwaysOnTopWindow: (req) => ipcRenderer.invoke(IpcInvokeContract.setAlwaysOnTopWindow.ch, req),

@@ -22,6 +22,10 @@ files:
 
 mac:
   category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: assets/build/entitlements.mac.plist
+  entitlementsInherit: assets/build/entitlements.mac.plist
   target:
     - target: dmg
       arch:
@@ -29,6 +33,10 @@ mac:
         - x64
   extendInfo:
     NSHumanReadableCopyright: Copyright © 2026 dkisser
+    NSCalendarsFullAccessUsageDescription: Tiny Schedule 需要访问系统日历以将任务作为事件写入。
+  extraResources:
+    - from: bin/event-helper
+      to: bin/event-helper
 
 dmg:
   title: ${productName} ${version}

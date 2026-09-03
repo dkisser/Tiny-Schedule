@@ -1,5 +1,6 @@
 import {
   applyEntryChange,
+  type CalendarAddTaskOutput,
   INBOX_PROJECT_ID,
   localDate,
   SYSTEM_TAG_IDS,
@@ -7,8 +8,11 @@ import {
   type TimeEntry,
 } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
-import { ChevronLeft, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { CalendarPlus, ChevronLeft, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
+import { api } from '../api';
+import { isMacOS } from '../lib/platform';
 import { blankTask, taskProjectTitle, taskTagLabel } from '../lib/tasks';
 import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { useDataStore } from '../stores/data';
@@ -38,6 +42,7 @@ export function TaskDetail({ task }: { task: Task }) {
   const [editingNotes, setEditingNotes] = useState(false);
   const [editEntry, setEditEntry] = useState<TimeEntry | null>(null);
   const [deleteEntry, setDeleteEntry] = useState<TimeEntry | null>(null);
+  const [addingToCalendar, setAddingToCalendar] = useState(false);
   const cherryRef = useRef<Cherry | null>(null);
   // 标记 Done / Cancel 已经处理过当前编辑会话，MarkdownEditor 卸载时不要重复 flush。
   const notesHandledRef = useRef(false);
@@ -201,6 +206,47 @@ export function TaskDetail({ task }: { task: Task }) {
           />
         </div>
       </div>
+
+      {isMacOS() && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          disabled={!task.dueDay || addingToCalendar}
+          title={!task.dueDay ? '请先设置截止日期' : '添加到 macOS 日历'}
+          onClick={async () => {
+            setAddingToCalendar(true);
+            try {
+              const result = (await api().calendarAddTask({
+                taskId: task.id,
+              })) as CalendarAddTaskOutput;
+              if (result.ok) {
+                toast.success('已添加到日历');
+              } else {
+                const messages: Record<typeof result.code, string> = {
+                  'no-dueDay': '请先设置截止日期',
+                  'permission-denied':
+                    '未授权日历权限,请在「系统设置 → 隐私与安全性 → 日历」中允许',
+                  'calendar-app-unavailable': '未检测到日历应用',
+                  unknown: '添加到日历失败,请查看日志',
+                };
+                toast.error(messages[result.code] ?? result.message);
+              }
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : '未知错误');
+            } finally {
+              setAddingToCalendar(false);
+            }
+          }}
+        >
+          {addingToCalendar ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <CalendarPlus className="size-4" />
+          )}
+          添加到日历
+        </Button>
+      )}
 
       <div>
         <div className="mb-1 text-xs text-muted-foreground">子任务</div>

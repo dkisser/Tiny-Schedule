@@ -29,6 +29,7 @@ import type { DataStore } from './dataStore';
 import { exportProjectTaskList, exportWorklog } from './exporter';
 import { mergeImport, normalizeBackup } from './importer';
 import { decryptKey, encryptKey } from './keys';
+import { addTaskToMacCalendar } from './macos/calendar';
 import { migrateRemoveTodayTag } from './migrations';
 import { checkForUpdate } from './updater';
 
@@ -449,6 +450,28 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     },
 
     appCheckUpdate: () => checkForUpdate(getVersion()),
+
+    calendarAddTask: async ({ taskId }) => {
+      const snapshot = store.get();
+      const task = snapshot.tasks[taskId];
+      if (!task) {
+        logger.warn({ action: 'calendar:addTask', taskId, reason: 'not-found' });
+        return { ok: false, code: 'unknown', message: '任务不存在' } as const;
+      }
+      const project = snapshot.projects[task.projectId];
+      const result = await addTaskToMacCalendar({ task, project });
+      if (!result.ok) {
+        logger.warn({
+          action: 'calendar:addTask',
+          taskId,
+          code: result.code,
+          message: result.message,
+        });
+      } else {
+        logger.info({ action: 'calendar:addTask', taskId, eventId: result.eventId });
+      }
+      return result;
+    },
 
     appOpenExternal: async ({ url }) => {
       // Only https: reaches shell.openExternal; other schemes (file:,

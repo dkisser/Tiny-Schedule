@@ -15,11 +15,12 @@
   "homepage": "https://github.com/dkisser/Tiny-Schedule",
   "main": "./out/main/main.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build:event-helper": "bash ./scripts/build-event-helper.sh",
+    "dev": "npm run build:event-helper && electron-vite dev",
+    "build": "npm run build:event-helper && electron-vite build",
     "test": "bun test",
-    "release": "electron-builder --mac --publish never",
-    "release:dir": "electron-builder --mac --dir"
+    "release": "REBUILD_EVENT_HELPER=1 npm run build:event-helper && electron-builder --mac --publish never --config electron-builder.yml",
+    "release:dir": "REBUILD_EVENT_HELPER=1 npm run build:event-helper && electron-builder --mac --dir --config electron-builder.yml"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.84.1",

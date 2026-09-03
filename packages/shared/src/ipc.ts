@@ -38,6 +38,7 @@ export const Ipc = {
   chatDone: 'chat:done',
   chatError: 'chat:error',
   uiNewTask: 'ui:newTask',
+  calendarAddTask: 'calendar:addTask',
   appCheckUpdate: 'app:checkUpdate',
   appOpenExternal: 'app:openExternal',
   uiUpdateAvailable: 'ui:updateAvailable',
@@ -244,6 +245,21 @@ export const ImportRunResultSchema = z.object({
 });
 export type ImportRunResult = z.infer<typeof ImportRunResultSchema>;
 
+export const CalendarAddTaskInputSchema = z.object({
+  taskId: z.string().min(1),
+});
+export type CalendarAddTaskInput = z.infer<typeof CalendarAddTaskInputSchema>;
+
+export const CalendarAddTaskOutputSchema = z.union([
+  z.object({ ok: z.literal(true), eventId: z.string() }),
+  z.object({
+    ok: z.literal(false),
+    code: z.enum(['no-dueDay', 'permission-denied', 'calendar-app-unavailable', 'unknown']),
+    message: z.string(),
+  }),
+]);
+export type CalendarAddTaskOutput = z.infer<typeof CalendarAddTaskOutputSchema>;
+
 export const CheckUpdateResultSchema = z.object({
   current: z.string(), // app.getVersion(), present even when offline
   hasUpdate: z.boolean(),
@@ -448,6 +464,11 @@ export const IpcInvokeContract = {
     res: null as unknown as { requestId: string } | { error: string },
   },
   chatStop: { ch: Ipc.chatStop, req: ChatStopReqSchema, res: null as unknown as void },
+  calendarAddTask: {
+    ch: Ipc.calendarAddTask,
+    req: CalendarAddTaskInputSchema,
+    res: null as unknown as CalendarAddTaskOutput,
+  },
   appCheckUpdate: { ch: Ipc.appCheckUpdate, res: null as unknown as CheckUpdateResult },
   appOpenExternal: {
     ch: Ipc.appOpenExternal,

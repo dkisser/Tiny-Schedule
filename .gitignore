@@ -23,3 +23,7 @@ packages/app/release/
 *.zip
 *.blockmap
 *.app
+
+# Swift Package Manager 产物(event-helper Swift CLI)
+packages/app/event-helper/.build/
+packages/app/event-helper/Package.resolved

@@ -46,12 +46,16 @@ jobs:
 
       - name: Build macOS artifacts (electron-builder)
         working-directory: packages/app
+        # 用 `bun run release:dir` 而不是直接 bunx electron-builder:
+        # 前者会自动 REBUILD_EVENT_HELPER=1,确保 .app 内嵌的 event-helper 是新构建的
+        # (避免"改了 Swift 源码但忘了 commit 新二进制"的 CI 漂移)。
+        # --config electron-builder.yml 显式指向 yml 配置,避免 electron-builder
+        # 回退到读 package.json (无)。
+        #
         # 不签名 / 不公证：CSC_LINK / APPLE_ID 等环境变量故意不设置
         # 不让 electron-builder 自己发布：使用 --publish never，
         # 改由下一步 softprops/action-gh-release 用 pushed tag 创建 Release
-        run: |
-          bunx electron-builder --mac --publish never \
-            --config electron-builder.yml
+        run: bun run release:dir
 
       - name: Create GitHub Release & upload artifacts
         uses: softprops/action-gh-release@v2

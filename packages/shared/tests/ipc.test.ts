@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import {
   AppDataSchema,
+  CalendarAddTaskInputSchema,
+  CalendarAddTaskOutputSchema,
   ExportMarkdownReqSchema,
   Ipc,
   ProjectUpdateReqSchema,
@@ -84,5 +86,37 @@ describe('schemas', () => {
 
   test('ProjectUpdateReqSchema rejects non-boolean isArchived', () => {
     expect(() => ProjectUpdateReqSchema.parse({ id: 'p1', isArchived: 'yes' })).toThrow();
+  });
+});
+
+describe('calendarAddTask IPC', () => {
+  test('calendar channel exists', () => {
+    expect(Ipc.calendarAddTask).toBe('calendar:addTask');
+  });
+
+  test('input requires taskId', () => {
+    expect(CalendarAddTaskInputSchema.safeParse({}).success).toBe(false);
+    expect(CalendarAddTaskInputSchema.safeParse({ taskId: '' }).success).toBe(false);
+    expect(CalendarAddTaskInputSchema.parse({ taskId: 't1' }).taskId).toBe('t1');
+  });
+
+  test('output success shape', () => {
+    const ok = CalendarAddTaskOutputSchema.parse({ ok: true, eventId: 'evt-1' });
+    expect(ok).toEqual({ ok: true, eventId: 'evt-1' });
+  });
+
+  test('output failure codes', () => {
+    for (const code of [
+      'no-dueDay',
+      'permission-denied',
+      'calendar-app-unavailable',
+      'unknown',
+    ] as const) {
+      const r = CalendarAddTaskOutputSchema.parse({ ok: false, code, message: 'x' });
+      expect(r).toEqual({ ok: false, code, message: 'x' });
+    }
+    expect(
+      CalendarAddTaskOutputSchema.safeParse({ ok: false, code: 'bogus', message: 'x' }).success,
+    ).toBe(false);
   });
 });
