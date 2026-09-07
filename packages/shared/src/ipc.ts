@@ -1,10 +1,22 @@
 import { z } from 'zod';
-import type { AppData, AppSettings, ChatSession, Task } from './models';
+import type {
+  AppData,
+  AppSettings,
+  ChatSession,
+  FollowUp,
+  FollowUpEntry,
+  Idea,
+  Task,
+} from './models';
 
 export const Ipc = {
   dataLoad: 'data:load',
   taskUpsert: 'task:upsert',
   taskDelete: 'task:delete',
+  followUpUpsert: 'followUp:upsert',
+  followUpDelete: 'followUp:delete',
+  ideaUpsert: 'idea:upsert',
+  ideaDelete: 'idea:delete',
   orderSet: 'order:set',
   projectCreate: 'project:create',
   projectUpdate: 'project:update',
@@ -78,6 +90,33 @@ export const TaskSchema = z.object({
 });
 export type TaskPayload = z.infer<typeof TaskSchema>;
 
+const FollowUpEntrySchema = z.object({
+  id: z.string().min(1),
+  at: z.number(),
+  text: z.string(),
+});
+
+export const FollowUpSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  notes: z.string(),
+  // default([]) lets entries be added to persisted follow-ups later without a migration.
+  entries: z.array(FollowUpEntrySchema).default([]),
+  createdAt: z.number(),
+  nextFollowUpDay: z.string().optional(),
+  isResolved: z.boolean(),
+  resolvedAt: z.number().optional(),
+});
+
+export const IdeaSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  notes: z.string(),
+  createdAt: z.number(),
+  convertedAt: z.number().optional(),
+  convertedTaskId: z.string().optional(),
+});
+
 const AiProviderSchema = z.object({
   id: z.string(),
   registryId: z.string(),
@@ -141,11 +180,19 @@ export const AppDataSchema = z.object({
   metric: z.unknown(),
   boards: z.unknown(),
   misc: z.record(z.string(), z.unknown()),
+  // Default backfills data.json files written before the FollowUp module existed.
+  followUps: z.record(z.string(), FollowUpSchema).default({}),
+  // Default backfills data.json files written before the Idea module existed.
+  ideas: z.record(z.string(), IdeaSchema).default({}),
   settings: SettingsSchema,
   activeTimer: ActiveTimerSchema.nullable(),
 });
 
 export const TaskDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+export const FollowUpDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+export const IdeaDeleteReqSchema = z.object({ id: z.string().min(1) });
 
 export const OrderSetReqSchema = z.object({
   viewKey: z.string().min(1),
@@ -390,6 +437,26 @@ export const IpcInvokeContract = {
   dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
   taskUpsert: { ch: Ipc.taskUpsert, req: TaskSchema, res: null as unknown as AppData },
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
+  followUpUpsert: {
+    ch: Ipc.followUpUpsert,
+    req: FollowUpSchema,
+    res: null as unknown as AppData,
+  },
+  followUpDelete: {
+    ch: Ipc.followUpDelete,
+    req: FollowUpDeleteReqSchema,
+    res: null as unknown as AppData,
+  },
+  ideaUpsert: {
+    ch: Ipc.ideaUpsert,
+    req: IdeaSchema,
+    res: null as unknown as AppData,
+  },
+  ideaDelete: {
+    ch: Ipc.ideaDelete,
+    req: IdeaDeleteReqSchema,
+    res: null as unknown as AppData,
+  },
   orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
   projectCreate: {
     ch: Ipc.projectCreate,
@@ -534,4 +601,4 @@ export function maskDataForRenderer(data: AppData): AppData {
   };
 }
 
-export type { AppData, AppSettings, Task };
+export type { AppData, AppSettings, FollowUp, FollowUpEntry, Idea, Task };

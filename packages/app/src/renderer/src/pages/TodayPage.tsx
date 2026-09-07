@@ -1,11 +1,12 @@
-import { localDate } from '@tiny-schedule/shared';
-import { CheckCircle2, ChevronRight } from 'lucide-react';
+import { addDays, localDate } from '@tiny-schedule/shared';
+import { CheckCircle2, ChevronRight, Hourglass } from 'lucide-react';
 import { useState } from 'react';
 import { api } from '../api';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
+import { dueFollowUps, waitingDays } from '../lib/followUps';
 import { applyManualOrder, taskOrderFor, todayDoneTasks, todayTasks } from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
@@ -19,12 +20,16 @@ function formatMs(ms: number): string {
 
 export function TodayPage() {
   const data = useDataStore((s) => s.data);
+  const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const setView = useUiStore((s) => s.setView);
+  const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   const [finishOpen, setFinishOpen] = useState(false);
   if (!data) return null;
   const today = localDate(Date.now());
   const tasks = applyManualOrder(todayTasks(data), taskOrderFor(data, 'today'));
   const doneTasks = todayDoneTasks(data);
+  const due = dueFollowUps(data);
   const workedToday = Object.values(data.tasks).reduce(
     (sum, t) => sum + (t.timeSpentOnDay[today] ?? 0),
     0,
@@ -64,6 +69,51 @@ export function TodayPage() {
       {finishedToday && (
         <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm text-muted-foreground">
           今天已结束（Finish Day 已完成）
+        </div>
+      )}
+      {due.length > 0 && (
+        <div className="mt-3 rounded-md border border-amber-400/60 bg-amber-500/10 px-3 py-2">
+          <div className="flex items-center gap-1 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <Hourglass className="h-3 w-3" /> 需要跟进
+          </div>
+          <div className="mt-1 flex flex-col gap-1">
+            {due.map((f) => (
+              <div
+                key={f.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setView({ type: 'followUps' });
+                  selectFollowUp(f.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setView({ type: 'followUps' });
+                    selectFollowUp(f.id);
+                  }
+                }}
+                className="flex cursor-pointer items-center gap-2 rounded px-1 text-sm hover:bg-amber-500/10"
+              >
+                <span className="min-w-0 flex-1 truncate">{f.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  已等待 {waitingDays(f)} 天
+                </span>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void upsertFollowUp({
+                      ...f,
+                      nextFollowUpDay: addDays(today, 7),
+                    });
+                  }}
+                >
+                  +7天
+                </Button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <div className="mt-4">

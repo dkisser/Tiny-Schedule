@@ -29,6 +29,34 @@ export interface Task {
   created: number; // epoch ms
 }
 
+export interface FollowUpEntry {
+  id: string;
+  at: number; // epoch ms
+  text: string;
+}
+
+// 长期等待外部反馈的事项（如 ICP 审核）：与 Task 完全分开，不参与计时/今日。
+export interface FollowUp {
+  id: string;
+  title: string;
+  notes: string; // markdown，在等谁/背景说明
+  entries: FollowUpEntry[]; // 跟进记录时间线，按 at 升序追加
+  createdAt: number; // epoch ms，开始等待的时间
+  nextFollowUpDay?: string; // YYYY-MM-DD，下次跟进日期
+  isResolved: boolean;
+  resolvedAt?: number; // epoch ms
+}
+
+// 灵光一闪的想法：与 Task 完全分开，不参与计时/今日；挑中后可一键转为任务。
+export interface Idea {
+  id: string;
+  title: string;
+  notes: string; // markdown 备注
+  createdAt: number; // epoch ms
+  convertedAt?: number; // epoch ms；设置即表示已转为任务
+  convertedTaskId?: string; // 转化生成的任务 id
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -113,6 +141,8 @@ export interface AppData {
   tasks: Record<string, Task>;
   projects: Record<string, Project>;
   tags: Record<string, Tag>;
+  followUps: Record<string, FollowUp>;
+  ideas: Record<string, Idea>;
   timeTracking: unknown; // preserved raw from backup
   notes: unknown;
   planner: unknown;
@@ -166,6 +196,8 @@ export function emptyAppData(): AppData {
     metric: null,
     boards: null,
     misc: {},
+    followUps: {},
+    ideas: {},
     settings: defaultSettings(),
     activeTimer: null,
   };

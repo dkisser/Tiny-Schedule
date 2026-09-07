@@ -6,7 +6,9 @@ import {
   CalendarDays,
   ChevronRight,
   Download,
+  Hourglass,
   Inbox,
+  Lightbulb,
   Pencil,
   Plus,
   Settings,
@@ -15,6 +17,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useState } from 'react';
+import { dueFollowUps } from '../lib/followUps';
+import { openIdeas } from '../lib/ideas';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { type SidebarGroup, useUiStore, type View } from '../stores/ui';
@@ -282,6 +286,27 @@ export function Sidebar() {
         onClick={() => setView({ type: 'upcoming' })}
       >
         <CalendarDays className="h-4 w-4" /> Upcoming
+      </NavItem>
+      <NavItem
+        active={isActive({ type: 'followUps' })}
+        onClick={() => setView({ type: 'followUps' })}
+      >
+        <Hourglass className="h-4 w-4" />
+        <span className="flex-1 text-left">跟进</span>
+        {dueFollowUps(data).length > 0 && (
+          <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
+            {dueFollowUps(data).length}
+          </span>
+        )}
+      </NavItem>
+      <NavItem active={isActive({ type: 'ideas' })} onClick={() => setView({ type: 'ideas' })}>
+        <Lightbulb className="h-4 w-4" />
+        <span className="flex-1 text-left">想法</span>
+        {openIdeas(data).length > 0 && (
+          <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
+            {openIdeas(data).length}
+          </span>
+        )}
       </NavItem>
 
       <Collapsible

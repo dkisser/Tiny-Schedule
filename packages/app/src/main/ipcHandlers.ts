@@ -116,6 +116,44 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       return masked(next);
     },
 
+    followUpUpsert: (followUp) => {
+      const next = store.update((d) => ({
+        ...d,
+        followUps: { ...d.followUps, [followUp.id]: followUp },
+      }));
+      logger.info({ action: 'followUp:upsert', followUpId: followUp.id, title: followUp.title });
+      return masked(next);
+    },
+
+    followUpDelete: ({ id }) => {
+      const next = store.update((d) => {
+        const followUps = { ...d.followUps };
+        delete followUps[id];
+        return { ...d, followUps };
+      });
+      logger.info({ action: 'followUp:delete', followUpId: id });
+      return masked(next);
+    },
+
+    ideaUpsert: (idea) => {
+      const next = store.update((d) => ({
+        ...d,
+        ideas: { ...d.ideas, [idea.id]: idea },
+      }));
+      logger.info({ action: 'idea:upsert', ideaId: idea.id, title: idea.title });
+      return masked(next);
+    },
+
+    ideaDelete: ({ id }) => {
+      const next = store.update((d) => {
+        const ideas = { ...d.ideas };
+        delete ideas[id];
+        return { ...d, ideas };
+      });
+      logger.info({ action: 'idea:delete', ideaId: id });
+      return masked(next);
+    },
+
     orderSet: ({ viewKey, ids }) => {
       store.update((d) => {
         const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;

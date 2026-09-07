@@ -5,6 +5,8 @@ export type View =
   | { type: 'project'; id: string }
   | { type: 'tag'; id: string }
   | { type: 'upcoming' }
+  | { type: 'followUps' }
+  | { type: 'ideas' }
   | { type: 'ai' }
   | { type: 'export' }
   | { type: 'settings' };
@@ -19,11 +21,15 @@ export type SidebarGroup = 'projects' | 'tags' | 'archived';
 interface UiState {
   view: View;
   selectedTaskId: string | null;
+  selectedFollowUpId: string | null;
+  selectedIdeaId: string | null;
   aiAutoRun: AiAutoRun | null;
   aiView: 'report' | 'chat';
   collapsedGroups: Record<SidebarGroup, boolean>;
   setView: (view: View) => void;
   selectTask: (taskId: string | null) => void;
+  selectFollowUp: (followUpId: string | null) => void;
+  selectIdea: (ideaId: string | null) => void;
   setAiView: (v: 'report' | 'chat') => void;
   toggleSidebarGroup: (group: SidebarGroup) => void;
 }
@@ -31,11 +37,20 @@ interface UiState {
 export const useUiStore = create<UiState>((set) => ({
   view: { type: 'today' },
   selectedTaskId: null,
+  selectedFollowUpId: null,
+  selectedIdeaId: null,
   aiAutoRun: null,
   aiView: 'report',
   collapsedGroups: { projects: false, tags: false, archived: true },
-  setView: (view) => set({ view, selectedTaskId: null }),
-  selectTask: (taskId) => set({ selectedTaskId: taskId }),
+  setView: (view) =>
+    set({ view, selectedTaskId: null, selectedFollowUpId: null, selectedIdeaId: null }),
+  // Task / FollowUp / Idea 详情面板共用右侧 380px 区域，选中必须互斥。
+  selectTask: (taskId) =>
+    set({ selectedTaskId: taskId, selectedFollowUpId: null, selectedIdeaId: null }),
+  selectFollowUp: (followUpId) =>
+    set({ selectedFollowUpId: followUpId, selectedTaskId: null, selectedIdeaId: null }),
+  selectIdea: (ideaId) =>
+    set({ selectedIdeaId: ideaId, selectedTaskId: null, selectedFollowUpId: null }),
   setAiView: (aiView) => set({ aiView }),
   toggleSidebarGroup: (group) =>
     set((s) => ({

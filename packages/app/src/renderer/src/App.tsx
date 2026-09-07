@@ -2,6 +2,8 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { api } from './api';
+import { FollowUpDetail } from './components/FollowUpDetail';
+import { IdeaDetail } from './components/IdeaDetail';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
 import { TaskDetail } from './components/TaskDetail';
@@ -12,6 +14,8 @@ import { UpdateDialog } from './components/UpdateDialog';
 import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks } from './lib/tasks';
 import { AiPage } from './pages/AiPage';
 import { ExportPage } from './pages/ExportPage';
+import { FollowUpsPage } from './pages/FollowUpsPage';
+import { IdeasPage } from './pages/IdeasPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
@@ -85,6 +89,8 @@ export default function App() {
   const load = useDataStore((s) => s.load);
   const view = useUiStore((s) => s.view);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
+  const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
+  const selectedIdeaId = useUiStore((s) => s.selectedIdeaId);
   const theme = data?.settings.theme;
 
   useEffect(() => {
@@ -104,6 +110,8 @@ export default function App() {
   if (!data) return <div className="p-4">加载中…</div>;
 
   const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
+  const selectedFollowUp = selectedFollowUpId ? (data.followUps[selectedFollowUpId] ?? null) : null;
+  const selectedIdea = selectedIdeaId ? (data.ideas[selectedIdeaId] ?? null) : null;
 
   const page =
     view.type === 'today' ? (
@@ -114,6 +122,10 @@ export default function App() {
       <TagPage tagId={view.id} />
     ) : view.type === 'upcoming' ? (
       <UpcomingPage />
+    ) : view.type === 'followUps' ? (
+      <FollowUpsPage />
+    ) : view.type === 'ideas' ? (
+      <IdeasPage />
     ) : view.type === 'ai' ? (
       <AiPage />
     ) : view.type === 'export' ? (
@@ -140,6 +152,30 @@ export default function App() {
                 className="shrink-0 overflow-hidden"
               >
                 <TaskDetail key={selectedTask.id} task={selectedTask} />
+              </motion.div>
+            )}
+            {selectedFollowUp && (
+              <motion.div
+                key="followup-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <FollowUpDetail key={selectedFollowUp.id} followUp={selectedFollowUp} />
+              </motion.div>
+            )}
+            {selectedIdea && (
+              <motion.div
+                key="idea-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <IdeaDetail key={selectedIdea.id} idea={selectedIdea} />
               </motion.div>
             )}
           </AnimatePresence>

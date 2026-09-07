@@ -1,4 +1,4 @@
-import type { AppData, AppSettings, Task } from '@tiny-schedule/shared';
+import type { AppData, AppSettings, FollowUp, Idea, Task } from '@tiny-schedule/shared';
 import { create } from 'zustand';
 import { api } from '../api';
 
@@ -19,6 +19,10 @@ interface DataState {
   load: () => Promise<void>;
   upsertTask: (task: Task) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  upsertFollowUp: (followUp: FollowUp) => Promise<void>;
+  deleteFollowUp: (id: string) => Promise<void>;
+  upsertIdea: (idea: Idea) => Promise<void>;
+  deleteIdea: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   createProject: (title: string) => Promise<void>;
   updateProject: (
@@ -48,6 +52,22 @@ export const useDataStore = create<DataState>((set) => ({
   },
   deleteTask: async (id) => {
     const data = await api().taskDelete({ id });
+    set({ data });
+  },
+  upsertFollowUp: async (followUp) => {
+    const data = await api().followUpUpsert(followUp);
+    set({ data });
+  },
+  deleteFollowUp: async (id) => {
+    const data = await api().followUpDelete({ id });
+    set({ data });
+  },
+  upsertIdea: async (idea) => {
+    const data = await api().ideaUpsert(idea);
+    set({ data });
+  },
+  deleteIdea: async (id) => {
+    const data = await api().ideaDelete({ id });
     set({ data });
   },
   setTaskOrder: (viewKey, ids) => {

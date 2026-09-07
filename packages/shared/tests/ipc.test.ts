@@ -4,6 +4,8 @@ import {
   CalendarAddTaskInputSchema,
   CalendarAddTaskOutputSchema,
   ExportMarkdownReqSchema,
+  FollowUpSchema,
+  IdeaSchema,
   Ipc,
   ProjectUpdateReqSchema,
   SettingsUpdateReqSchema,
@@ -45,6 +47,48 @@ describe('schemas', () => {
 
   test('AppDataSchema accepts emptyAppData()', () => {
     expect(AppDataSchema.parse(emptyAppData()).version).toBe(1);
+  });
+
+  test('AppDataSchema backfills followUps for legacy data without the field', () => {
+    const legacy = emptyAppData() as unknown as Record<string, unknown>;
+    delete legacy.followUps;
+    const parsed = AppDataSchema.parse(legacy);
+    expect(parsed.followUps).toEqual({});
+  });
+
+  test('AppDataSchema backfills ideas for legacy data without the field', () => {
+    const legacy = emptyAppData() as unknown as Record<string, unknown>;
+    delete legacy.ideas;
+    const parsed = AppDataSchema.parse(legacy);
+    expect(parsed.ideas).toEqual({});
+  });
+
+  test('IdeaSchema rejects empty title', () => {
+    expect(IdeaSchema.safeParse({ id: 'i1', title: '  ', notes: '', createdAt: 0 }).success).toBe(
+      false,
+    );
+    const parsed = IdeaSchema.parse({ id: 'i1', title: '做个插件', notes: '', createdAt: 0 });
+    expect(parsed.convertedAt).toBeUndefined();
+  });
+
+  test('FollowUpSchema defaults entries to [] and rejects empty title', () => {
+    const parsed = FollowUpSchema.parse({
+      id: 'f1',
+      title: 'ICP 审核',
+      notes: '',
+      createdAt: 0,
+      isResolved: false,
+    });
+    expect(parsed.entries).toEqual([]);
+    expect(
+      FollowUpSchema.safeParse({
+        id: 'f1',
+        title: '  ',
+        notes: '',
+        createdAt: 0,
+        isResolved: false,
+      }).success,
+    ).toBe(false);
   });
 
   test('SettingsUpdateReq is partial', () => {

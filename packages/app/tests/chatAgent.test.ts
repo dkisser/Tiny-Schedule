@@ -66,6 +66,8 @@ function setup(options: SetupOptions = {}) {
       metric: null,
       boards: null,
       misc: {},
+      followUps: {},
+      ideas: {},
       settings: {
         userName: '',
         avatar: null,

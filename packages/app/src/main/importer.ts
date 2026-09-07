@@ -135,6 +135,8 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
     },
     settings: defaultSettings(),
     activeTimer: null,
+    followUps: {},
+    ideas: {},
   };
 
   return {

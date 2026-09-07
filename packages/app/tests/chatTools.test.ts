@@ -72,6 +72,8 @@ function fixture(): AppData {
       idlePauseMinutes: 5,
     },
     activeTimer: null,
+    followUps: {},
+    ideas: {},
   };
 }
 
