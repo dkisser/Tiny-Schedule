@@ -79,6 +79,16 @@ describe('mergeImport', () => {
     ];
     current.misc.aiHistory = [{ id: 'h1', content: 'x' }];
     const { data: imported } = normalizeBackup(fixture);
+    current.ideas.localIdea = {
+      id: 'localIdea',
+      title: '本地想法',
+      notes: '',
+      createdAt: 1,
+      status: 'incubating',
+      projectId: 'p1',
+      validationGoal: '验证目标',
+      timeline: [{ id: 'e1', createdAt: 1, text: '进展' }],
+    };
     const merged = mergeImport(current, imported);
     expect(merged.settings.userName).toBe('me');
     expect(merged.activeTimer?.taskId).toBe('x');
@@ -89,6 +99,9 @@ describe('mergeImport', () => {
     // AI sessions and history survive the import
     expect((merged.misc.chatSessions as unknown[]).length).toBe(1);
     expect((merged.misc.aiHistory as unknown[]).length).toBe(1);
+    // 本地想法（含验证记录）不被导入清空
+    expect(merged.ideas.localIdea?.status).toBe('incubating');
+    expect(merged.ideas.localIdea?.timeline).toHaveLength(1);
   });
 
   test('imported entity wins on ID collision', () => {

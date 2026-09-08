@@ -12,6 +12,7 @@ import {
   type IpcInvokeKey,
   localDate,
   maskDataForRenderer,
+  PROJECT_TITLE_MAX_LENGTH,
 } from '@tiny-schedule/shared';
 import {
   type BrowserWindow,
@@ -163,6 +164,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     },
 
     projectCreate: (req) => {
+      const title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
       const next = store.update((d) => {
         const id = `p_${randomUUID()}`;
         return {
@@ -171,7 +173,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
             ...d.projects,
             [id]: {
               id,
-              title: req.title,
+              title,
               icon: req.icon,
               isArchived: false,
               primaryColor: req.primaryColor,
@@ -179,7 +181,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           },
         };
       });
-      logger.info({ action: 'project:create', title: req.title });
+      logger.info({ action: 'project:create', title });
       return masked(next);
     },
 
@@ -192,7 +194,7 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         // request. `null` clears (e.g. clearing a project color); `undefined`
         // leaves the existing value untouched. Mirrors `tagUpdate`.
         const patch: Partial<typeof prev> = {};
-        if (req.title !== undefined) patch.title = req.title;
+        if (req.title !== undefined) patch.title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
         if (req.primaryColor !== undefined) patch.primaryColor = req.primaryColor;
         if (req.isArchived !== undefined) patch.isArchived = req.isArchived;
         if (Object.keys(patch).length === 0) return d;

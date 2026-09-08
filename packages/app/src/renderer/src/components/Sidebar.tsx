@@ -1,4 +1,9 @@
-import { hasProjectColor, INBOX_PROJECT_ID, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
+import {
+  hasProjectColor,
+  INBOX_PROJECT_ID,
+  PROJECT_TITLE_MAX_LENGTH,
+  SYSTEM_TAG_IDS,
+} from '@tiny-schedule/shared';
 import {
   Archive,
   ArchiveRestore,
@@ -18,7 +23,7 @@ import {
 } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useState } from 'react';
 import { dueFollowUps } from '../lib/followUps';
-import { openIdeas } from '../lib/ideas';
+import { ideaByProjectId, openIdeas } from '../lib/ideas';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { type SidebarGroup, useUiStore, type View } from '../stores/ui';
@@ -67,12 +72,12 @@ export function Sidebar() {
   const data = useDataStore((s) => s.data);
   const createProject = useDataStore((s) => s.createProject);
   const updateProject = useDataStore((s) => s.updateProject);
-  const deleteProject = useDataStore((s) => s.deleteProject);
   const createTag = useDataStore((s) => s.createTag);
   const updateTag = useDataStore((s) => s.updateTag);
   const deleteTag = useDataStore((s) => s.deleteTag);
   const view = useUiStore((s) => s.view);
   const setView = useUiStore((s) => s.setView);
+  const setClosingIdea = useUiStore((s) => s.setClosingIdea);
   const collapsedGroups = useUiStore((s) => s.collapsedGroups);
   const toggleSidebarGroup = useUiStore((s) => s.toggleSidebarGroup);
   const [creating, setCreating] = useState<SidebarGroup | null>(null);
@@ -83,10 +88,8 @@ export function Sidebar() {
   if (!data) return null;
 
   const openCountByProject = new Map<string, number>();
-  const taskCountByProject = new Map<string, number>();
   for (const t of Object.values(data.tasks)) {
     if (t.parentTaskId) continue;
-    taskCountByProject.set(t.projectId, (taskCountByProject.get(t.projectId) ?? 0) + 1);
     if (!t.isDone) {
       openCountByProject.set(t.projectId, (openCountByProject.get(t.projectId) ?? 0) + 1);
     }
@@ -110,7 +113,7 @@ export function Sidebar() {
     setCreating(null);
     setDraft('');
     if (!group || !title) return;
-    if (group === 'projects') await createProject(title);
+    if (group === 'projects') await createProject(title.slice(0, PROJECT_TITLE_MAX_LENGTH));
     else await createTag(title);
   };
 
@@ -130,17 +133,18 @@ export function Sidebar() {
     setRenaming(null);
     setRenameDraft('');
     if (!target || !title || title === target.title) return;
-    if (target.group === 'projects') await updateProject(target.id, { title });
+    if (target.group === 'projects')
+      await updateProject(target.id, { title: title.slice(0, PROJECT_TITLE_MAX_LENGTH) });
     else await updateTag(target.id, title);
   };
 
+  // 只有标签可删除；项目的唯一终结方式是归档（ADR 0001）。
   const confirmDelete = async () => {
     const target = deleteTarget;
     setDeleteTarget(null);
     if (!target) return;
     if ('id' in view && view.id === target.id) setView({ type: 'today' });
-    if (target.group === 'projects') await deleteProject(target.id);
-    else await deleteTag(target.id);
+    await deleteTag(target.id);
   };
 
   const createInput = (
@@ -148,6 +152,7 @@ export function Sidebar() {
       autoFocus
       value={draft}
       placeholder="名称，回车确认"
+      maxLength={creating === 'projects' ? PROJECT_TITLE_MAX_LENGTH : undefined}
       onChange={(e) => setDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') void submitCreate();
@@ -165,6 +170,7 @@ export function Sidebar() {
       autoFocus
       value={renameDraft}
       placeholder="名称，回车确认"
+      maxLength={renaming?.group === 'projects' ? PROJECT_TITLE_MAX_LENGTH : undefined}
       onChange={(e) => setRenameDraft(e.target.value)}
       onKeyDown={(e) => {
         if (e.key === 'Enter') void submitRename();
@@ -210,12 +216,20 @@ export function Sidebar() {
 
   // Projects get an Archive button (hides from sidebar but keeps stats).
   // Inbox is a system project and is never archivable.
+  // 项目不可删除（ADR 0001）：归档是唯一终结方式，行操作只有改名/归档-恢复/颜色。
   const projectRowActions = (e: EntityRef, archivable: boolean) => {
     const project = data?.projects[e.id];
     const archived = !!project?.isArchived;
     const onArchiveToggle = (ev: { stopPropagation: () => void }) => {
       ev.stopPropagation();
-      void updateProject(e.id, { isArchived: !archived });
+      const archiving = !archived;
+      void updateProject(e.id, { isArchived: archiving }).then(() => {
+        if (!archiving) return;
+        // 归档命中验证中想法时弹出闭环弹窗；暂不确定则想法自然进入待结论态。
+        const d = useDataStore.getState().data;
+        const idea = d ? ideaByProjectId(d, e.id) : undefined;
+        if (idea?.status === 'incubating') setClosingIdea(idea.id);
+      });
     };
     return (
       <div className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-accent group-hover/row:flex">
@@ -242,18 +256,6 @@ export function Sidebar() {
             {archived ? <ArchiveRestore /> : <Archive />}
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="删除"
-          className="text-muted-foreground hover:text-destructive"
-          onClick={(ev) => {
-            ev.stopPropagation();
-            setDeleteTarget(e);
-          }}
-        >
-          <Trash2 />
-        </Button>
       </div>
     );
   };
@@ -444,14 +446,10 @@ export function Sidebar() {
       <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              删除{deleteTarget?.group === 'projects' ? '项目' : '标签'}「{deleteTarget?.title}」？
-            </DialogTitle>
+            <DialogTitle>删除标签「{deleteTarget?.title}」？</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            {deleteTarget?.group === 'projects'
-              ? `该项目下 ${taskCountByProject.get(deleteTarget.id) ?? 0} 个任务将移入 Inbox，任务上显示的项目名保持不变。`
-              : '任务上已显示的历史标签名会保留，仅从侧栏移除该标签。'}
+            任务上已显示的历史标签名会保留，仅从侧栏移除该标签。
           </p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>

@@ -23,6 +23,9 @@ interface UiState {
   selectedTaskId: string | null;
   selectedFollowUpId: string | null;
   selectedIdeaId: string | null;
+  // 想法升级/闭环弹窗：值为目标想法 id，null 表示关闭。
+  upgradeIdeaId: string | null;
+  closingIdeaId: string | null;
   aiAutoRun: AiAutoRun | null;
   aiView: 'report' | 'chat';
   collapsedGroups: Record<SidebarGroup, boolean>;
@@ -30,6 +33,8 @@ interface UiState {
   selectTask: (taskId: string | null) => void;
   selectFollowUp: (followUpId: string | null) => void;
   selectIdea: (ideaId: string | null) => void;
+  setUpgradeIdea: (ideaId: string | null) => void;
+  setClosingIdea: (ideaId: string | null) => void;
   setAiView: (v: 'report' | 'chat') => void;
   toggleSidebarGroup: (group: SidebarGroup) => void;
 }
@@ -39,6 +44,8 @@ export const useUiStore = create<UiState>((set) => ({
   selectedTaskId: null,
   selectedFollowUpId: null,
   selectedIdeaId: null,
+  upgradeIdeaId: null,
+  closingIdeaId: null,
   aiAutoRun: null,
   aiView: 'report',
   collapsedGroups: { projects: false, tags: false, archived: true },
@@ -51,6 +58,8 @@ export const useUiStore = create<UiState>((set) => ({
     set({ selectedFollowUpId: followUpId, selectedTaskId: null, selectedIdeaId: null }),
   selectIdea: (ideaId) =>
     set({ selectedIdeaId: ideaId, selectedTaskId: null, selectedFollowUpId: null }),
+  setUpgradeIdea: (upgradeIdeaId) => set({ upgradeIdeaId }),
+  setClosingIdea: (closingIdeaId) => set({ closingIdeaId }),
   setAiView: (aiView) => set({ aiView }),
   toggleSidebarGroup: (group) =>
     set((s) => ({

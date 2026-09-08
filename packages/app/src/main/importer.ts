@@ -2,6 +2,7 @@ import {
   type AppData,
   defaultSettings,
   INBOX_PROJECT_ID,
+  PROJECT_TITLE_MAX_LENGTH,
   type Project,
   type Tag,
   type Task,
@@ -79,7 +80,7 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
     const theme = isRecord(p.theme) ? p.theme : {};
     projects[id] = {
       id,
-      title: typeof p.title === 'string' ? p.title : id,
+      title: (typeof p.title === 'string' ? p.title : id).slice(0, PROJECT_TITLE_MAX_LENGTH),
       icon: typeof p.icon === 'string' ? p.icon : undefined,
       isArchived: p.isArchived === true,
       primaryColor: typeof theme.primary === 'string' ? theme.primary : undefined,
@@ -167,6 +168,10 @@ export function mergeImport(current: AppData, imported: AppData): AppData {
     metric: imported.metric ?? current.metric,
     boards: imported.boards ?? current.boards,
     misc: { ...current.misc, ...imported.misc },
+    // Super Productivity 备份里没有想法/跟进概念：导入必须保留本地已有记录，
+    // 不能用 normalizeBackup 产出的空对象覆盖（决策 12）。
+    followUps: current.followUps,
+    ideas: current.ideas,
     settings: current.settings,
     activeTimer: current.activeTimer,
   };

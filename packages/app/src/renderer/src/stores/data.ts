@@ -1,4 +1,4 @@
-import type { AppData, AppSettings, FollowUp, Idea, Task } from '@tiny-schedule/shared';
+import type { AppData, AppSettings, FollowUp, Idea, Project, Task } from '@tiny-schedule/shared';
 import { create } from 'zustand';
 import { api } from '../api';
 
@@ -24,7 +24,8 @@ interface DataState {
   upsertIdea: (idea: Idea) => Promise<void>;
   deleteIdea: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
-  createProject: (title: string) => Promise<void>;
+  // Returns the newly created project (callers like 想法升级为项目 need its id).
+  createProject: (title: string) => Promise<Project | null>;
   updateProject: (
     id: string,
     patch: { title?: string; primaryColor?: string | null; isArchived?: boolean },
@@ -38,7 +39,7 @@ interface DataState {
   ) => Promise<void>;
 }
 
-export const useDataStore = create<DataState>((set) => ({
+export const useDataStore = create<DataState>((set, get) => ({
   data: null,
   loading: false,
   load: async () => {
@@ -82,8 +83,10 @@ export const useDataStore = create<DataState>((set) => ({
     void api().orderSet({ viewKey, ids });
   },
   createProject: async (title) => {
+    const prevIds = new Set(Object.keys(get().data?.projects ?? {}));
     const data = await api().projectCreate({ title });
     set({ data });
+    return Object.values(data.projects).find((p) => !prevIds.has(p.id)) ?? null;
   },
   updateProject: async (id, patch) => {
     const data = await api().projectUpdate({ id, ...patch });

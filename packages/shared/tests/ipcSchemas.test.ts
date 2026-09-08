@@ -6,6 +6,7 @@ import {
   ChatSessionDeleteReqSchema,
   ChatStatusEventSchema,
   ChatStopReqSchema,
+  IdeaSchema,
   Ipc,
 } from '../src/ipc';
 
@@ -50,5 +51,43 @@ describe('chat IPC schemas', () => {
     expect(ChatStatusEventSchema.safeParse({ sessionId: 's', status: 'bogus' }).success).toBe(
       false,
     );
+  });
+});
+
+describe('IdeaSchema status migration', () => {
+  const base = { id: 'i1', title: '想法', notes: '', createdAt: 1 };
+
+  test('legacy ideas without status derive from convertedAt', () => {
+    expect(IdeaSchema.parse(base).status).toBe('open');
+    expect(IdeaSchema.parse({ ...base, convertedAt: 2 }).status).toBe('converted');
+  });
+
+  test('explicit status wins over derivation', () => {
+    expect(IdeaSchema.parse({ ...base, status: 'incubating' }).status).toBe('incubating');
+    expect(IdeaSchema.parse({ ...base, status: 'done', convertedAt: 2 }).status).toBe('done');
+  });
+
+  test('invalid status falls back to derivation', () => {
+    expect(IdeaSchema.parse({ ...base, status: 'bogus' }).status).toBe('open');
+  });
+
+  test('new fields round-trip', () => {
+    const parsed = IdeaSchema.parse({
+      ...base,
+      status: 'incubating',
+      projectId: 'p1',
+      validationGoal: '目标',
+      timeline: [{ id: 'e1', createdAt: 3, text: '记录' }],
+      incubatedAt: 2,
+    });
+    expect(parsed.projectId).toBe('p1');
+    expect(parsed.timeline?.[0]?.text).toBe('记录');
+    const closed = IdeaSchema.parse({
+      ...base,
+      status: 'closed',
+      verdict: { result: 'partial', text: '一半', closedAt: 4 },
+      resolvedAt: 4,
+    });
+    expect(closed.verdict?.result).toBe('partial');
   });
 });

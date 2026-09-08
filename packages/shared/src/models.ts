@@ -47,15 +47,42 @@ export interface FollowUp {
   resolvedAt?: number; // epoch ms
 }
 
-// 灵光一闪的想法：与 Task 完全分开，不参与计时/今日；挑中后可一键转为任务。
+// 想法生命周期：open 是唯一可分流的状态；done/discarded 可重新打开；
+// converted/closed 是终态（closed 可修改结论）；incubating 的唯一出口是给结论。
+export type IdeaStatus = 'open' | 'done' | 'discarded' | 'converted' | 'incubating' | 'closed';
+
+// 验证中想法的演进日志条目（结构对齐 FollowUpEntry）。
+export interface IdeaEntry {
+  id: string;
+  createdAt: number; // epoch ms
+  text: string;
+}
+
+export interface IdeaVerdict {
+  result: 'validated' | 'invalidated' | 'partial';
+  text?: string;
+  closedAt: number; // epoch ms
+}
+
+// 灵光一闪的想法：与 Task 完全分开，不参与计时/今日；出口：转任务/完成/废弃/升级为项目。
 export interface Idea {
   id: string;
   title: string;
   notes: string; // markdown 备注
   createdAt: number; // epoch ms
+  // 旧数据无 status 字段，由 IdeaSchema 在解析时派生：convertedAt 存在 → converted，否则 → open。
+  status: IdeaStatus;
   convertedAt?: number; // epoch ms；设置即表示已转为任务
   convertedTaskId?: string; // 转化生成的任务 id
+  projectId?: string; // incubating/closed 时关联的专属项目（一对一）
+  validationGoal?: string; // 可选验证目标：怎么算验证成功
+  timeline?: IdeaEntry[]; // 演进日志，按 createdAt 升序追加
+  verdict?: IdeaVerdict; // closed 时的验证结论
+  incubatedAt?: number; // epoch ms，升级为项目的时间（验证中区排序用）
+  resolvedAt?: number; // epoch ms，进入 done/discarded/closed 的时间（已了结区排序用）
 }
+
+export const PROJECT_TITLE_MAX_LENGTH = 32;
 
 export interface Project {
   id: string;

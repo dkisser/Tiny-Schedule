@@ -108,14 +108,43 @@ export const FollowUpSchema = z.object({
   resolvedAt: z.number().optional(),
 });
 
-export const IdeaSchema = z.object({
+const IdeaEntrySchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1),
-  notes: z.string(),
   createdAt: z.number(),
-  convertedAt: z.number().optional(),
-  convertedTaskId: z.string().optional(),
+  text: z.string(),
 });
+
+const IdeaVerdictSchema = z.object({
+  result: z.enum(['validated', 'invalidated', 'partial']),
+  text: z.string().optional(),
+  closedAt: z.number(),
+});
+
+const IdeaStatusSchema = z.enum(['open', 'done', 'discarded', 'converted', 'incubating', 'closed']);
+
+export const IdeaSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().trim().min(1),
+    notes: z.string(),
+    createdAt: z.number(),
+    convertedAt: z.number().optional(),
+    convertedTaskId: z.string().optional(),
+    // 旧数据没有 status：catch 兜底非法值，transform 按 convertedAt 派生缺失值。
+    status: IdeaStatusSchema.optional().catch(undefined),
+    projectId: z.string().optional(),
+    validationGoal: z.string().optional(),
+    timeline: z.array(IdeaEntrySchema).optional(),
+    verdict: IdeaVerdictSchema.optional(),
+    incubatedAt: z.number().optional(),
+    resolvedAt: z.number().optional(),
+  })
+  .transform(
+    (idea): Idea => ({
+      ...idea,
+      status: idea.status ?? (idea.convertedAt !== undefined ? 'converted' : 'open'),
+    }),
+  );
 
 const AiProviderSchema = z.object({
   id: z.string(),

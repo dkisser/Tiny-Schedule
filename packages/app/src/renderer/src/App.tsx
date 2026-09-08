@@ -1,7 +1,9 @@
+import { Lightbulb } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { api } from './api';
+import { CloseIdeaDialog } from './components/CloseIdeaDialog';
 import { FollowUpDetail } from './components/FollowUpDetail';
 import { IdeaDetail } from './components/IdeaDetail';
 import { Layout } from './components/Layout';
@@ -11,6 +13,8 @@ import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
 import { PomodoroPhaseDialog } from './components/timer/PomodoroPhaseDialog';
 import { UpdateDialog } from './components/UpdateDialog';
+import { UpgradeIdeaDialog } from './components/UpgradeIdeaDialog';
+import { ideaByProjectId } from './lib/ideas';
 import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks } from './lib/tasks';
 import { AiPage } from './pages/AiPage';
 import { ExportPage } from './pages/ExportPage';
@@ -26,11 +30,35 @@ import { applyTheme } from './theme';
 
 function ProjectPage({ projectId }: { projectId: string }) {
   const data = useDataStore((s) => s.data);
+  const setView = useUiStore((s) => s.setView);
+  const selectIdea = useUiStore((s) => s.selectIdea);
   const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
   if (!data) return null;
   const viewKey = `project:${projectId}`;
+  // 双向可见：项目源自想法时，标题上方显示来源横幅，点击跳到想法详情。
+  const sourceIdea = ideaByProjectId(data, projectId);
+  const openSourceIdea = () => {
+    if (!sourceIdea) return;
+    setView({ type: 'ideas' });
+    selectIdea(sourceIdea.id);
+  };
   return (
     <div className="mx-auto max-w-3xl p-6">
+      {sourceIdea && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={openSourceIdea}
+          onKeyDown={(e) => e.key === 'Enter' && openSourceIdea()}
+          className="mb-2 flex cursor-pointer items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Lightbulb className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            本项目源自想法《{sourceIdea.title}》·{' '}
+            {sourceIdea.status === 'incubating' ? '验证中' : '已闭环'}
+          </span>
+        </div>
+      )}
       <h1 className="text-xl font-semibold">{data.projects[projectId]?.title ?? '项目'}</h1>
       <div className="mt-4">
         <TaskList
@@ -183,6 +211,8 @@ export default function App() {
       </Layout>
       <UpdateDialog />
       <PomodoroPhaseDialog />
+      <UpgradeIdeaDialog />
+      <CloseIdeaDialog />
       <Toaster
         position="bottom-right"
         theme={theme === 'dark' ? 'dark' : 'light'}
