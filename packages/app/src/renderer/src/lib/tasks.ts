@@ -21,8 +21,8 @@ export function todayTasks(data: AppData, now = Date.now()): Task[] {
     .sort((a, b) => (a.dueDay ?? '').localeCompare(b.dueDay ?? ''));
 }
 
-// 只展示今天完成的任务（含提前完成/逾期完成，它们的 doneAt 都是今天）；
-// 过去几天完成的任务随日期滚动消失，历史已完成任务在各项目页查看。
+// 只展示今天做完的任务（含提前做完/逾期做完，它们的 doneAt 都是今天）；
+// 过去几天做完的任务随日期滚动消失，历史已做完任务在各项目页查看。
 export function todayDoneTasks(data: AppData, now = Date.now()): Task[] {
   const today = localDate(now);
   return Object.values(data.tasks)

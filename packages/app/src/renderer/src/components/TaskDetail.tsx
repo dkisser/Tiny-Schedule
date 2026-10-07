@@ -36,6 +36,7 @@ export function TaskDetail({ task }: { task: Task }) {
   const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
   const selectTask = useUiStore((s) => s.selectTask);
+  const requestComplete = useUiStore((s) => s.requestComplete);
   const activeTaskId = useTimerStore((s) => s.timer?.taskId ?? null);
   const [subTitle, setSubTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Task | null>(null);
@@ -256,7 +257,13 @@ export function TaskDetail({ task }: { task: Task }) {
               <input
                 type="checkbox"
                 checked={s.isDone}
-                onChange={(e) => void upsertTask({ ...s, isDone: e.target.checked })}
+                onChange={(e) => {
+                  // Same path as the card checkbox: completing a timed subtask
+                  // must end its timing, confirm and all.
+                  const next = { ...s, isDone: e.target.checked };
+                  if (!next.isDone) next.doneAt = undefined;
+                  requestComplete(next);
+                }}
               />
               <span className={s.isDone ? 'line-through text-muted-foreground' : ''}>
                 {s.title}

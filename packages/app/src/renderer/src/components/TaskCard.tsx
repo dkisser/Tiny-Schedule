@@ -42,8 +42,8 @@ export function TaskCard({
   dragControls?: DragControls;
 }) {
   const selectTask = useUiStore((s) => s.selectTask);
+  const requestComplete = useUiStore((s) => s.requestComplete);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
-  const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
   const pauseTimer = useTimerStore((s) => s.pause);
   const resumeTimer = useTimerStore((s) => s.resume);
@@ -99,18 +99,16 @@ export function TaskCard({
       )}
       <button
         type="button"
-        aria-label="完成"
+        aria-label={task.isDone ? '取消完成' : '完成'}
         className={cn(
           'flex size-4 shrink-0 items-center justify-center rounded-full border text-muted-foreground transition-colors hover:text-foreground',
           task.isDone && 'border-primary bg-primary text-primary-foreground',
         )}
         onClick={(e) => {
           e.stopPropagation();
-          void upsertTask({
-            ...task,
-            isDone: !task.isDone,
-            doneAt: task.isDone ? undefined : Date.now(),
-          });
+          // Every completion surface routes through one place, so none of them
+          // can forget that completing a timed task also ends its timing.
+          requestComplete(task);
         }}
       >
         <Check className="h-3 w-3" />
@@ -124,7 +122,7 @@ export function TaskCard({
         <div className="mt-0.5 flex gap-1">
           {task.isDone && task.doneAt !== undefined && (
             <span className="rounded bg-emerald-500/15 px-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-              完成于 {formatDoneAt(task.doneAt)}
+              做完于 {formatDoneAt(task.doneAt)}
             </span>
           )}
           {overdue && (

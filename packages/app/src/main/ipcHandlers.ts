@@ -4,6 +4,7 @@ import {
   type AppData,
   addDays,
   type ChatSession,
+  dropStaleTiming,
   type ImportRunResult,
   INBOX_PROJECT_ID,
   Ipc,
@@ -13,6 +14,7 @@ import {
   localDate,
   maskDataForRenderer,
   PROJECT_TITLE_MAX_LENGTH,
+  upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
 import {
   type BrowserWindow,
@@ -91,14 +93,25 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     dataLoad: () => masked(store.get()),
 
     taskUpsert: (task) => {
-      // 规范化完成时间：任何入口标记完成都保证有 doneAt，重开则清除
-      const normalized = { ...task, doneAt: task.isDone ? (task.doneAt ?? Date.now()) : undefined };
-      const next = store.update((d) => ({
-        ...d,
-        tasks: { ...d.tasks, [normalized.id]: normalized },
-      }));
-      logger.info({ action: 'task:upsert', taskId: task.id, title: task.title });
-      return masked(next);
+      // The single enforcement point for "completing a task ends its timing":
+      // every write path funnels through here, so no entry point can leave a
+      // done task being timed. upsertTaskWithTiming also normalizes doneAt and
+      // moves the task and the timer in one atomic transition. settledMs goes
+      // back to the caller so the renderer reports what was actually recorded
+      // instead of predicting it.
+      let settledMs = 0;
+      const next = store.update((d) => {
+        const r = upsertTaskWithTiming(d, task, Date.now());
+        settledMs = r.settledMs;
+        return r.data;
+      });
+      logger.info({
+        action: 'task:upsert',
+        taskId: task.id,
+        title: task.title,
+        settledMs,
+      });
+      return { data: masked(next), settledMs };
     },
 
     taskDelete: ({ id }) => {
@@ -299,9 +312,22 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     },
 
     timerSync: ({ timer }) => {
-      store.update((d) => ({ ...d, activeTimer: timer }));
-      if (timer)
-        logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
+      if (!timer) {
+        store.update((d) => ({ ...d, activeTimer: null }));
+        return;
+      }
+      // Same invariant as taskUpsert: a timer may never be persisted for a task
+      // that is already done, whoever is asking to sync it.
+      const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
+      if (!next.activeTimer) {
+        // Announce the drop. Staying silent would leave the renderer's clock
+        // ticking for a session the main process just discarded — and its next
+        // stop would settle that time into the done task.
+        sendSafe(getWindow(), Ipc.timerChanged, null);
+        logger.info({ action: 'timer:drop:sync', taskId: timer.taskId });
+        return;
+      }
+      logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
     },
 
     finishDay: (_req) => {
@@ -348,9 +374,24 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           });
           if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
         }
-        const next = store.update((d) => migrateRemoveTodayTag(mergeImport(d, imported)));
-        logger.info({ action: 'import:run', counts, file: picked.filePaths[0] });
-        void next;
+        // The merge keeps the current activeTimer while letting an imported
+        // task win an id collision, so it can hand us a done task that is still
+        // being timed. Sweep it here rather than leaving the state for a later
+        // write to clean up, and tell the renderer so its clock stops too.
+        const hadTimer = !!store.get().activeTimer;
+        const next = store.update((d) =>
+          dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
+        );
+        if (hadTimer && !next.activeTimer) {
+          sendSafe(getWindow(), Ipc.timerChanged, null);
+          logger.info({ action: 'timer:drop:import' });
+        }
+        logger.info({
+          action: 'import:run',
+          counts,
+          file: picked.filePaths[0],
+          keptTimer: !!next.activeTimer,
+        });
         return { ok: true, counts };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

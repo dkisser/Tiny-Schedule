@@ -123,7 +123,7 @@ export function TodayPage() {
         <Collapsible className="mt-4">
           <CollapsibleTrigger className="group flex w-full items-center gap-1 rounded-md px-1 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
             <ChevronRight className="h-4 w-4 transition-transform group-data-[state=open]:rotate-90" />
-            今日已完成（{doneTasks.length}）
+            今日已做完（{doneTasks.length}）
           </CollapsibleTrigger>
           <CollapsibleContent>
             <div className="mt-2">

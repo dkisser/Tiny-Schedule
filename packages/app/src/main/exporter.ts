@@ -33,7 +33,7 @@ export function exportProjectTaskList(data: AppData, projectId: string): string 
     '## 进行中',
     ...(open.length > 0 ? open.map((t) => taskLine(data, t)) : ['（无）']),
     '',
-    '## 已完成',
+    '## 已做完',
     ...(done.length > 0 ? done.map((t) => taskLine(data, t)) : ['（无）']),
     '',
   ];

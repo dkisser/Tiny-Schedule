@@ -173,7 +173,7 @@ function DoneHeader({ count }: { count: number }) {
       transition={{ duration: 0.18 }}
       className="mt-4 mb-1 flex items-center gap-2 text-xs text-muted-foreground"
     >
-      <span>已完成（{count}）</span>
+      <span>已做完（{count}）</span>
       <div className="h-px flex-1 bg-border" />
     </motion.div>
   );

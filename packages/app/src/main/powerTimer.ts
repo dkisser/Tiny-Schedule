@@ -1,4 +1,4 @@
-import { autoPauseTimer, Ipc, idleThresholdReached } from '@tiny-schedule/shared';
+import { autoPauseTimer, dropStaleTiming, Ipc, idleThresholdReached } from '@tiny-schedule/shared';
 import { type BrowserWindow, powerMonitor } from 'electron';
 import type { Logger } from 'pino';
 import type { DataStore } from './dataStore';
@@ -23,8 +23,17 @@ export function startPowerTimerWatcher({ store, logger, getWindow }: PowerTimerD
     const timer = store.get().activeTimer;
     if (!timer || timer.isPaused) return;
     const paused = autoPauseTimer(timer, Date.now(), reason, backdateMs);
-    store.update((d) => ({ ...d, activeTimer: paused }));
+    // Same invariant as the task/timer write paths: a timer may never be
+    // persisted for a task that is already done.
+    const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: paused }));
     const win = getWindow();
+    if (!next.activeTimer) {
+      // Tell the renderer the clock is gone. Without this its TimerBar keeps
+      // counting a session the main process has discarded.
+      if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, null);
+      logger.info({ action: 'timer:drop:autoPause', taskId: paused.taskId, reason });
+      return;
+    }
     // check-ipc: ok — Ipc.timerChanged constant
     if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, paused);
     logger.info({ action: 'timer:autoPause', reason, taskId: paused.taskId });

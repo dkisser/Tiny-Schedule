@@ -5,6 +5,7 @@ import {
   applySettlement,
   computeElapsed,
   computeFocusElapsed,
+  dropStaleTiming,
   isPhaseComplete,
   isPomodoro,
   POMODORO_FOCUS_MS,
@@ -31,6 +32,13 @@ interface TimerState {
   restore: (data: AppData) => void;
   start: (taskId: string) => Promise<void>;
   startPomodoro: (taskId: string) => Promise<void>;
+  /**
+   * Mark a task done and settle the timing session running on it. The invariant
+   * is enforced by the main process on write, so this only has to stay in step
+   * with the returned dataset — no second timer write, hence no window in which
+   * a done task could still be timed. Resolves to the ms recorded (0 if none).
+   */
+  completeFor: (taskId: string) => Promise<number>;
   pause: () => void;
   resume: () => void;
   stop: () => Promise<void>;
@@ -61,7 +69,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   phasePendingAdvance: null,
 
   restore: (data) => {
-    set({ timer: data.activeTimer });
+    // Drop rather than settle: a done task holding a timer is ambiguous, and
+    // settling on that guess would bill already-recorded time a second time.
+    const clean = dropStaleTiming(data);
+    const dropped = clean !== data;
+    set({ timer: clean.activeTimer ?? null });
+    if (dropped) void sync(null).catch(() => {});
     const heartbeat = setInterval(() => {
       const t = get().timer;
       if (t) void sync(t);
@@ -110,6 +123,18 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     set({ timer: next, now, phasePendingAdvance: null });
     if (cur) await settleInto(cur, now);
     await sync(next);
+  },
+
+  completeFor: async (taskId) => {
+    const task = useDataStore.getState().data?.tasks[taskId];
+    if (!task || task.isDone) return 0;
+    // One write settles the task and clears the timer together, and the main
+    // process is what decides how much that was — so report its number rather
+    // than predicting one here. doneAt is left to the main process too, so a
+    // task that was already done keeps the day it was done on.
+    const { data, settledMs } = await useDataStore.getState().upsertTask({ ...task, isDone: true });
+    set({ timer: data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
+    return settledMs;
   },
 
   pause: () => {

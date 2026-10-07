@@ -22,13 +22,21 @@ let quitConfirmOpen = false;
 function settleActiveTimer(dataStore: DataStore, log: Logger): void {
   const timer = dataStore.get().activeTimer;
   if (!timer) return;
+  const task = dataStore.get().tasks[timer.taskId];
+  if (task?.isDone) {
+    // A done task is never being timed. Clear without recording: the time may
+    // already have been settled, and settling again would bill it twice.
+    dataStore.update((d) => ({ ...d, activeTimer: null }));
+    log.info({ action: 'timer:drop:quit', taskId: timer.taskId });
+    return;
+  }
   const settlement = settleTimer(timer, Date.now());
   dataStore.update((d) => {
-    const task = d.tasks[timer.taskId];
-    if (!task) return { ...d, activeTimer: null };
+    const t = d.tasks[timer.taskId];
+    if (!t) return { ...d, activeTimer: null };
     return {
       ...d,
-      tasks: { ...d.tasks, [task.id]: applySettlement(task, settlement) },
+      tasks: { ...d.tasks, [t.id]: applySettlement(t, settlement) },
       activeTimer: null,
     };
   });
