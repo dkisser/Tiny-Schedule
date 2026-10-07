@@ -1,4 +1,4 @@
-import { isPomodoro, POMODORO_CYCLES_PER_SET, settleTimer } from '@tiny-schedule/shared';
+import { isPomodoro, POMODORO_CYCLES_PER_SET } from '@tiny-schedule/shared';
 import { toast } from 'sonner';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
