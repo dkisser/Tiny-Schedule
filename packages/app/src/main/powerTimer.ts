@@ -26,11 +26,14 @@ export function startPowerTimerWatcher({ store, logger, getWindow }: PowerTimerD
     // Same invariant as the task/timer write paths: a timer may never be
     // persisted for a task that is already done.
     const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: paused }));
+    const win = getWindow();
     if (!next.activeTimer) {
+      // Tell the renderer the clock is gone. Without this its TimerBar keeps
+      // counting a session the main process has discarded.
+      if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, null);
       logger.info({ action: 'timer:drop:autoPause', taskId: paused.taskId, reason });
       return;
     }
-    const win = getWindow();
     // check-ipc: ok — Ipc.timerChanged constant
     if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, paused);
     logger.info({ action: 'timer:autoPause', reason, taskId: paused.taskId });

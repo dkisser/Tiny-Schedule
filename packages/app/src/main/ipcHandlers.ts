@@ -312,11 +312,22 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     },
 
     timerSync: ({ timer }) => {
+      if (!timer) {
+        store.update((d) => ({ ...d, activeTimer: null }));
+        return;
+      }
       // Same invariant as taskUpsert: a timer may never be persisted for a task
       // that is already done, whoever is asking to sync it.
       const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
-      if (timer && next.activeTimer)
-        logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
+      if (!next.activeTimer) {
+        // Announce the drop. Staying silent would leave the renderer's clock
+        // ticking for a session the main process just discarded — and its next
+        // stop would settle that time into the done task.
+        sendSafe(getWindow(), Ipc.timerChanged, null);
+        logger.info({ action: 'timer:drop:sync', taskId: timer.taskId });
+        return;
+      }
+      logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
     },
 
     finishDay: (_req) => {
@@ -366,10 +377,15 @@ export function registerIpcHandlers(deps: IpcDeps): void {
         // The merge keeps the current activeTimer while letting an imported
         // task win an id collision, so it can hand us a done task that is still
         // being timed. Sweep it here rather than leaving the state for a later
-        // write to clean up.
+        // write to clean up, and tell the renderer so its clock stops too.
+        const hadTimer = !!store.get().activeTimer;
         const next = store.update((d) =>
           dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
         );
+        if (hadTimer && !next.activeTimer) {
+          sendSafe(getWindow(), Ipc.timerChanged, null);
+          logger.info({ action: 'timer:drop:import' });
+        }
         logger.info({
           action: 'import:run',
           counts,
