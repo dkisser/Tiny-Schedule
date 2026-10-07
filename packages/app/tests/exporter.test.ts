@@ -51,10 +51,10 @@ describe('exportProjectTaskList', () => {
     expect(md).toContain('截止 2026-08-05');
     expect(md).toContain('预估 2h');
     expect(md).toContain('实际 1h');
-    expect(md).toContain('## 已完成');
+    expect(md).toContain('## 已做完');
     expect(md).toContain('- [x] 任务B');
     // done section appears after open section
-    expect(md.indexOf('## 已完成')).toBeGreaterThan(md.indexOf('## 进行中'));
+    expect(md.indexOf('## 已做完')).toBeGreaterThan(md.indexOf('## 进行中'));
   });
 
   test('throws for unknown project', () => {

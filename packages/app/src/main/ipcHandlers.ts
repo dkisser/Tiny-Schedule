@@ -13,6 +13,7 @@ import {
   localDate,
   maskDataForRenderer,
   PROJECT_TITLE_MAX_LENGTH,
+  upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
 import {
   type BrowserWindow,
@@ -91,12 +92,11 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     dataLoad: () => masked(store.get()),
 
     taskUpsert: (task) => {
-      // 规范化完成时间：任何入口标记完成都保证有 doneAt，重开则清除
-      const normalized = { ...task, doneAt: task.isDone ? (task.doneAt ?? Date.now()) : undefined };
-      const next = store.update((d) => ({
-        ...d,
-        tasks: { ...d.tasks, [normalized.id]: normalized },
-      }));
+      // The single enforcement point for "completing a task ends its timing":
+      // every write path funnels through here, so no entry point can leave a
+      // done task being timed. upsertTaskWithTiming also normalizes doneAt and
+      // moves the task and the timer in one atomic transition.
+      const next = store.update((d) => upsertTaskWithTiming(d, task, Date.now()).data);
       logger.info({ action: 'task:upsert', taskId: task.id, title: task.title });
       return masked(next);
     },

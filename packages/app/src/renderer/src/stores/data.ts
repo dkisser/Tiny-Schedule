@@ -17,7 +17,7 @@ interface DataState {
   data: AppData | null;
   loading: boolean;
   load: () => Promise<void>;
-  upsertTask: (task: Task) => Promise<void>;
+  upsertTask: (task: Task) => Promise<AppData>;
   deleteTask: (id: string) => Promise<void>;
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
@@ -48,8 +48,11 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data, loading: false });
   },
   upsertTask: async (task) => {
+    // The main process enforces "completing a task ends its timing" on write,
+    // so the returned dataset is the authority on both the task and the timer.
     const data = await api().taskUpsert(task);
     set({ data });
+    return data;
   },
   deleteTask: async (id) => {
     const data = await api().taskDelete({ id });

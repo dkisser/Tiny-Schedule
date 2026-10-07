@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { completeTask } from '../src/completeTask';
-import type { ActiveTimer, Task } from '../src/models';
+import { completeTask, dropStaleTiming, upsertTaskWithTiming } from '../src/completeTask';
+import type { ActiveTimer, AppData, Task } from '../src/models';
 import {
   advancePomodoroPhase,
   POMODORO_BREAK_MS,
@@ -129,5 +129,123 @@ describe('completeTask', () => {
       expect(r.task.timeEntries).toHaveLength(0);
       expect(r.task.isDone).toBe(true);
     });
+  });
+});
+
+function dataOf(t: Task, activeTimer: ActiveTimer | null = null): AppData {
+  return { tasks: { [t.id]: t }, activeTimer } as unknown as AppData;
+}
+
+describe('upsertTaskWithTiming', () => {
+  test('completing a timed task settles it and clears the timer in one transition', () => {
+    const d = dataOf(task(), startTimer('t1', T0));
+    const r = upsertTaskWithTiming(d, { ...task(), isDone: true }, T0 + 90_000);
+    expect(r.data.tasks.t1?.isDone).toBe(true);
+    expect(r.data.activeTimer).toBeNull();
+    expect(r.settledMs).toBe(90_000);
+    expect(r.data.tasks.t1?.timeEntries).toHaveLength(1);
+  });
+
+  // The regression from code review: a settle-then-clear pair of writes leaves
+  // a done, already-recorded task still holding the timer, and recovery then
+  // records the same span a second time.
+  test('the result can never be a done task still holding its own timer', () => {
+    const d = dataOf(task(), startTimer('t1', T0));
+    const r = upsertTaskWithTiming(d, { ...task(), isDone: true }, T0 + 90_000);
+    expect(r.data.tasks[r.data.tasks.t1!.id]?.isDone).toBe(true);
+    expect(r.data.activeTimer?.taskId).not.toBe('t1');
+  });
+
+  test('completing an un-timed task records nothing and leaves other timing alone', () => {
+    const d = dataOf(task(), null);
+    const r = upsertTaskWithTiming(d, { ...task(), isDone: true }, T0 + 90_000);
+    expect(r.settledMs).toBe(0);
+    expect(r.data.tasks.t1?.timeEntries).toHaveLength(0);
+    expect(r.data.activeTimer).toBeNull();
+  });
+
+  test('completing a task leaves a timer on a different task running', () => {
+    const other = startTimer('t2', T0);
+    const r = upsertTaskWithTiming(dataOf(task(), other), { ...task(), isDone: true }, T0 + 90_000);
+    expect(r.data.activeTimer).toBe(other);
+    expect(r.settledMs).toBe(0);
+  });
+
+  test('re-saving an already-done task does not touch the timer', () => {
+    const other = startTimer('t2', T0);
+    const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
+    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, title: '改名' }, T0 + 90_000);
+    expect(r.data.activeTimer).toBe(other);
+    expect(r.settledMs).toBe(0);
+  });
+
+  test('un-completing clears doneAt and does not disturb timing', () => {
+    const other = startTimer('t2', T0);
+    const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
+    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, isDone: false }, T0 + 90_000);
+    expect(r.data.tasks.t1?.isDone).toBe(false);
+    expect(r.data.tasks.t1?.doneAt).toBeUndefined();
+    expect(r.data.activeTimer).toBe(other);
+  });
+
+  test('normalizes doneAt on completion and keeps a supplied one', () => {
+    const supplied = T0 + 5000;
+    const a = upsertTaskWithTiming(dataOf(task()), { ...task(), isDone: true }, T0 + 90_000);
+    expect(a.data.tasks.t1?.doneAt).toBe(T0 + 90_000);
+    const b = upsertTaskWithTiming(
+      dataOf(task()),
+      { ...task(), isDone: true, doneAt: supplied },
+      T0 + 90_000,
+    );
+    expect(b.data.tasks.t1?.doneAt).toBe(supplied);
+  });
+
+  test('preserves other tasks and the pomodoro focus-only rule', () => {
+    let pom: ActiveTimer = startPomodoroFocus('t1', T0);
+    pom = advancePomodoroPhase(pom, T0 + POMODORO_FOCUS_MS).next; // → break
+    const base = dataOf(task(), pom);
+    const withOther = { ...base, tasks: { ...base.tasks, t9: { ...task(), id: 't9' } } };
+    const r = upsertTaskWithTiming(
+      withOther,
+      { ...task(), isDone: true },
+      T0 + POMODORO_FOCUS_MS + 60_000,
+    );
+    expect(r.settledMs).toBe(POMODORO_FOCUS_MS);
+    expect(r.data.tasks.t9?.isDone).toBe(false);
+    expect(r.data.activeTimer).toBeNull();
+  });
+
+  test('an unknown task id is a no-op rather than a crash', () => {
+    const d = dataOf(task());
+    const r = upsertTaskWithTiming(d, { ...task(), id: 'nope', isDone: true }, T0 + 1000);
+    expect(r.data.tasks.t1?.isDone).toBe(false);
+    expect(r.settledMs).toBe(0);
+  });
+});
+
+describe('dropStaleTiming', () => {
+  test('clears a timer left on an already-done task', () => {
+    const done = { ...task(), isDone: true, doneAt: T0 };
+    const clean = dropStaleTiming(dataOf(done, startTimer('t1', T0)));
+    expect(clean.activeTimer).toBeNull();
+  });
+
+  // Clearing rather than settling: the time behind a dangling timer may already
+  // have been recorded, and settling on that guess would double-bill it.
+  test('clears without touching the task, so nothing is recorded twice', () => {
+    const done = { ...task(), isDone: true, doneAt: T0, timeSpent: 90_000 };
+    const clean = dropStaleTiming(dataOf(done, startTimer('t1', T0)));
+    expect(clean.tasks.t1?.timeSpent).toBe(90_000);
+    expect(clean.tasks.t1?.timeEntries).toHaveLength(0);
+  });
+
+  test('leaves a running timer alone', () => {
+    const d = dataOf(task(), startTimer('t1', T0));
+    expect(dropStaleTiming(d)).toBe(d);
+  });
+
+  test('leaves no-timer data alone', () => {
+    const d = dataOf(task());
+    expect(dropStaleTiming(d)).toBe(d);
   });
 });

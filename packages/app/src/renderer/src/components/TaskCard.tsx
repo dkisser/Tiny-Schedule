@@ -42,9 +42,8 @@ export function TaskCard({
   dragControls?: DragControls;
 }) {
   const selectTask = useUiStore((s) => s.selectTask);
-  const setCompletingTask = useUiStore((s) => s.setCompletingTask);
+  const requestComplete = useUiStore((s) => s.requestComplete);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
-  const upsertTask = useDataStore((s) => s.upsertTask);
   const deleteTask = useDataStore((s) => s.deleteTask);
   const pauseTimer = useTimerStore((s) => s.pause);
   const resumeTimer = useTimerStore((s) => s.resume);
@@ -107,16 +106,9 @@ export function TaskCard({
         )}
         onClick={(e) => {
           e.stopPropagation();
-          // 取消完成 leaves the task clean: any timing was already settled, and
-          // it is deliberately not restored.
-          if (task.isDone) {
-            void upsertTask({ ...task, isDone: false, doneAt: undefined });
-            return;
-          }
-          // Completing a timed task ends its timing, so confirm first. A timer
-          // on a different task is irrelevant here and needs no confirmation.
-          if (active) setCompletingTask(task.id);
-          else void upsertTask({ ...task, isDone: true, doneAt: Date.now() });
+          // Every completion surface routes through one place, so none of them
+          // can forget that completing a timed task also ends its timing.
+          requestComplete(task);
         }}
       >
         <Check className="h-3 w-3" />

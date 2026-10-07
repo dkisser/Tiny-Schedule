@@ -1,4 +1,4 @@
-import type { ActiveTimer, Task } from './models';
+import type { ActiveTimer, AppData, Task } from './models';
 import { applySettlement, pauseTimer, type Settlement, settleTimer } from './timer';
 
 export interface CompleteResult {
@@ -29,7 +29,9 @@ export interface CompleteResult {
  * earlier still settles at its own `pausedAt` instead of being advanced to now.
  */
 export function completeTask(task: Task, timer: ActiveTimer | null, now: number): CompleteResult {
-  const done: Task = { ...task, isDone: true, doneAt: now };
+  // Respect a doneAt the caller supplied (backfilling a task completed
+  // earlier); only fill one in when completing it right now.
+  const done: Task = { ...task, isDone: true, doneAt: task.doneAt ?? now };
 
   if (!timer || timer.taskId !== task.id) {
     return { task: done, timer, settlement: null };
@@ -42,4 +44,64 @@ export function completeTask(task: Task, timer: ActiveTimer | null, now: number)
     return { task: done, timer: null, settlement: null };
   }
   return { task: applySettlement(done, settlement), timer: null, settlement };
+}
+
+export interface UpsertTaskResult {
+  data: AppData;
+  /** Ms recorded because this write completed a timed task; 0 otherwise. */
+  settledMs: number;
+}
+
+/**
+ * Apply a task upsert, enforcing that completing a task ends its timing.
+ *
+ * This is the enforcement point rather than a UI convention: every write path
+ * (the completion checkbox, the subtask checkbox, a future keyboard shortcut or
+ * agent tool) goes through here, so none of them can leave a done task being
+ * timed. The task and the timer move in a single immutable transition, so a
+ * crash can never catch them out of step — which is what made a settle-then-clear
+ * pair of writes unsafe: an interruption there produced a done, already-recorded
+ * task that a later recovery pass would record a second time.
+ *
+ * Only a false -> true transition counts. Re-saving an already-done task (a
+ * title edit, say) must not disturb whatever else is being timed.
+ */
+export function upsertTaskWithTiming(data: AppData, incoming: Task, now: number): UpsertTaskResult {
+  const task: Task = {
+    ...incoming,
+    doneAt: incoming.isDone ? (incoming.doneAt ?? now) : undefined,
+  };
+  const completing = task.isDone && !data.tasks[task.id]?.isDone;
+
+  if (!completing) {
+    return {
+      data: { ...data, tasks: { ...data.tasks, [task.id]: task } },
+      settledMs: 0,
+    };
+  }
+
+  const result = completeTask(task, data.activeTimer, now);
+  return {
+    data: {
+      ...data,
+      tasks: { ...data.tasks, [task.id]: result.task },
+      activeTimer: result.timer,
+    },
+    settledMs: result.settlement?.ms ?? 0,
+  };
+}
+
+/**
+ * Drop a timing session whose task is already done, recording nothing.
+ *
+ * Recovery paths must clear rather than settle. A done task holding a timer is
+ * ambiguous: the time may already have been recorded (an interrupted write) or
+ * never recorded at all (data from before this rule existed). Settling on that
+ * guess double-bills the first case, so the safe direction is to discard — and
+ * repairing historical timing is deliberately out of scope.
+ */
+export function dropStaleTiming(data: AppData): AppData {
+  const timer = data.activeTimer;
+  if (!timer || !data.tasks[timer.taskId]?.isDone) return data;
+  return { ...data, activeTimer: null };
 }
