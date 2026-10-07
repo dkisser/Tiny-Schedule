@@ -88,11 +88,15 @@ export function upsertTaskWithTiming(data: AppData, incoming: Task, now: number)
 
   const result = completeTask(task, data.activeTimer, now);
   return {
-    data: {
+    // Sweep here too, not just on the non-completing path: `result.timer` is
+    // the *other* task's timer when one is running, and that task may itself be
+    // done (reachable by an import, which keeps the current activeTimer while
+    // letting an imported task win an id collision).
+    data: dropStaleTiming({
       ...data,
       tasks: { ...data.tasks, [task.id]: result.task },
       activeTimer: result.timer,
-    },
+    }),
     settledMs: result.settlement?.ms ?? 0,
   };
 }

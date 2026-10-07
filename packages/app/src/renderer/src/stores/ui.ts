@@ -92,7 +92,8 @@ export const useUiStore = create<UiState>((set, get) => ({
     // A timer on a different task is irrelevant here: completing this one must
     // not settle someone else's time, and needs no confirmation.
     if (timing?.taskId !== task.id) {
-      void useDataStore.getState().upsertTask({ ...task, isDone: true, doneAt: Date.now() });
+      // doneAt is stamped by the main process, which knows the stored value.
+      void useDataStore.getState().upsertTask({ ...task, isDone: true });
       return;
     }
     // Freeze the clock at the moment the user chose to complete, so deliberation

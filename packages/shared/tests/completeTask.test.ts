@@ -236,7 +236,7 @@ describe('upsertTaskWithTiming', () => {
     expect(r.data.tasks.t1?.doneAt).toBe(T0 + 1000);
   });
 
-  test('settledMs is the authoritative record, 0 when nothing was recorded', () => {
+  test('settledMs reports what was recorded, 0 when nothing was', () => {
     const timed = upsertTaskWithTiming(
       dataOf(task(), startTimer('t1', T0)),
       { ...task(), isDone: true },
@@ -245,6 +245,33 @@ describe('upsertTaskWithTiming', () => {
     expect(timed.settledMs).toBe(90_000);
     const untimed = upsertTaskWithTiming(dataOf(task()), { ...task(), isDone: true }, T0 + 90_000);
     expect(untimed.settledMs).toBe(0);
+  });
+
+  test('completing an untimed task also sweeps a done task left holding the timer', () => {
+    // `result.timer` is the *other* task's timer on this path, and that task
+    // may already be done: an import keeps the current activeTimer while
+    // letting an imported task win an id collision.
+    const done = { ...task(), id: 't1', isDone: true, doneAt: T0 + 1000 };
+    const other = { ...task(), id: 't2' };
+    const r = upsertTaskWithTiming(
+      { tasks: { t1: done, t2: other }, activeTimer: startTimer('t1', T0) } as unknown as AppData,
+      { ...other, isDone: true },
+      T0 + 90_000,
+    );
+    expect(r.settledMs).toBe(0);
+    expect(r.data.tasks.t2?.isDone).toBe(true);
+    expect(r.data.activeTimer).toBeNull();
+  });
+
+  test('completing an untimed task still keeps a live timer on an open task', () => {
+    const open = { ...task(), id: 't9' };
+    const other = startTimer('t9', T0);
+    const r = upsertTaskWithTiming(
+      { tasks: { t2: task(), t9: open }, activeTimer: other } as unknown as AppData,
+      { ...task(), id: 't2', isDone: true },
+      T0 + 90_000,
+    );
+    expect(r.data.activeTimer).toBe(other);
   });
 
   test('an unknown task id is a no-op rather than a crash', () => {

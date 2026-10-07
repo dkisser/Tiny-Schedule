@@ -130,10 +130,9 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (!task || task.isDone) return 0;
     // One write settles the task and clears the timer together, and the main
     // process is what decides how much that was — so report its number rather
-    // than predicting one here.
-    const { data, settledMs } = await useDataStore
-      .getState()
-      .upsertTask({ ...task, isDone: true, doneAt: Date.now() });
+    // than predicting one here. doneAt is left to the main process too, so a
+    // task that was already done keeps the day it was done on.
+    const { data, settledMs } = await useDataStore.getState().upsertTask({ ...task, isDone: true });
     set({ timer: data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
     return settledMs;
   },

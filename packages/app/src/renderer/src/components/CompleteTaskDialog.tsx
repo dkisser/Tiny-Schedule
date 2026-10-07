@@ -29,6 +29,11 @@ function formatElapsed(ms: number): string {
  * The clock freeze lives in `requestComplete` rather than in an effect here, so
  * what gets restored on cancel is a recorded decision instead of something
  * re-derived on every render.
+ *
+ * The dialog deliberately names no duration. The main process is what decides
+ * how much a write records, and the renderer's view of the timer can drift from
+ * it, so a figure promised here would not be a promise. The confirmation toast
+ * after the fact carries the real number.
  */
 export function CompleteTaskDialog() {
   const pending = useUiStore((s) => s.completing);
@@ -39,10 +44,6 @@ export function CompleteTaskDialog() {
 
   if (!pending || !task) return null;
   const timed = timer?.taskId === pending.taskId ? timer : null;
-
-  // settleTimer dates the entry to the freeze instant and, for pomodoro, counts
-  // focus time only — exactly what confirming will record.
-  const ms = timed ? settleTimer(timed, Date.now()).ms : 0;
   const pomodoro = timed !== null && isPomodoro(timed);
 
   const handleConfirm = async () => {
@@ -69,8 +70,8 @@ export function CompleteTaskDialog() {
           <DialogTitle>完成这个任务？</DialogTitle>
           <DialogDescription>
             {pomodoro
-              ? `本次番茄钟已完成 ${timed?.cyclesCompleted ?? 0}/${POMODORO_CYCLES_PER_SET} 轮专注。完成会结束计时并记录 ${formatElapsed(ms)}（只计专注时长）。`
-              : `这个任务正在计时，完成会同时结束计时并记录 ${formatElapsed(ms)}。`}
+              ? `本次番茄钟已完成 ${timed?.cyclesCompleted ?? 0}/${POMODORO_CYCLES_PER_SET} 轮专注。完成会结束计时，只记录专注时长。`
+              : '这个任务正在计时，完成会同时结束计时并记录本次时长。'}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

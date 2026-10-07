@@ -363,9 +363,19 @@ export function registerIpcHandlers(deps: IpcDeps): void {
           });
           if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
         }
-        const next = store.update((d) => migrateRemoveTodayTag(mergeImport(d, imported)));
-        logger.info({ action: 'import:run', counts, file: picked.filePaths[0] });
-        void next;
+        // The merge keeps the current activeTimer while letting an imported
+        // task win an id collision, so it can hand us a done task that is still
+        // being timed. Sweep it here rather than leaving the state for a later
+        // write to clean up.
+        const next = store.update((d) =>
+          dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
+        );
+        logger.info({
+          action: 'import:run',
+          counts,
+          file: picked.filePaths[0],
+          keptTimer: !!next.activeTimer,
+        });
         return { ok: true, counts };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
