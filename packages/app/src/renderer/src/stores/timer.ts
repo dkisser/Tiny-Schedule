@@ -3,6 +3,7 @@ import {
   type AppData,
   advancePomodoroPhase,
   applySettlement,
+  completeTask,
   computeElapsed,
   computeFocusElapsed,
   isPhaseComplete,
@@ -11,6 +12,7 @@ import {
   type PomodoroPhase,
   pauseTimer,
   resumeTimer,
+  type Settlement,
   settleTimer,
   startPomodoroFocus,
   startTimer,
@@ -31,6 +33,12 @@ interface TimerState {
   restore: (data: AppData) => void;
   start: (taskId: string) => Promise<void>;
   startPomodoro: (taskId: string) => Promise<void>;
+  /**
+   * Mark a task done, ending the timing session running on it. Delegates the
+   * invariant to `completeTask` and returns what was recorded, for the caller
+   * to surface. A timer on a different task keeps running.
+   */
+  completeFor: (taskId: string) => Promise<Settlement | null>;
   pause: () => void;
   resume: () => void;
   stop: () => Promise<void>;
@@ -61,7 +69,21 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   phasePendingAdvance: null,
 
   restore: (data) => {
-    set({ timer: data.activeTimer });
+    const active = data.activeTimer;
+    const target = active ? data.tasks[active.taskId] : undefined;
+    if (active && target?.isDone) {
+      // Self-heal: a crash between persisting a done task and clearing the
+      // timer can leave a done task still being timed. Record the work that
+      // really happened (settleTimer dates it to this recovery instant) and
+      // clear, so the invariant holds again from here on. Runs once.
+      const settlement = settleTimer(active, Date.now());
+      if (settlement.ms > 0)
+        void useDataStore.getState().upsertTask(applySettlement(target, settlement));
+      void sync(null);
+      set({ timer: null });
+    } else {
+      set({ timer: active ?? null });
+    }
     const heartbeat = setInterval(() => {
       const t = get().timer;
       if (t) void sync(t);
@@ -110,6 +132,21 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     set({ timer: next, now, phasePendingAdvance: null });
     if (cur) await settleInto(cur, now);
     await sync(next);
+  },
+
+  completeFor: async (taskId) => {
+    const task = useDataStore.getState().data?.tasks[taskId];
+    if (!task) return null;
+    const now = Date.now();
+    const result = completeTask(task, get().timer, now);
+    // Swap the timer out first so the 30s heartbeat can't resync a session
+    // that is no longer running, then persist the settled + done task in a
+    // single write. Clearing the persisted timer is a second call; a crash in
+    // between is what the restore self-heal above exists for.
+    set({ timer: result.timer, now, phasePendingAdvance: null });
+    await useDataStore.getState().upsertTask(result.task);
+    await sync(result.timer);
+    return result.settlement;
   },
 
   pause: () => {

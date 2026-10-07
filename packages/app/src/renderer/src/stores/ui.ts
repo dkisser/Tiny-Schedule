@@ -26,6 +26,8 @@ interface UiState {
   // 想法升级/闭环弹窗：值为目标想法 id，null 表示关闭。
   upgradeIdeaId: string | null;
   closingIdeaId: string | null;
+  // 任务完成确认弹窗：仅当该任务正在被计时时出现，值为目标任务 id。
+  completingTaskId: string | null;
   aiAutoRun: AiAutoRun | null;
   aiView: 'report' | 'chat';
   collapsedGroups: Record<SidebarGroup, boolean>;
@@ -35,6 +37,7 @@ interface UiState {
   selectIdea: (ideaId: string | null) => void;
   setUpgradeIdea: (ideaId: string | null) => void;
   setClosingIdea: (ideaId: string | null) => void;
+  setCompletingTask: (taskId: string | null) => void;
   setAiView: (v: 'report' | 'chat') => void;
   toggleSidebarGroup: (group: SidebarGroup) => void;
 }
@@ -46,6 +49,7 @@ export const useUiStore = create<UiState>((set) => ({
   selectedIdeaId: null,
   upgradeIdeaId: null,
   closingIdeaId: null,
+  completingTaskId: null,
   aiAutoRun: null,
   aiView: 'report',
   collapsedGroups: { projects: false, tags: false, archived: true },
@@ -60,6 +64,7 @@ export const useUiStore = create<UiState>((set) => ({
     set({ selectedIdeaId: ideaId, selectedTaskId: null, selectedFollowUpId: null }),
   setUpgradeIdea: (upgradeIdeaId) => set({ upgradeIdeaId }),
   setClosingIdea: (closingIdeaId) => set({ closingIdeaId }),
+  setCompletingTask: (completingTaskId) => set({ completingTaskId }),
   setAiView: (aiView) => set({ aiView }),
   toggleSidebarGroup: (group) =>
     set((s) => ({

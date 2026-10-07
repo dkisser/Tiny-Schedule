@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { api } from './api';
 import { CloseIdeaDialog } from './components/CloseIdeaDialog';
+import { CompleteTaskDialog } from './components/CompleteTaskDialog';
 import { FollowUpDetail } from './components/FollowUpDetail';
 import { IdeaDetail } from './components/IdeaDetail';
 import { Layout } from './components/Layout';
@@ -211,6 +212,7 @@ export default function App() {
       </Layout>
       <UpdateDialog />
       <PomodoroPhaseDialog />
+      <CompleteTaskDialog />
       <UpgradeIdeaDialog />
       <CloseIdeaDialog />
       <Toaster
