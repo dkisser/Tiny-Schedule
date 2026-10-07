@@ -464,7 +464,13 @@ export type ChatEvent =
 // outside this contract; see IpcEventChannels.
 export const IpcInvokeContract = {
   dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
-  taskUpsert: { ch: Ipc.taskUpsert, req: TaskSchema, res: null as unknown as AppData },
+  taskUpsert: {
+    ch: Ipc.taskUpsert,
+    req: TaskSchema,
+    // `settledMs` is the authoritative answer to "how much time did this write
+    // record", so the renderer can report it instead of predicting it.
+    res: null as unknown as { data: AppData; settledMs: number },
+  },
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
   followUpUpsert: {
     ch: Ipc.followUpUpsert,

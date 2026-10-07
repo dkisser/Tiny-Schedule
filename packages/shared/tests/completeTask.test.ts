@@ -215,6 +215,38 @@ describe('upsertTaskWithTiming', () => {
     expect(r.data.activeTimer).toBeNull();
   });
 
+  test('a non-completing write also sweeps a stale timer on a done task', () => {
+    // N1: re-saving an already-done task must not leave it being timed, even
+    // when the renderer's copy had not caught up and believed it was open.
+    const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
+    const r = upsertTaskWithTiming(
+      dataOf(done, startTimer('t1', T0)),
+      { ...done, title: '改名' },
+      T0 + 90_000,
+    );
+    expect(r.settledMs).toBe(0);
+    expect(r.data.activeTimer).toBeNull();
+    expect(r.data.tasks.t1?.timeSpent).toBe(0);
+  });
+
+  test('an already-done task keeps its original doneAt instead of sliding to now', () => {
+    // N3: sliding doneAt would change which days it counts as done on.
+    const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
+    const r = upsertTaskWithTiming(dataOf(done), { ...done, doneAt: undefined }, T0 + 90_000);
+    expect(r.data.tasks.t1?.doneAt).toBe(T0 + 1000);
+  });
+
+  test('settledMs is the authoritative record, 0 when nothing was recorded', () => {
+    const timed = upsertTaskWithTiming(
+      dataOf(task(), startTimer('t1', T0)),
+      { ...task(), isDone: true },
+      T0 + 90_000,
+    );
+    expect(timed.settledMs).toBe(90_000);
+    const untimed = upsertTaskWithTiming(dataOf(task()), { ...task(), isDone: true }, T0 + 90_000);
+    expect(untimed.settledMs).toBe(0);
+  });
+
   test('an unknown task id is a no-op rather than a crash', () => {
     const d = dataOf(task());
     const r = upsertTaskWithTiming(d, { ...task(), id: 'nope', isDone: true }, T0 + 1000);

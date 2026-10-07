@@ -4,6 +4,7 @@ import {
   type AppData,
   addDays,
   type ChatSession,
+  dropStaleTiming,
   type ImportRunResult,
   INBOX_PROJECT_ID,
   Ipc,
@@ -95,10 +96,22 @@ export function registerIpcHandlers(deps: IpcDeps): void {
       // The single enforcement point for "completing a task ends its timing":
       // every write path funnels through here, so no entry point can leave a
       // done task being timed. upsertTaskWithTiming also normalizes doneAt and
-      // moves the task and the timer in one atomic transition.
-      const next = store.update((d) => upsertTaskWithTiming(d, task, Date.now()).data);
-      logger.info({ action: 'task:upsert', taskId: task.id, title: task.title });
-      return masked(next);
+      // moves the task and the timer in one atomic transition. settledMs goes
+      // back to the caller so the renderer reports what was actually recorded
+      // instead of predicting it.
+      let settledMs = 0;
+      const next = store.update((d) => {
+        const r = upsertTaskWithTiming(d, task, Date.now());
+        settledMs = r.settledMs;
+        return r.data;
+      });
+      logger.info({
+        action: 'task:upsert',
+        taskId: task.id,
+        title: task.title,
+        settledMs,
+      });
+      return { data: masked(next), settledMs };
     },
 
     taskDelete: ({ id }) => {
@@ -299,8 +312,10 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     },
 
     timerSync: ({ timer }) => {
-      store.update((d) => ({ ...d, activeTimer: timer }));
-      if (timer)
+      // Same invariant as taskUpsert: a timer may never be persisted for a task
+      // that is already done, whoever is asking to sync it.
+      const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
+      if (timer && next.activeTimer)
         logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
     },
 

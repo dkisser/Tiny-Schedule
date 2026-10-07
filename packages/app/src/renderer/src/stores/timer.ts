@@ -3,7 +3,6 @@ import {
   type AppData,
   advancePomodoroPhase,
   applySettlement,
-  completeTask,
   computeElapsed,
   computeFocusElapsed,
   dropStaleTiming,
@@ -129,15 +128,14 @@ export const useTimerStore = create<TimerState>((set, get) => ({
   completeFor: async (taskId) => {
     const task = useDataStore.getState().data?.tasks[taskId];
     if (!task || task.isDone) return 0;
-    const now = Date.now();
-    // Display-only preview of what the main process is about to record. It
-    // agrees because the timer is paused at this point, which makes the
-    // settlement independent of `now`.
-    const preview = completeTask(task, get().timer, now).settlement?.ms ?? 0;
-    // One write settles the task and clears the timer together.
-    const data = await useDataStore.getState().upsertTask({ ...task, isDone: true, doneAt: now });
-    set({ timer: data.activeTimer ?? null, now, phasePendingAdvance: null });
-    return preview;
+    // One write settles the task and clears the timer together, and the main
+    // process is what decides how much that was — so report its number rather
+    // than predicting one here.
+    const { data, settledMs } = await useDataStore
+      .getState()
+      .upsertTask({ ...task, isDone: true, doneAt: Date.now() });
+    set({ timer: data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
+    return settledMs;
   },
 
   pause: () => {

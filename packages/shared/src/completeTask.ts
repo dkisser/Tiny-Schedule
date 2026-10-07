@@ -63,19 +63,25 @@ export interface UpsertTaskResult {
  * pair of writes unsafe: an interruption there produced a done, already-recorded
  * task that a later recovery pass would record a second time.
  *
- * Only a false -> true transition counts. Re-saving an already-done task (a
- * title edit, say) must not disturb whatever else is being timed.
+ * Only a false -> true transition settles anything. Re-saving an already-done
+ * task (a title edit, say) must not disturb whatever else is being timed, but it
+ * still sweeps a stale timer: whatever the write was, its result must not be a
+ * done task that is still being timed.
  */
 export function upsertTaskWithTiming(data: AppData, incoming: Task, now: number): UpsertTaskResult {
+  const stored = data.tasks[incoming.id];
   const task: Task = {
     ...incoming,
-    doneAt: incoming.isDone ? (incoming.doneAt ?? now) : undefined,
+    // Completing now stamps the moment. An already-done task keeps whatever
+    // completion time it already had rather than sliding forward to `now`,
+    // which would change which days it counts as done on.
+    doneAt: incoming.isDone ? (incoming.doneAt ?? stored?.doneAt ?? now) : undefined,
   };
-  const completing = task.isDone && !data.tasks[task.id]?.isDone;
+  const completing = task.isDone && !stored?.isDone;
 
   if (!completing) {
     return {
-      data: { ...data, tasks: { ...data.tasks, [task.id]: task } },
+      data: dropStaleTiming({ ...data, tasks: { ...data.tasks, [task.id]: task } }),
       settledMs: 0,
     };
   }
