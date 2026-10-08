@@ -220,3 +220,24 @@ describe('taskService.syncTimer', () => {
     expect(service.syncTimer(timerAt(NOW, 1_000)).dropped).toBe(false);
   });
 });
+
+describe('taskService.remove — deleting a task must not leave a ghost timer', () => {
+  test("drops the deleted task's activeTimer", () => {
+    // dropStaleTiming only tests `tasks[timer.taskId]?.isDone`, and a *missing*
+    // task yields undefined — not true — so without an explicit sweep here the
+    // timer survived every heartbeat, every save and every restart, and the
+    // eventual stop reported TASK_NOT_FOUND and recorded nothing.
+    const { data, service } = setup({ t1: task() }, timerAt(NOW, 45 * 60_000));
+    service.remove('t1');
+    expect(data.activeTimer).toBeNull();
+  });
+
+  test("leaves another task's timer alone", () => {
+    const { data, service } = setup(
+      { t1: task(), t2: task({ id: 't2' }) },
+      { ...timerAt(NOW, 1000), taskId: 't2' },
+    );
+    service.remove('t1');
+    expect(data.activeTimer?.taskId).toBe('t2');
+  });
+});

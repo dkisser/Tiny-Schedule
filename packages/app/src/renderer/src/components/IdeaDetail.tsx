@@ -1,11 +1,4 @@
-import {
-  appendIdeaEntry,
-  deleteIdeaEntry,
-  type Idea,
-  type IdeaEntry,
-  localDate,
-  updateIdeaEntry,
-} from '@tiny-schedule/shared';
+import { type Idea, type IdeaEntry, localDate } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import {
   Ban,
@@ -71,7 +64,9 @@ function ValidationGoalEditor({ idea }: { idea: Idea }) {
 
 // 演进日志：追加 + hover 编辑/删除（仅验证中可改）。
 function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const addIdeaEntry = useDataStore((s) => s.addIdeaEntry);
+  const updateIdeaEntry = useDataStore((s) => s.updateIdeaEntry);
+  const deleteIdeaEntry = useDataStore((s) => s.deleteIdeaEntry);
   const [entryDraft, setEntryDraft] = useState('');
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
@@ -79,7 +74,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
   const addEntry = () => {
     const text = entryDraft.trim();
     if (!text) return;
-    void upsertIdea(appendIdeaEntry(idea, text));
+    void addIdeaEntry(idea.id, text);
     setEntryDraft('');
   };
 
@@ -90,7 +85,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
 
   const submitEdit = () => {
     const text = editingText.trim();
-    if (editingEntryId && text) void upsertIdea(updateIdeaEntry(idea, editingEntryId, text));
+    if (editingEntryId && text) void updateIdeaEntry(idea.id, editingEntryId, text);
     setEditingEntryId(null);
     setEditingText('');
   };
@@ -174,7 +169,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
                         size="icon-xs"
                         aria-label="删除记录"
                         className="text-muted-foreground hover:text-destructive"
-                        onClick={() => void upsertIdea(deleteIdeaEntry(idea, entry.id))}
+                        onClick={() => void deleteIdeaEntry(idea.id, entry.id)}
                       >
                         <Trash2 />
                       </Button>

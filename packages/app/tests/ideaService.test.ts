@@ -350,3 +350,52 @@ describe('ideaService.edit — the narrowed write contract', () => {
     expect(data.ideas.i1?.status).toBe('incubating');
   });
 });
+
+describe('ideaService timeline commands — the list is edited on the main side', () => {
+  // A field edit used to carry the renderer's whole snapshot of the timeline,
+  // so a debounced title commit landing after an entry was added silently
+  // rolled the list back. The commands apply append/update/delete to the
+  // *stored* idea, which makes list edits and scalar edits independent.
+  const entry = (id: string, text: string) => ({ id, createdAt: 1, text });
+
+  test('addEntry appends to the stored timeline', () => {
+    const { data, service } = setup({ i1: idea({ timeline: [entry('e1', '第一条')] }) });
+    const r = service.addEntry('i1', '第二条');
+    expect(r.ok).toBe(true);
+    expect(data.ideas.i1?.timeline?.map((e) => e.text)).toEqual(['第一条', '第二条']);
+  });
+
+  test('updateEntry rewrites one entry and leaves the others alone', () => {
+    const { data, service } = setup({
+      i1: idea({ timeline: [entry('e1', '一'), entry('e2', '二')] }),
+    });
+    service.updateEntry('i1', 'e2', '改过的二');
+    expect(data.ideas.i1?.timeline?.map((e) => e.text)).toEqual(['一', '改过的二']);
+  });
+
+  test('deleteEntry removes just the named entry', () => {
+    const { data, service } = setup({
+      i1: idea({ timeline: [entry('e1', '一'), entry('e2', '二')] }),
+    });
+    service.deleteEntry('i1', 'e1');
+    expect(data.ideas.i1?.timeline?.map((e) => e.id)).toEqual(['e2']);
+  });
+
+  test('a missing idea is a rejection, not a throw', () => {
+    const { service } = setup({});
+    expect(service.addEntry('nope', 'x')).toEqual({ ok: false, error: 'IDEA_NOT_FOUND' });
+    expect(service.deleteEntry('nope', 'e1')).toEqual({ ok: false, error: 'IDEA_NOT_FOUND' });
+  });
+
+  test('a scalar edit does not roll back a concurrently added entry', () => {
+    // The regression, end to end: the stored timeline gains an entry, then a
+    // title edit arrives carrying the renderer's older snapshot.
+    const { data, service } = setup({ i1: idea({ timeline: [entry('e1', '一')] }) });
+    service.addEntry('i1', '第二条');
+    const staleSnapshot = { id: 'i1', title: '改标题', notes: '', createdAt: 1 };
+    const patch = IdeaEditSchema.parse({ ...staleSnapshot, timeline: undefined });
+    service.edit(patch);
+    expect(data.ideas.i1?.timeline?.map((e) => e.text)).toEqual(['一', '第二条']);
+    expect(data.ideas.i1?.title).toBe('改标题');
+  });
+});

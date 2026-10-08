@@ -25,7 +25,23 @@ export interface QueriedTask {
   timeSpentInRangeMs: number;
 }
 
-export function queryTasks(data: AppData, p: QueryTasksParams): QueriedTask[] {
+/**
+ * The read side of the task aggregate.
+ *
+ * Exposed as a factory over a reader rather than as functions taking an
+ * AppData: "the agent's tools read through services" (ADR-0003) only holds if
+ * there is no way to reach the data without going through the service. A
+ * caller handed an `AppData` could invoke `queryTasks(store.get(), params)`
+ * directly, so the boundary would be a convention. Taking a reader makes the
+ * store the only way in.
+ */
+export function createTaskQueries(read: () => AppData) {
+  const queryTasks = (p: QueryTasksParams): QueriedTask[] => runQuery(read(), p);
+  const getSummary = (p: SummaryParams): SummaryResult => runSummary(read(), p);
+  return { queryTasks, getSummary };
+}
+
+function runQuery(data: AppData, p: QueryTasksParams): QueriedTask[] {
   // 范围过滤：from/to 各边界独立求值；只给一边时另一边界视为开（不设限）
   const hasRange = p.from !== undefined || p.to !== undefined;
   const from = p.from ?? '0000-01-01';
@@ -81,7 +97,7 @@ export interface SummaryResult {
   byTag: { tag: string; taskCount: number; spentMs: number }[];
 }
 
-export function getSummary(data: AppData, p: SummaryParams): SummaryResult {
+function runSummary(data: AppData, p: SummaryParams): SummaryResult {
   const date = p.date ?? '1970-01-01';
   // project 范围必须提供 projectId：缺省时返回空汇总，避免把全部任务当作该项目的统计
   if (p.scope === 'project' && !p.projectId) {
@@ -89,8 +105,8 @@ export function getSummary(data: AppData, p: SummaryParams): SummaryResult {
   }
   const query =
     p.scope === 'project'
-      ? queryTasks(data, { projectId: p.projectId })
-      : queryTasks(data, scopeToRange(p.scope, date));
+      ? runQuery(data, { projectId: p.projectId })
+      : runQuery(data, scopeToRange(p.scope, date));
   const byProject = new Map<string, { project: string; taskCount: number; spentMs: number }>();
   const byTag = new Map<string, { tag: string; taskCount: number; spentMs: number }>();
   for (const t of query) {

@@ -84,7 +84,6 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
     ideas,
     followUps,
     projects,
-    chatSink,
   };
 
   // IpcInvokeHandlers is exhaustive over IpcInvokeContract: forgetting a

@@ -1,7 +1,6 @@
 import { type AppData, maskDataForRenderer } from '@tiny-schedule/shared';
 import type { BrowserWindow } from 'electron';
 import type { Logger } from 'pino';
-import type { ChatEventSink } from '../services/chatService';
 import type { FollowUpService } from '../services/followUpService';
 import type { IdeaService } from '../services/ideaService';
 import type { ProjectService } from '../services/projectService';
@@ -24,12 +23,25 @@ export interface HandlerDeps {
   ideas: IdeaService;
   followUps: FollowUpService;
   projects: ProjectService;
-  chatSink: ChatEventSink;
 }
 
-/** AppData sent to the renderer never contains real keys. */
+/**
+ * AppData sent to the renderer never contains real keys.
+ *
+ * `maskedResult` is the same guarantee for the command envelopes, and it is
+ * here rather than inlined per handler: forgetting the wrapper on one branch of
+ * one command ships every provider's ciphertext across the contextBridge, and
+ * the renderer adopts these datasets wholesale. One place to remember, so
+ * there is one place to review.
+ */
 export function masked(data: AppData): AppData {
   return maskDataForRenderer(data);
+}
+
+export function maskedResult<T extends { ok: true; data: AppData } | { ok: false; error: string }>(
+  result: T,
+): T {
+  return result.ok ? ({ ...result, data: masked(result.data) } as T) : result;
 }
 
 export function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {

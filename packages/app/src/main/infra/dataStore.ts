@@ -25,8 +25,32 @@ export class DataStore {
   }
 
   load(): AppData {
-    this.cache =
-      this.readValidated(this.filePath) ?? this.readValidated(this.backupPath) ?? emptyAppData();
+    // Each fallback is announced. Landing on emptyAppData() after two failed
+    // parses means the user is looking at an empty app and a data.json that
+    // still looks fine on disk; without a record of why, that is
+    // indistinguishable from a fresh install.
+    const problems: string[] = [];
+    const read = (path: string) => this.readValidated(path, (r) => problems.push(r));
+    const primary = read(this.filePath);
+    if (primary) {
+      this.cache = primary;
+    } else {
+      const backup = read(this.backupPath);
+      if (backup) {
+        this.cache = backup;
+        console.warn(
+          `[dataStore] data.json unusable (${problems[0] ?? 'missing'}); loaded backup instead`,
+        );
+      } else {
+        this.cache = emptyAppData();
+        if (problems.length > 0) {
+          console.error(
+            `[dataStore] both data.json and its backup are unusable (${problems.join('; ')}); ` +
+              'starting empty. The files on disk have been left untouched.',
+          );
+        }
+      }
+    }
     return this.cache;
   }
 
@@ -53,12 +77,35 @@ export class DataStore {
     this.cache = validated;
   }
 
-  private readValidated(path: string): AppData | null {
+  /**
+   * Parse a data file, or report why it could not be read.
+   *
+   * The caller falls back from data.json to the backup to emptyAppData(), and
+   * the last of those renders an empty app. That is total, silent data
+   * invisibility, so each fallback is named rather than swallowed: a dataset
+   * that used to have ideas and now has none needs an explanation on disk.
+   */
+  private readValidated(path: string, onUnreadable: (reason: string) => void): AppData | null {
     if (!existsSync(path)) return null;
+    let raw: string;
     try {
-      return AppDataSchema.parse(JSON.parse(readFileSync(path, 'utf8'))) as AppData;
-    } catch {
+      raw = readFileSync(path, 'utf8');
+    } catch (err) {
+      onUnreadable(`unreadable: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
+    let json: unknown;
+    try {
+      json = JSON.parse(raw);
+    } catch (err) {
+      onUnreadable(`invalid json: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
+    const result = AppDataSchema.safeParse(json);
+    if (!result.success) {
+      onUnreadable(`schema mismatch: ${result.error.issues[0]?.path.join('.') ?? '(unknown)'}`);
+      return null;
+    }
+    return result.data as AppData;
   }
 }

@@ -14,10 +14,9 @@ import {
 import type { Logger } from 'pino';
 import type { DataStore } from '../infra/dataStore';
 import {
-  getSummary,
+  createTaskQueries,
   type QueriedTask,
   type QueryTasksParams,
-  queryTasks,
   type SummaryParams,
   type SummaryResult,
 } from './taskQueries';
@@ -42,6 +41,8 @@ export interface UpsertTaskOutcome {
 }
 
 export function createTaskService({ store, logger }: ServiceDeps) {
+  const reads = createTaskQueries(() => store.get());
+
   // Declared as plain closures rather than object-literal methods so they stay
   // callable after destructuring: `settleForQuit` runs inside `before-quit`, and
   // a `this`-bound call there would throw and leave the app unquittable with a
@@ -118,7 +119,17 @@ export function createTaskService({ store, logger }: ServiceDeps) {
             tasks[t.id] = { ...t, subTaskIds: t.subTaskIds.filter((s) => s !== id) };
           }
         }
-        return { ...d, tasks };
+        // A deleted task leaves its timer behind as an unkillable ghost:
+        // dropStaleTiming only tests `tasks[timer.taskId]?.isDone`, and a
+        // *missing* task yields undefined, which is not true — so the sweep
+        // never fires on this path. Every heartbeat then re-persists the
+        // orphan, and the eventual stop reports TASK_NOT_FOUND and records
+        // nothing. Run it here so delete is as clean as completion.
+        const cleaned = dropStaleTiming({ ...d, tasks });
+        if (cleaned.activeTimer !== d.activeTimer) {
+          logger.info({ action: 'timer:drop:delete', taskId: id });
+        }
+        return cleaned;
       });
       logger.info({ action: 'task:delete', taskId: id });
       return next;
@@ -179,11 +190,11 @@ export function createTaskService({ store, logger }: ServiceDeps) {
     // --- 读侧查询：AI agent 的工具经由这里取数（ADR-0003：tools 的读也走 services） ---
 
     queryTasks(params: QueryTasksParams): QueriedTask[] {
-      return queryTasks(store.get(), params);
+      return reads.queryTasks(params);
     },
 
     getSummary(params: SummaryParams): SummaryResult {
-      return getSummary(store.get(), params);
+      return reads.getSummary(params);
     },
   };
 }

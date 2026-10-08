@@ -32,7 +32,9 @@ export interface FollowUpCommandOutcome {
  * An idea edit, with the one distinction the wire contract draws: an absent
  * validationGoal leaves it alone, an explicit null clears it.
  */
-export type IdeaPatch = Omit<Idea, 'validationGoal'> & { validationGoal?: string | null };
+export type IdeaPatch = Omit<Idea, 'validationGoal' | 'timeline'> & {
+  validationGoal?: string | null;
+};
 
 /**
  * Run an intent command (idea or follow-up) and adopt its dataset. The main process is the
@@ -79,8 +81,11 @@ interface DataState {
   deleteTask: (id: string) => Promise<void>;
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
-  /** 字段编辑（标题/备注/验证目标/演进日志）；状态只能走意图命令。 */
+  /** 字段编辑（标题/备注/验证目标）；状态与演进日志只能走意图命令。 */
   upsertIdea: (idea: IdeaPatch) => Promise<void>;
+  addIdeaEntry: (id: string, text: string) => Promise<IdeaCommandOutcome>;
+  deleteIdeaEntry: (id: string, entryId: string) => Promise<IdeaCommandOutcome>;
+  updateIdeaEntry: (id: string, entryId: string, text: string) => Promise<IdeaCommandOutcome>;
   deleteIdea: (id: string) => Promise<void>;
   /**
    * 想法的写路径是意图命令而非 upsert（ADR-0003）：终态规则由主进程强制，
@@ -151,6 +156,10 @@ export const useDataStore = create<DataState>((set, get) => ({
   upsertIdea: async (idea) => {
     // The write contract carries non-status fields only (ADR-0003), so a caller
     // holding a full Idea cannot smuggle a status change through this path.
+    // The timeline is deliberately NOT sent: this path is for scalar fields the
+    // user just typed, and the caller's snapshot of a list is as stale as its
+    // snapshot of anything else — a debounced title commit landing after an
+    // entry was added would roll the timeline back. It has its own commands.
     const data = await api().ideaUpsert({
       id: idea.id,
       title: idea.title,
@@ -159,10 +168,13 @@ export const useDataStore = create<DataState>((set, get) => ({
       // Omitted when undefined: the main process treats an absent key as "leave
       // this alone". Only an explicit null clears the field.
       ...(idea.validationGoal !== undefined ? { validationGoal: idea.validationGoal } : {}),
-      timeline: idea.timeline,
     });
     set({ data });
   },
+  addIdeaEntry: (id, text) => adoptCommand(api().ideaAddEntry({ id, text })),
+  deleteIdeaEntry: (id, entryId) => adoptCommand(api().ideaDeleteEntry({ id, entryId })),
+  updateIdeaEntry: (id, entryId, text) =>
+    adoptCommand(api().ideaUpdateEntry({ id, entryId, text })),
   deleteIdea: async (id) => {
     const data = await api().ideaDelete({ id });
     set({ data });

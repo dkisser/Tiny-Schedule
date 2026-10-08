@@ -1,6 +1,6 @@
 import type { IdeaCommandResult, IdeaEdit } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
-import { masked } from './deps';
+import { masked, maskedResult } from './deps';
 
 /**
  * 想法的 handler：写契约是意图命令集，所以这里的方法名就是领域语言。
@@ -11,10 +11,6 @@ import { masked } from './deps';
  * 密文。渲染进程会整份采纳命令结果，所以漏掉一次遮罩就是把密文送过去。
  */
 export function ideaHandlers({ ideas }: HandlerDeps) {
-  /** Single choke point: whatever leaves for the renderer is masked. */
-  const maskedResult = (result: IdeaCommandResult) =>
-    result.ok ? { ...result, data: masked(result.data) } : result;
-
   return {
     /** 字段编辑：请求只带非状态字段，合并由 service 完成。 */
     ideaUpsert: (patch: IdeaEdit) => masked(ideas.edit(patch)),
@@ -48,6 +44,16 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
       if (!result.ok) return result;
       return { ok: true as const, data: masked(result.data), projectId: result.projectId };
     },
+
+    /** 追加/删除演进日志：也是命令,改的是主进程存的那条列表。 */
+    ideaAddEntry: ({ id, text }: { id: string; text: string }) =>
+      maskedResult(ideas.addEntry(id, text)),
+
+    ideaDeleteEntry: ({ id, entryId }: { id: string; entryId: string }) =>
+      maskedResult(ideas.deleteEntry(id, entryId)),
+
+    ideaUpdateEntry: ({ id, entryId, text }: { id: string; entryId: string; text: string }) =>
+      maskedResult(ideas.updateEntry(id, entryId, text)),
 
     ideaCloseWithVerdict: ({
       id,

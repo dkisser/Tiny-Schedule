@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import {
   type AppData,
+  appendIdeaEntry,
   closeIdeaWithVerdict,
   completeIdea,
+  deleteIdeaEntry,
   discardIdea,
   IDEA_CLEARABLE_FIELDS,
   type Idea,
@@ -15,6 +17,7 @@ import {
   PROJECT_TITLE_MAX_LENGTH,
   type Project,
   reopenIdea,
+  updateIdeaEntry,
   upgradeIdeaToProject,
   upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
@@ -37,6 +40,16 @@ export interface IdeaUpgradeInput {
   primaryColor?: string;
   validationGoal?: string;
 }
+
+/** Every status may carry a timeline entry; the commands below are not transitions. */
+const ALL_STATUSES: readonly Idea['status'][] = [
+  'open',
+  'done',
+  'discarded',
+  'converted',
+  'incubating',
+  'closed',
+];
 
 function newProjectId(): string {
   return `p_${randomUUID()}`;
@@ -235,6 +248,45 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * verdict 由 schema 强制存在（result 必填），所以"closed 必须带结论"在契约层
      * 就无法表达为一个缺 verdict 的命令。
      */
+    /**
+     * 追加一条演进日志。
+     *
+     * A command rather than another field edit: the timeline is a list the
+     * renderer must mutate, and editing it through the merge would mean sending
+     * the renderer's whole snapshot of it — so a debounced title commit landing
+     * after an entry was added would silently drop that entry. Applying
+     * appendIdeaEntry to the *stored* idea makes concurrent edits to the
+     * timeline and to the scalar fields independent.
+     */
+    addEntry(id: string, text: string): IdeaCommandResult {
+      return transitionFrom(
+        id,
+        ALL_STATUSES,
+        (idea) => appendIdeaEntry(idea, text),
+        'IDEA_NOT_FOUND',
+      );
+    },
+
+    /** 改一条演进日志的正文。同 addEntry：改的是主进程存的那条。 */
+    updateEntry(id: string, entryId: string, text: string): IdeaCommandResult {
+      return transitionFrom(
+        id,
+        ALL_STATUSES,
+        (idea) => updateIdeaEntry(idea, entryId, text),
+        'IDEA_NOT_FOUND',
+      );
+    },
+
+    /** 删掉一条演进日志。同 addEntry：改的是主进程存的那条，不是渲染进程的快照。 */
+    deleteEntry(id: string, entryId: string): IdeaCommandResult {
+      return transitionFrom(
+        id,
+        ALL_STATUSES,
+        (idea) => deleteIdeaEntry(idea, entryId),
+        'IDEA_NOT_FOUND',
+      );
+    },
+
     closeWithVerdict(
       id: string,
       result: 'validated' | 'invalidated' | 'partial',

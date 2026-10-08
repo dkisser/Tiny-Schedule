@@ -27,6 +27,9 @@ export const Ipc = {
   ideaReopen: 'idea:reopen',
   ideaConvertToTask: 'idea:convertToTask',
   ideaUpgradeToProject: 'idea:upgradeToProject',
+  ideaAddEntry: 'idea:addEntry',
+  ideaDeleteEntry: 'idea:deleteEntry',
+  ideaUpdateEntry: 'idea:updateEntry',
   ideaCloseWithVerdict: 'idea:closeWithVerdict',
   orderSet: 'order:set',
   projectCreate: 'project:create',
@@ -151,6 +154,28 @@ export const IdeaUpgradeToProjectReqSchema = z.object({
   validationGoal: z.string().optional(),
 });
 export type IdeaUpgradeToProjectReq = z.infer<typeof IdeaUpgradeToProjectReqSchema>;
+
+/** The two follow-up state commands take the same body as a delete: an id. */
+export const FollowUpIdReqSchema = FollowUpDeleteReqSchema;
+
+export const IdeaAddEntryReqSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().trim().min(1),
+});
+export type IdeaAddEntryReq = z.infer<typeof IdeaAddEntryReqSchema>;
+
+export const IdeaDeleteEntryReqSchema = z.object({
+  id: z.string().min(1),
+  entryId: z.string().min(1),
+});
+export type IdeaDeleteEntryReq = z.infer<typeof IdeaDeleteEntryReqSchema>;
+
+export const IdeaUpdateEntryReqSchema = z.object({
+  id: z.string().min(1),
+  entryId: z.string().min(1),
+  text: z.string().trim().min(1),
+});
+export type IdeaUpdateEntryReq = z.infer<typeof IdeaUpdateEntryReqSchema>;
 
 export const IdeaCloseWithVerdictReqSchema = z.object({
   id: z.string().min(1),
@@ -468,12 +493,14 @@ export const IpcInvokeContract = {
   },
   followUpResolve: {
     ch: Ipc.followUpResolve,
-    req: FollowUpDeleteReqSchema,
+    // Not FollowUpDeleteReqSchema: a field added to the delete schema would
+    // otherwise silently change the wire shape of this command.
+    req: FollowUpIdReqSchema,
     res: null as unknown as FollowUpCommandResult,
   },
   followUpReopen: {
     ch: Ipc.followUpReopen,
-    req: FollowUpDeleteReqSchema,
+    req: FollowUpIdReqSchema,
     res: null as unknown as FollowUpCommandResult,
   },
   ideaUpsert: {
@@ -510,6 +537,21 @@ export const IpcInvokeContract = {
     ch: Ipc.ideaUpgradeToProject,
     req: IdeaUpgradeToProjectReqSchema,
     res: null as unknown as IdeaUpgradeResult,
+  },
+  ideaAddEntry: {
+    ch: Ipc.ideaAddEntry,
+    req: IdeaAddEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaDeleteEntry: {
+    ch: Ipc.ideaDeleteEntry,
+    req: IdeaDeleteEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaUpdateEntry: {
+    ch: Ipc.ideaUpdateEntry,
+    req: IdeaUpdateEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
   },
   ideaCloseWithVerdict: {
     ch: Ipc.ideaCloseWithVerdict,

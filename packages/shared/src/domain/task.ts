@@ -571,16 +571,24 @@ export function upsertTaskWithTiming(data: AppData, incoming: Task, now: number)
 }
 
 /**
- * Drop a timing session whose task is already done, recording nothing.
+ * Drop a timing session that can no longer be settled: its task is done, or
+ * the task is gone entirely. Recording nothing.
  *
  * Recovery paths must clear rather than settle. A done task holding a timer is
  * ambiguous: the time may already have been recorded (an interrupted write) or
  * never recorded at all (data from before this rule existed). Settling on that
  * guess double-bills the first case, so the safe direction is to discard — and
  * repairing historical timing is deliberately out of scope.
+ *
+ * A *missing* task is stale for a stronger reason: there is nothing left to
+ * settle onto, so leaving the timer in place produced an unkillable ghost that
+ * every heartbeat re-persisted and that the eventual stop reported as
+ * TASK_NOT_FOUND without recording anything.
  */
 export function dropStaleTiming(data: AppData): AppData {
   const timer = data.activeTimer;
-  if (!timer || !data.tasks[timer.taskId]?.isDone) return data;
+  if (!timer) return data;
+  const task = data.tasks[timer.taskId];
+  if (task && !task.isDone) return data;
   return { ...data, activeTimer: null };
 }

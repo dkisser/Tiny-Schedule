@@ -139,6 +139,19 @@ function dataOf(t: Task, activeTimer: ActiveTimer | null = null): AppData {
   return { tasks: { [t.id]: t }, activeTimer } as unknown as AppData;
 }
 
+/**
+ * `t1` plus a real, unfinished `t2`, for the cases that need a timer running
+ * on *another* task. A timer whose task is absent from the dataset is a ghost
+ * that dropStaleTiming is now expected to remove, so the fixture has to model
+ * the situation it claims to test.
+ */
+function dataOfWithOther(t: Task, other: ActiveTimer, extra: Record<string, Task> = {}): AppData {
+  return {
+    tasks: { [t.id]: t, [other.taskId]: { ...task(), id: other.taskId }, ...extra },
+    activeTimer: other,
+  } as unknown as AppData;
+}
+
 describe('upsertTaskWithTiming', () => {
   test('completing a timed task settles it and clears the timer in one transition', () => {
     const d = dataOf(task(), startTimer('t1', T0));
@@ -169,26 +182,38 @@ describe('upsertTaskWithTiming', () => {
 
   test('completing a task leaves a timer on a different task running', () => {
     const other = startTimer('t2', T0);
-    const r = upsertTaskWithTiming(dataOf(task(), other), { ...task(), isDone: true }, T0 + 90_000);
-    expect(r.data.activeTimer).toBe(other);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(task(), other),
+      { ...task(), isDone: true },
+      T0 + 90_000,
+    );
+    expect(r.data.activeTimer).toEqual(other);
     expect(r.settledMs).toBe(0);
   });
 
   test('re-saving an already-done task does not touch the timer', () => {
     const other = startTimer('t2', T0);
     const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
-    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, title: '改名' }, T0 + 90_000);
-    expect(r.data.activeTimer).toBe(other);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(done, other),
+      { ...done, title: '改名' },
+      T0 + 90_000,
+    );
+    expect(r.data.activeTimer).toEqual(other);
     expect(r.settledMs).toBe(0);
   });
 
   test('un-completing clears doneAt and does not disturb timing', () => {
     const other = startTimer('t2', T0);
     const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
-    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, isDone: false }, T0 + 90_000);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(done, other),
+      { ...done, isDone: false },
+      T0 + 90_000,
+    );
     expect(r.data.tasks.t1?.isDone).toBe(false);
     expect(r.data.tasks.t1?.doneAt).toBeUndefined();
-    expect(r.data.activeTimer).toBe(other);
+    expect(r.data.activeTimer).toEqual(other);
   });
 
   test('normalizes doneAt on completion and keeps a supplied one', () => {

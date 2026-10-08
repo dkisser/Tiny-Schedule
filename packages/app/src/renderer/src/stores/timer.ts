@@ -60,11 +60,21 @@ async function sync(timer: ActiveTimer | null) {
  * `expectedTaskId` 钉住要结算的是哪一次：换表与心跳 sync() 是异步的，不钉住的话
  * 主进程可能结算到刚起步的新表，把旧任务的时长记错地方。拒绝时也采纳返回的
  * 数据集——主进程可能已经丢弃了 activeTimer，渲染进程必须跟着收敛。
+ *
+ * 返回码区分"主进程那边已经没有表了"和"主进程跑的不是我指定的那次"：后者
+ * 必须留着,调用方要拿它来决定还要不要补一次清空。两种情况都返回 0。
  */
-async function settleOnMain(expectedTaskId?: string): Promise<number> {
+async function settleOnMain(
+  expectedTaskId?: string,
+): Promise<{ settledMs: number; cleared: boolean }> {
   const result = await api().timingStop({ taskId: expectedTaskId });
   useDataStore.setState({ data: result.data });
-  return result.ok ? result.settledMs : 0;
+  if (result.ok) return { settledMs: result.settledMs, cleared: true };
+  // TIMER_MISMATCH means a *different* session is running on the main side and
+  // was deliberately left alone. Reporting "cleared" here would have the
+  // caller wipe that session's accumulated time with no TimeEntry, no log and
+  // no toast.
+  return { settledMs: 0, cleared: result.error !== 'TIMER_MISMATCH' };
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -165,15 +175,21 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // Optimistic: the clock stops on this frame; the recorded duration is
     // whatever the main process settles, adopted in settleOnMain.
     set({ timer: null, phasePendingAdvance: null });
+    // Clear the main-side timer unless the settle *declined* it. A decline
+    // (TIMER_MISMATCH) means another session is running over there and the pin
+    // deliberately left it alone — clearing it anyway would destroy that
+    // session's accumulated time with no TimeEntry and no log. The finally
+    // still clears when the settle throws, or main would keep a timer the UI
+    // already shows as stopped.
+    //
+    // With no local timer there is nothing to pin to, so settle whatever main
+    // holds: recording that time on its own task beats discarding it, and
+    // beats leaving a ghost that a later start() would bill somewhere else.
+    let cleared = false;
     try {
-      if (cur) await settleOnMain(cur.taskId);
+      ({ cleared } = await settleOnMain(cur?.taskId));
     } finally {
-      // Unconditional, and in a finally: settleOnMain only removes the timer on
-      // a successful settle, so without this the main process could keep an
-      // activeTimer the UI already shows as stopped — and a later start() would
-      // find it and bill its elapsed time onto whichever task came along next.
-      // In a finally so a throwing settle cannot skip the clear either.
-      await sync(null);
+      if (cleared) await sync(null);
     }
   },
 

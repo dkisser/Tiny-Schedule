@@ -257,6 +257,69 @@ describe('new command channels dispatch through their real handlers', () => {
     expect(reopened.data.followUps.f1?.resolvedAt).toBeUndefined();
   });
 
+  test('follow-up command datasets are masked on success too', () => {
+    // Same guarantee as the idea channels, through the shared choke point in
+    // deps.ts rather than an inlined copy: the renderer adopts this dataset
+    // wholesale, so an unmasked branch ships the ciphertext across the bridge.
+    storeRef.update((d) => ({
+      ...d,
+      settings: {
+        ...d.settings,
+        aiProviders: [
+          {
+            id: 'pr1',
+            registryId: 'openai',
+            apiKeyEncrypted: 'SECRET-CIPHERTEXT',
+            model: 'gpt-x',
+            isDefault: true,
+          },
+        ],
+      },
+    }));
+    call('followUpUpsert', {
+      id: 'f9',
+      title: '待办',
+      notes: '',
+      entries: [],
+      createdAt: 1,
+      isResolved: false,
+    });
+    const resolved = call('followUpResolve', { id: 'f9' }) as { ok: boolean; data: AppData };
+    expect(resolved.ok).toBe(true);
+    expect(resolved.data.settings.aiProviders[0]?.apiKeyEncrypted).toBe('');
+  });
+
+  test('the timeline commands dispatch and drive the transition', () => {
+    call('ideaUpsert', { id: 'i7', title: '有日志的想法', notes: '', createdAt: 1 });
+    const added = call('ideaAddEntry', { id: 'i7', text: '第一步' }) as {
+      ok: boolean;
+      data: AppData;
+    };
+    expect(added.ok).toBe(true);
+    expect(added.data.ideas.i7?.timeline).toHaveLength(1);
+    const entryId = added.data.ideas.i7?.timeline?.[0]?.id as string;
+    const updated = call('ideaUpdateEntry', { id: 'i7', entryId, text: '改过的' }) as {
+      ok: boolean;
+      data: AppData;
+    };
+    expect(updated.data.ideas.i7?.timeline?.[0]?.text).toBe('改过的');
+    const deleted = call('ideaDeleteEntry', { id: 'i7', entryId }) as {
+      ok: boolean;
+      data: AppData;
+    };
+    // The last removal leaves an empty list rather than dropping the key.
+    expect(deleted.data.ideas.i7?.timeline).toEqual([]);
+  });
+
+  test('the follow-up state commands do not reuse the delete request schema', () => {
+    // Both take an id today, but a field added to the delete schema would
+    // otherwise silently change the wire shape of two commands.
+    const deleteReq = IpcInvokeContract.followUpDelete.req as { shape: Record<string, unknown> };
+    expect(Object.keys(deleteReq.shape)).toEqual(['id']);
+    expect(IpcInvokeContract.followUpResolve.ch).toBe('followUp:resolve');
+    expect(IpcInvokeContract.followUpReopen.ch).toBe('followUp:reopen');
+  });
+
   test('a followUp command on a missing id rejects instead of returning null', () => {
     const r = call('followUpResolve', { id: 'nope' }) as { ok: boolean; error: string };
     expect(r).toEqual({ ok: false, error: 'FOLLOW_UP_NOT_FOUND' });
