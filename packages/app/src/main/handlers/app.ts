@@ -1,28 +1,32 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { dropStaleTiming, type ImportRunResult, Ipc } from '@tiny-schedule/shared';
+import { type ImportRunResult, Ipc } from '@tiny-schedule/shared';
 import { type BrowserWindow, dialog as electronDialog, Notification, shell } from 'electron';
 import type { DataStore } from '../infra/dataStore';
 import { exportProjectTaskList, exportWorklog } from '../infra/exporter';
-import { mergeImport, normalizeBackup } from '../infra/importer';
+import { normalizeBackup } from '../infra/importer';
 import { addTaskToMacCalendar } from '../infra/macos/calendar';
-import { migrateRemoveTodayTag } from '../infra/migrations';
 import { checkForUpdate } from '../infra/updater';
+import type { ImportService } from '../services/importService';
 import { sendSafe } from './deps';
 
 /**
  * 系统级通道：导入导出、头像、日历、外链、通知、窗口、更新检查。
  * 它们不属于任何聚合，因此没有 service——机制在 infra/，编排在这里。
+ * 例外是导入：它不归属聚合，却是一条整批写路径，清扫陈旧计时的义务归
+ * importService，handler 只负责对话框与广播。
  */
 export function appHandlers({
   store,
   logger,
   getWindow,
   getVersion,
+  imports,
 }: {
   store: DataStore;
   logger: { info: (o: object) => void; warn: (o: object) => void; error: (o: object) => void };
   getWindow: () => BrowserWindow | null;
   getVersion: () => string;
+  imports: ImportService;
 }) {
   return {
     importRun: async (): Promise<ImportRunResult> => {
@@ -50,18 +54,11 @@ export function appHandlers({
           });
           if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
         }
-        // The merge keeps the current activeTimer while letting an imported
-        // task win an id collision, so it can hand us a done task that is still
-        // being timed. Sweep it here rather than leaving the state for a later
-        // write to clean up, and tell the renderer so its clock stops too.
-        const hadTimer = !!store.get().activeTimer;
-        const next = store.update((d) =>
-          dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
-        );
-        if (hadTimer && !next.activeTimer) {
-          sendSafe(getWindow(), Ipc.timerChanged, null);
-          logger.info({ action: 'timer:drop:import' });
-        }
+        // The service owns the merge *and* the stale-timing sweep, so a done
+        // task can never come back from an import still being timed. Announcing
+        // the drop is ours: it is a message to the renderer's clock.
+        const { data: next, droppedTimer } = imports.mergeImported(imported);
+        if (droppedTimer) sendSafe(getWindow(), Ipc.timerChanged, null);
         logger.info({
           action: 'import:run',
           counts,

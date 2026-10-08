@@ -10,7 +10,7 @@ import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from './infra/
 import { startPowerTimerWatcher } from './infra/powerTimer';
 import { startupUpdateCheck } from './infra/updater';
 import { registerIpcHandlers } from './ipcHandlers';
-import { createTaskService, type TaskService } from './services/taskService';
+import type { TaskService } from './services/taskService';
 
 let win: BrowserWindow | null = null;
 let store: DataStore | null = null;
@@ -127,18 +127,20 @@ app.whenReady().then(async () => {
   logger = createLogger(join(userData, 'logs'));
   store = new DataStore(userData);
   store.load();
-  tasks = createTaskService({ store, logger });
   const migrated = migrateRemoveTodayTag(store.get());
   if (migrated !== store.get()) store.save(migrated);
   const migrated2 = migrateActiveTimerPomodoroFocus(store.get());
   if (migrated2 !== store.get()) store.save(migrated2);
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
-  registerIpcHandlers({
+  // The quit path settles through this same instance. Building a second
+  // TaskService here would duplicate any in-flight state a service acquires
+  // (a settle guard, say) and quietly split the enforcement point in two.
+  ({ tasks } = registerIpcHandlers({
     store,
     logger,
     getWindow: () => win,
     getVersion: () => app.getVersion(),
-  });
+  }));
   startPowerTimerWatcher({ store, logger, getWindow: () => win });
   Menu.setApplicationMenu(
     buildMenu(() => {

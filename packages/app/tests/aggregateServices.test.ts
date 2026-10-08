@@ -129,11 +129,14 @@ describe('followUpService', () => {
     expect(data.followUps.f1?.resolvedAt).toBeUndefined();
   });
 
-  test('an unknown id is a no-op rather than a throw', () => {
+  test('an unknown id is a rejection envelope, not a null', () => {
+    // A bare null used to travel to the renderer, which adopts this value as
+    // its entire dataset — so a follow-up deleted between render and click
+    // blanked the app with no way to tell "gone" from "not loaded yet".
     const { deps } = setup();
     const s = createFollowUpService(deps);
-    expect(s.resolve('nope')).toBeNull();
-    expect(s.reopen('nope')).toBeNull();
+    expect(s.resolve('nope')).toEqual({ ok: false, error: 'FOLLOW_UP_NOT_FOUND' });
+    expect(s.reopen('nope')).toEqual({ ok: false, error: 'FOLLOW_UP_NOT_FOUND' });
   });
 
   test('upsert stays unconditional this phase (renderer switches in phase 3)', () => {

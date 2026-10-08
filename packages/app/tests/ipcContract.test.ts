@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, mock, test } from 'bun:test';
 import {
   type AppData,
+  AppDataSchema,
   emptyAppData,
   Ipc,
   IpcChatEventChannels,
@@ -19,6 +20,8 @@ import type { DataStore } from '../src/main/infra/dataStore';
 
 const registered = new Set<string>();
 const invoked = new Set<string>();
+/** Direct handle on the store the handlers were wired to, for seeding/asserting. */
+let storeRef: DataStore;
 const listened = new Set<string>();
 // Keep the handler so a test can dispatch a real request through it, exactly as
 // the renderer would once preload invoked the channel.
@@ -65,15 +68,22 @@ mock.module('electron', () => ({
 beforeAll(async () => {
   const { registerIpcHandlers } = await import('../src/main/ipcHandlers');
   // Faithful DataStore stand-in: update() must reassign, or a service that
-  // loads-then-persists would never see its own write.
+  // loads-then-persists would never see its own write — and it must parse,
+  // because the real save() does. Skipping the parse made this whole suite
+  // blind to every AppDataSchema defect: a zod object strips keys it does not
+  // declare, so a handler persisting a pomodoro timer with focusAccumulatedMs
+  // passed green here and only corrupted data.json against the real store.
   let data = emptyAppData();
   const store = {
     get: () => data,
     update: (fn: (current: AppData) => AppData) => {
-      data = fn(data);
+      // Same cast as the real DataStore: zod infers z.unknown() fields as
+      // optional in the parsed output type.
+      data = AppDataSchema.parse(fn(data)) as AppData;
       return data;
     },
   } as unknown as DataStore;
+  storeRef = store;
   const logger = { info: () => {}, error: () => {} } as unknown as Logger;
   registerIpcHandlers({ store, logger, getWindow: () => null, getVersion: () => '0.0.0' });
   await import('../src/preload/index');
@@ -197,8 +207,13 @@ describe('new command channels dispatch through their real handlers', () => {
     expect(r).toEqual({ ok: false, error: 'IDEA_NOT_FOUND' });
   });
 
-  test('timingStop with no running timer reports the reason', () => {
-    expect(call('timingStop')).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER' });
+  test('timingStop with no running timer reports the reason and the dataset', () => {
+    // The rejection carries `data` too: the main process may already have
+    // dropped the timer, and the renderer has to converge on that.
+    const r = call('timingStop', {}) as { ok: boolean; error: string; data: AppData };
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe('NO_ACTIVE_TIMER');
+    expect(r.data.tasks).toBeDefined();
   });
 
   test('ideaUpsert refuses a request carrying status fields', () => {
@@ -231,12 +246,69 @@ describe('new command channels dispatch through their real handlers', () => {
       createdAt: 1,
       isResolved: false,
     });
-    const resolved = call('followUpResolve', { id: 'f1' }) as AppData;
-    expect(resolved.followUps.f1?.isResolved).toBe(true);
-    expect(resolved.followUps.f1?.resolvedAt).toBeGreaterThan(0);
+    const resolved = call('followUpResolve', { id: 'f1' }) as { ok: boolean; data: AppData };
+    expect(resolved.ok).toBe(true);
+    expect(resolved.data.followUps.f1?.isResolved).toBe(true);
+    expect(resolved.data.followUps.f1?.resolvedAt).toBeGreaterThan(0);
 
-    const reopened = call('followUpReopen', { id: 'f1' }) as AppData;
-    expect(reopened.followUps.f1?.isResolved).toBe(false);
-    expect(reopened.followUps.f1?.resolvedAt).toBeUndefined();
+    const reopened = call('followUpReopen', { id: 'f1' }) as { ok: boolean; data: AppData };
+    expect(reopened.ok).toBe(true);
+    expect(reopened.data.followUps.f1?.isResolved).toBe(false);
+    expect(reopened.data.followUps.f1?.resolvedAt).toBeUndefined();
+  });
+
+  test('a followUp command on a missing id rejects instead of returning null', () => {
+    const r = call('followUpResolve', { id: 'nope' }) as { ok: boolean; error: string };
+    expect(r).toEqual({ ok: false, error: 'FOLLOW_UP_NOT_FOUND' });
+  });
+
+  test('idea intent commands never leak provider key ciphertext to the renderer', () => {
+    // Every channel that returns AppData must mask it: the renderer adopts
+    // these datasets wholesale, so one unmasked return ships the ciphertext
+    // across the contextBridge. Four of the six commands were unmasked here.
+    storeRef.update((d) => ({
+      ...d,
+      settings: {
+        ...d.settings,
+        aiProviders: [
+          {
+            id: 'pr1',
+            registryId: 'openai',
+            apiKeyEncrypted: 'SECRET-CIPHERTEXT',
+            model: 'gpt-x',
+            isDefault: true,
+          },
+        ],
+      },
+    }));
+    // Prove the fixture is not vacuous: the store really does hold the secret.
+    expect(storeRef.get().settings.aiProviders[0]?.apiKeyEncrypted).toBe('SECRET-CIPHERTEXT');
+
+    // ideaUpsert carries no status (that is the point of the narrowed write
+    // contract), so each idea is walked into the state its command needs
+    // using commands — then the command under test returns a dataset.
+    const seedOpen = (id: string) =>
+      call('ideaUpsert', { id, title: '要脱敏的', notes: '', createdAt: 1 });
+
+    const expectMasked = (key: keyof typeof IpcInvokeContract, req: unknown) => {
+      const r = call(key, req) as { ok: boolean; data?: AppData };
+      expect(r.ok).toBe(true);
+      expect(r.data?.settings.aiProviders[0]?.apiKeyEncrypted).toBe('');
+      expect(r.data?.settings.aiProviders[0]?.hasApiKey).toBe(true);
+    };
+
+    seedOpen('i3');
+    expectMasked('ideaComplete', { id: 'i3' });
+
+    seedOpen('i4');
+    expectMasked('ideaDiscard', { id: 'i4' });
+
+    seedOpen('i5');
+    call('ideaComplete', { id: 'i5' }); // open -> done
+    expectMasked('ideaReopen', { id: 'i5' });
+
+    seedOpen('i6');
+    call('ideaUpgradeToProject', { id: 'i6', title: '验证项目' }); // open -> incubating
+    expectMasked('ideaCloseWithVerdict', { id: 'i6', result: 'validated' });
   });
 });

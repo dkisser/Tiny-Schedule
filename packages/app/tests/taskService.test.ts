@@ -60,14 +60,36 @@ describe('taskService.stopTiming — main-side settlement', () => {
     expect(data.tasks.t1?.timeEntries).toHaveLength(1);
   });
 
-  test('rejects when nothing is being timed', () => {
-    const { service } = setup({ t1: task() });
-    expect(service.stopTiming(NOW)).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER' });
+  test('rejects when nothing is being timed, handing back the dataset', () => {
+    const { data, service } = setup({ t1: task() });
+    const r = service.stopTiming(NOW);
+    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data });
   });
 
   test('drops a timer whose task is gone rather than inventing a task', () => {
     const { data, service } = setup({}, timerAt(NOW, 60_000));
-    expect(service.stopTiming(NOW)).toEqual({ ok: false, error: 'TASK_NOT_FOUND' });
+    const r = service.stopTiming(NOW);
+    expect(r.ok).toBe(false);
+    expect(r).toMatchObject({ error: 'TASK_NOT_FOUND' });
+    expect(data.activeTimer).toBeNull();
+  });
+
+  test('refuses to settle a task other than the one the caller pinned', () => {
+    // The renderer's heartbeat sync() can land between its local swap and its
+    // stop call. Without the pin, main would settle the *newly started* timer
+    // and the previous task's elapsed time would go unbilled.
+    const { data, service } = setup({ t1: task(), t2: task({ id: 't2' }) }, timerAt(NOW, 60_000));
+    const r = service.stopTiming(NOW, 't2');
+    expect(r).toMatchObject({ ok: false, error: 'NO_ACTIVE_TIMER' });
+    // Untouched: still running, still unbilled — but on the right session.
+    expect(data.activeTimer).not.toBeNull();
+    expect(data.tasks.t1?.timeSpent).toBe(0);
+  });
+
+  test('settles normally when the pinned task is the one running', () => {
+    const { data, service } = setup({ t1: task() }, timerAt(NOW, 60_000));
+    const r = service.stopTiming(NOW, 't1');
+    expect(r).toMatchObject({ ok: true, settledMs: 60_000 });
     expect(data.activeTimer).toBeNull();
   });
 
@@ -79,6 +101,9 @@ describe('taskService.stopTiming — main-side settlement', () => {
     );
     const r = service.stopTiming(NOW);
     expect(r.ok).toBe(false);
+    // Distinct from TASK_NOT_FOUND: the row exists, we deliberately refused to
+    // bill it, and the renderer has to be able to tell the two apart.
+    expect(r).toMatchObject({ error: 'TASK_ALREADY_DONE' });
     expect(data.activeTimer).toBeNull();
     expect(data.tasks.t1?.timeSpent).toBe(999);
   });

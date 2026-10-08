@@ -4,7 +4,9 @@ import {
   appendIdeaEntry,
   emptyAppData,
   type Idea,
+  IdeaEditSchema,
   type IdeaStatus,
+  type Task,
 } from '@tiny-schedule/shared';
 import type { DataStore } from '../src/main/infra/dataStore';
 import { createIdeaService } from '../src/main/services/ideaService';
@@ -130,6 +132,45 @@ describe('ideaService.convertToTask', () => {
     expect(data.tasks[r.taskId]?.notes).toBe('背景说明');
   });
 
+  test('the task write goes through the stale-timing sweep, in the same write', () => {
+    // Splicing d.tasks directly skipped upsertTaskWithTiming, and with it the
+    // dropStaleTiming sweep that ends every task write. A done task holding an
+    // activeTimer then survived the conversion, and the eventual settle billed
+    // time onto an already-finished task (ADR-0002's enforcement point).
+    const doneTask = {
+      id: 'tdone',
+      title: '已完成',
+      projectId: 'INBOX_PROJECT',
+      tagIds: [],
+      subTaskIds: [],
+      isDone: true,
+      timeEstimate: 0,
+      timeSpent: 999,
+      timeSpentOnDay: {},
+      timeEntries: [],
+      notes: '',
+      created: 0,
+    } satisfies Task;
+    const data: AppData = {
+      ...emptyAppData(),
+      ideas: { i1: idea() },
+      tasks: { tdone: doneTask },
+      activeTimer: { taskId: 'tdone', startedAt: 0, accumulatedMs: 0, isPaused: false },
+    };
+    const store = {
+      get: () => data,
+      update: (fn: (c: AppData) => AppData) => {
+        Object.assign(data, fn(data));
+        return data;
+      },
+    } as unknown as DataStore;
+    const service = createIdeaService({ store, logger });
+    const r = service.convertToTask('i1');
+    expect(r.ok).toBe(true);
+    // The invariant, not the mechanism: no write may leave a done task timed.
+    expect(data.activeTimer).toBeNull();
+  });
+
   test('a converted idea cannot be converted again', () => {
     const { data, service } = setup({ i1: idea({ status: 'converted' }) });
     expect(service.convertToTask('i1').ok).toBe(false);
@@ -232,6 +273,41 @@ describe('ideaService.edit — the narrowed write contract', () => {
     });
     service.edit({ id: 'i1', title: '改名', notes: '', createdAt: 1 });
     expect(data.ideas.i1?.convertedTaskId).toBe('t9');
+  });
+
+  test('a present-but-undefined optional key does not erase the stored value', () => {
+    // The wire path is what makes this bite: the renderer builds the payload
+    // literally (`validationGoal: idea.validationGoal, timeline: ...`), so the
+    // keys are always present, and zod hands back undefined for the unset
+    // ones. A plain `{ ...stored, ...patch }` therefore wiped the timeline on
+    // every unrelated title edit — and the service-level tests missed it
+    // because they call edit() directly, past the zod boundary.
+    const stored = idea({ timeline: [{ id: 'e1', createdAt: 1, text: '记一笔' }] });
+    const { data, service } = setup({ i1: stored });
+    const patch = IdeaEditSchema.parse({
+      id: 'i1',
+      title: '只改标题',
+      notes: '',
+      createdAt: 1,
+      timeline: undefined,
+      validationGoal: undefined,
+    });
+    // Prove the fixture reproduces what zod actually hands the service.
+    expect('timeline' in patch).toBe(true);
+    service.edit(patch);
+    expect(data.ideas.i1?.timeline).toHaveLength(1);
+    expect(data.ideas.i1?.title).toBe('只改标题');
+  });
+
+  test('an explicitly nulled optional field still clears it', () => {
+    // Filtering undefined must not turn into "ignore everything optional":
+    // clearing a field has to stay expressible.
+    const { data, service } = setup({
+      i1: idea({ validationGoal: '验证一下' }),
+    });
+    service.edit({ id: 'i1', title: 't', notes: '', createdAt: 1, validationGoal: undefined });
+    // validationGoal is optional, so an omitted key means "leave it alone".
+    expect(data.ideas.i1?.validationGoal).toBe('验证一下');
   });
 
   test('editing the timeline leaves the status untouched', () => {

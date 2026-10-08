@@ -22,15 +22,33 @@ export interface IdeaCommandOutcome {
 
 const ACCEPTED: IdeaCommandOutcome = { ok: true };
 
+/** Domain rejections come back as data, not as exceptions (ADR-0003). */
+export interface FollowUpCommandOutcome {
+  ok: boolean;
+  error?: string;
+}
+
 /**
  * Run an idea intent command and adopt its dataset. The main process is the
  * only place that decides whether a transition is legal, so the verdict is
  * forwarded rather than second-guessed here.
+ *
+ * A *thrown* error is a different matter: the contract says system errors keep
+ * throwing (e.g. a missing Inbox project, or a zod rejection at the
+ * registration loop). Callers fire these off with `void`, so an uncaught
+ * rejection is silent in a packaged app — no toast, the dialog stays open, and
+ * the user concludes the click did nothing. Surfacing it as a rejection keeps
+ * every caller's existing `if (!outcome.ok) toast.error(...)` path honest.
  */
 async function adoptIdeaCommand(
   promise: Promise<{ ok: true; data: AppData } | { ok: false; error: string }>,
 ): Promise<IdeaCommandOutcome> {
-  const result = await promise;
+  let result: { ok: true; data: AppData } | { ok: false; error: string };
+  try {
+    result = await promise;
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'COMMAND_FAILED' };
+  }
   if (!result.ok) return { ok: false, error: result.error };
   useDataStore.setState({ data: result.data });
   return ACCEPTED;
@@ -78,8 +96,8 @@ interface DataState {
     result: IdeaVerdict['result'],
     text?: string,
   ) => Promise<IdeaCommandOutcome>;
-  resolveFollowUp: (id: string) => Promise<void>;
-  reopenFollowUp: (id: string) => Promise<void>;
+  resolveFollowUp: (id: string) => Promise<FollowUpCommandOutcome>;
+  reopenFollowUp: (id: string) => Promise<FollowUpCommandOutcome>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   // Returns the newly created project (callers like 想法升级为项目 need its id).
   createProject: (title: string) => Promise<Project | null>;
@@ -152,12 +170,16 @@ export const useDataStore = create<DataState>((set, get) => ({
   resolveFollowUp: async (id) => {
     // The transition is applied in the main process; the returned dataset is
     // the whole answer, so the renderer never composes isResolved itself.
-    const data = await api().followUpResolve({ id });
-    set({ data });
+    const result = await api().followUpResolve({ id });
+    if (!result.ok) return { ok: false as const, error: result.error };
+    set({ data: result.data });
+    return { ok: true as const };
   },
   reopenFollowUp: async (id) => {
-    const data = await api().followUpReopen({ id });
-    set({ data });
+    const result = await api().followUpReopen({ id });
+    if (!result.ok) return { ok: false as const, error: result.error };
+    set({ data: result.data });
+    return { ok: true as const };
   },
   setTaskOrder: (viewKey, ids) => {
     // Optimistic: apply locally first so dragging stays fluid, then persist.

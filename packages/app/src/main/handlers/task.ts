@@ -25,13 +25,16 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
     /**
      * Stop timing. The main process settles here, so `settledMs` is the
      * authority on "how much time did this record" — the renderer no longer
-     * gets to be the one that decides.
+     * gets to be the one that decides. `req.taskId` pins which session to
+     * settle so a racing sync() can't make this bill the wrong task.
      */
-    timingStop: () => {
-      const result = tasks.stopTiming();
+    timingStop: (req: { taskId?: string }) => {
+      const result = tasks.stopTiming(Date.now(), req.taskId);
       if (!result.ok) {
+        // Rejections still carry data: the main process may already have
+        // dropped the timer, and the renderer needs to see that.
         logger.info({ action: 'timing:stop', error: result.error });
-        return result;
+        return { ...result, data: masked(result.data) };
       }
       return { ok: true as const, data: masked(result.data), settledMs: result.settledMs };
     },

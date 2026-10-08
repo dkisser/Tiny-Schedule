@@ -1,6 +1,7 @@
 import {
   type AppData,
   type FollowUp,
+  type FollowUpCommandResult,
   reopenFollowUp,
   resolveFollowUp,
 } from '@tiny-schedule/shared';
@@ -37,18 +38,30 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
       return next;
     },
 
-    /** 办结：记录了结时刻。 */
-    resolve(id: string, now = Date.now()): AppData | null {
+    /**
+     * 办结：记录了结时刻。
+     *
+     * Rejections are envelopes, not nulls — the caller is the renderer, which
+     * would otherwise have no way to tell "this follow-up is gone" from "the
+     * dataset failed to load".
+     */
+    resolve(id: string, now = Date.now()): FollowUpCommandResult {
       const current = store.get().followUps[id];
-      if (!current) return null;
-      return persist(resolveFollowUp(current, now));
+      if (!current) {
+        logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
+        return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
+      }
+      return { ok: true, data: persist(resolveFollowUp(current, now)) };
     },
 
     /** 恢复跟进：清空了结时刻，回到等待中。 */
-    reopen(id: string): AppData | null {
+    reopen(id: string): FollowUpCommandResult {
       const current = store.get().followUps[id];
-      if (!current) return null;
-      return persist(reopenFollowUp(current));
+      if (!current) {
+        logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
+        return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
+      }
+      return { ok: true, data: persist(reopenFollowUp(current)) };
     },
   };
 }

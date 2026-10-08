@@ -15,6 +15,7 @@ import {
   type Project,
   reopenIdea,
   upgradeIdeaToProject,
+  upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
 
@@ -60,6 +61,35 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     return { ok: true, data: next };
   };
 
+  /**
+   * Guard + transition, shared by the single-field commands.
+   *
+   * Deliberately NOT part of the returned object: exposing it would let a
+   * future agent write tool or handler perform a transition the command set
+   * deliberately does not express, which is the whole point of ADR-0003
+   * ("契约里根本不存在这个操作"). A closure also keeps it off `this`, so the
+   * commands below stay safe to destructure.
+   */
+  const transitionFrom = (
+    id: string,
+    allowed: readonly Idea['status'][],
+    transition: (idea: Idea) => Idea,
+    rejectError: string,
+  ): IdeaCommandResult => {
+    const found = load(id);
+    if ('error' in found) return { ok: false, error: found.error };
+    if (!allowed.includes(found.idea.status)) {
+      logger.info({
+        action: 'idea:rejected',
+        ideaId: id,
+        status: found.idea.status,
+        error: rejectError,
+      });
+      return { ok: false, error: rejectError };
+    }
+    return apply(id, transition);
+  };
+
   return {
     /**
      * 想法的字段编辑（标题/备注/验证目标/演进日志）。
@@ -69,9 +99,20 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * 新建（记录箱里记一笔）仍走这条路径，落库时 status 恒为 open。
      */
     edit(patch: IdeaEdit): AppData {
+      // A partial edit is a *merge*, so only the keys the caller actually set
+      // may be applied. `{ ...stored, ...patch }` would let an explicitly
+      // present-but-undefined optional key (which is what zod hands back for
+      // `timeline: undefined`) erase the stored value — the schema was
+      // deliberately loosened so callers could send partial edits, and every
+      // one of them would have been silently destructive.
+      const defined = Object.fromEntries(
+        Object.entries(patch).filter(([, v]) => v !== undefined),
+      ) as Partial<IdeaEdit>;
       const next = store.update((d) => {
         const stored = d.ideas[patch.id];
-        const idea: Idea = stored ? { ...stored, ...patch } : { ...patch, status: 'open' as const };
+        const idea: Idea = stored
+          ? { ...stored, ...defined, id: patch.id }
+          : { ...patch, status: 'open' as const };
         return { ...d, ideas: { ...d.ideas, [idea.id]: idea } };
       });
       logger.info({ action: 'idea:upsert', ideaId: patch.id, title: patch.title });
@@ -90,12 +131,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
 
     /** 记录即完成。open 是唯一可分流的状态，incubating/closed/converted 均拒绝。 */
     complete(id: string): IdeaCommandResult {
-      return this.transitionFrom(id, ['open'], completeIdea, 'IDEA_NOT_IN_OPEN');
+      return transitionFrom(id, ['open'], completeIdea, 'IDEA_NOT_IN_OPEN');
     },
 
     /** 废弃。 */
     discard(id: string): IdeaCommandResult {
-      return this.transitionFrom(id, ['open'], discardIdea, 'IDEA_NOT_IN_OPEN');
+      return transitionFrom(id, ['open'], discardIdea, 'IDEA_NOT_IN_OPEN');
     },
 
     /**
@@ -103,7 +144,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * converted 与 closed 是终态——契约上根本没有对它们 reopen 的操作。
      */
     reopen(id: string): IdeaCommandResult {
-      return this.transitionFrom(id, ['done', 'discarded'], reopenIdea, 'IDEA_NOT_REOPENABLE');
+      return transitionFrom(id, ['done', 'discarded'], reopenIdea, 'IDEA_NOT_REOPENABLE');
     },
 
     /** 转为任务：任务进 Inbox，想法转 converted（终态）。 */
@@ -121,11 +162,17 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       // 标题覆盖：调用方可以给任务换名，但备注恒随想法带入。
       const source = title ? { ...found.idea, title } : found.idea;
       const { task, converted } = ideaToTask(source, inbox);
-      const next = store.update((d) => ({
-        ...d,
-        tasks: { ...d.tasks, [task.id]: task },
-        ideas: { ...d.ideas, [id]: converted },
-      }));
+      const now = Date.now();
+      const next = store.update((d) => {
+        // Route the task write through the shared invariant helper rather than
+        // splicing d.tasks: upsertTaskWithTiming ends every task write with
+        // dropStaleTiming, which is what guarantees "no write leaves a done
+        // task still being timed". Splicing skipped it, so a stale activeTimer
+        // survived the conversion and later billed time onto a finished task.
+        // Running it inside this same update keeps the two writes atomic.
+        const r = upsertTaskWithTiming(d, task, now);
+        return { ...r.data, ideas: { ...r.data.ideas, [id]: converted } };
+      });
       logger.info({ action: 'idea:convertToTask', ideaId: id, taskId: task.id });
       return { ok: true, data: next, taskId: task.id };
     },
@@ -170,33 +217,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       result: 'validated' | 'invalidated' | 'partial',
       text?: string,
     ): IdeaCommandResult {
-      return this.transitionFrom(
+      return transitionFrom(
         id,
         ['incubating', 'closed'],
         (idea) => closeIdeaWithVerdict(idea, result, text),
         'IDEA_NOT_CLOSABLE',
       );
-    },
-
-    /** Guard + transition shared by the single-field commands. */
-    transitionFrom(
-      id: string,
-      allowed: readonly Idea['status'][],
-      transition: (idea: Idea) => Idea,
-      rejectError: string,
-    ): IdeaCommandResult {
-      const found = load(id);
-      if ('error' in found) return { ok: false, error: found.error };
-      if (!allowed.includes(found.idea.status)) {
-        logger.info({
-          action: 'idea:rejected',
-          ideaId: id,
-          status: found.idea.status,
-          error: rejectError,
-        });
-        return { ok: false, error: rejectError };
-      }
-      return apply(id, transition);
     },
   };
 }

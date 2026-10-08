@@ -1,23 +1,31 @@
-import type { IdeaEdit } from '@tiny-schedule/shared';
+import type { IdeaCommandResult, IdeaEdit } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
 import { masked } from './deps';
 
 /**
  * 想法的 handler：写契约是意图命令集，所以这里的方法名就是领域语言。
  * 守卫（终态规则）全在 ideaService 里，handler 不复述任何一条。
+ *
+ * 每一条返回 AppData 的通道都要过 masked()：渲染进程是跨 contextBridge 的
+ * 不可信边界，service 返回的落库数据里带着每个 provider 的 apiKeyEncrypted
+ * 密文。渲染进程会整份采纳命令结果，所以漏掉一次遮罩就是把密文送过去。
  */
 export function ideaHandlers({ ideas }: HandlerDeps) {
+  /** Single choke point: whatever leaves for the renderer is masked. */
+  const maskedResult = (result: IdeaCommandResult) =>
+    result.ok ? { ...result, data: masked(result.data) } : result;
+
   return {
     /** 字段编辑：请求只带非状态字段，合并由 service 完成。 */
     ideaUpsert: (patch: IdeaEdit) => masked(ideas.edit(patch)),
 
     ideaDelete: ({ id }: { id: string }) => masked(ideas.remove(id)),
 
-    ideaComplete: ({ id }: { id: string }) => ideas.complete(id),
+    ideaComplete: ({ id }: { id: string }) => maskedResult(ideas.complete(id)),
 
-    ideaDiscard: ({ id }: { id: string }) => ideas.discard(id),
+    ideaDiscard: ({ id }: { id: string }) => maskedResult(ideas.discard(id)),
 
-    ideaReopen: ({ id }: { id: string }) => ideas.reopen(id),
+    ideaReopen: ({ id }: { id: string }) => maskedResult(ideas.reopen(id)),
 
     ideaConvertToTask: ({ id, title }: { id: string; title?: string }) => {
       const result = ideas.convertToTask(id, title);
@@ -49,6 +57,6 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
       id: string;
       result: 'validated' | 'invalidated' | 'partial';
       text?: string;
-    }) => ideas.closeWithVerdict(id, result, text),
+    }): IdeaCommandResult => maskedResult(ideas.closeWithVerdict(id, result, text)),
   };
 }

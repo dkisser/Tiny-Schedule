@@ -66,8 +66,11 @@ export const IdeaSchema = z
     createdAt: z.number(),
     convertedAt: z.number().optional(),
     convertedTaskId: z.string().optional(),
-    // 旧数据没有 status：catch 兜底非法值，transform 按 convertedAt 派生缺失值。
-    status: IdeaStatusSchema.optional().catch(undefined),
+    // 旧数据没有 status：transform 按 convertedAt 派生缺失值。刻意**不**加
+    // .catch()——一个不认识的状态值说明 data.json 来自更新的构建或有损坏，
+    // 此时静默降级成 undefined 会让 transform 把已闭环的想法复活成 open。
+    // 让它抛，读侧（readValidated）会退回备份，这比悄悄丢失终态安全。
+    status: IdeaStatusSchema.optional(),
     projectId: z.string().optional(),
     validationGoal: z.string().optional(),
     timeline: z.array(IdeaEntrySchema).optional(),

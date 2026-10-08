@@ -18,11 +18,13 @@ import { settingsHandlers } from './handlers/settings';
 import { taskHandlers } from './handlers/task';
 import type { DataStore } from './infra/dataStore';
 import { decryptKey } from './infra/keys';
+import { createAiHistoryService } from './services/aiHistoryService';
 import { type ChatEventSink, createChatService } from './services/chatService';
 import { createFollowUpService } from './services/followUpService';
 import { createIdeaService } from './services/ideaService';
+import { createImportService } from './services/importService';
 import { createProjectService } from './services/projectService';
-import { createTaskService } from './services/taskService';
+import { createTaskService, type TaskService } from './services/taskService';
 
 export interface IpcDeps {
   store: DataStore;
@@ -32,10 +34,21 @@ export interface IpcDeps {
 }
 
 /**
+ * The services this function built. main.ts needs the very same TaskService
+ * instance for its quit path: a second one would mean a second copy of any
+ * in-flight state a service acquires, so a settle guard live on the IPC path
+ * would be empty on the quit path — the single-enforcement-point property
+ * ADR-0003 rests on.
+ */
+export interface RegisterResult {
+  tasks: TaskService;
+}
+
+/**
  * 组装点，不是逻辑所在：这里只做三件事——建 services、拼 handlers、跑注册循环。
  * 每个 handler 模块只做 zod 校验（由注册循环统一执行）与转调；领域规则在 services。
  */
-export function registerIpcHandlers(deps: IpcDeps): void {
+export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   const { store, logger, getWindow, getVersion } = deps;
 
   const serviceDeps = { store, logger };
@@ -43,6 +56,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
   const ideas = createIdeaService(serviceDeps);
   const followUps = createFollowUpService(serviceDeps);
   const projects = createProjectService(serviceDeps);
+  const imports = createImportService(serviceDeps);
+  const aiHistory = createAiHistoryService(serviceDeps);
   const chatSink: ChatEventSink = {
     chunk: (sessionId, requestId, delta) =>
       sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),
@@ -83,8 +98,8 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     ...projectHandlers(handlerDeps),
     ...settingsHandlers({ store, logger }),
     ...chatHandlers(chatManager),
-    ...aiHandlers({ store, logger, getWindow }),
-    ...appHandlers({ store, logger, getWindow, getVersion }),
+    ...aiHandlers({ store, logger, getWindow, aiHistory }),
+    ...appHandlers({ store, logger, getWindow, getVersion, imports }),
   };
 
   type ContractEntry = { ch: string; req?: { parse(raw: unknown): unknown } };
@@ -97,4 +112,6 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // check-ipc: ok — entry.ch comes from IpcInvokeContract
     ipcMain.handle(entry.ch, (_e, raw: unknown) => handler(entry.req ? entry.req.parse(raw) : raw));
   }
+
+  return { tasks };
 }

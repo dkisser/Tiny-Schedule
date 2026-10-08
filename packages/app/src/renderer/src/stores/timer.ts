@@ -56,12 +56,15 @@ async function sync(timer: ActiveTimer | null) {
 /**
  * 结算由主进程做（ADR-0003）：渲染进程不再自己算时长再写回去。
  * 调用方先乐观地停表，所以这里只负责采纳主进程的答案——返回它记录的 ms。
+ *
+ * `expectedTaskId` 钉住要结算的是哪一次：换表与心跳 sync() 是异步的，不钉住的话
+ * 主进程可能结算到刚起步的新表，把旧任务的时长记错地方。拒绝时也采纳返回的
+ * 数据集——主进程可能已经丢弃了 activeTimer，渲染进程必须跟着收敛。
  */
-async function settleOnMain(): Promise<number> {
-  const result = await api().timingStop();
-  if (!result.ok) return 0;
+async function settleOnMain(expectedTaskId?: string): Promise<number> {
+  const result = await api().timingStop({ taskId: expectedTaskId });
   useDataStore.setState({ data: result.data });
-  return result.settledMs;
+  return result.ok ? result.settledMs : 0;
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -110,9 +113,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startTimer(taskId, now);
     // Swap synchronously first so rapid clicks can't race, then settle the
-    // previous timer so its elapsed time isn't lost.
+    // previous timer so its elapsed time isn't lost. The settle is pinned to
+    // the previous task: without the pin, a concurrent sync() landing first
+    // would make the main process settle `next` instead and leave the old
+    // task's elapsed time unbilled.
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleOnMain();
+    if (cur) await settleOnMain(cur.taskId);
     await sync(next);
   },
 
@@ -122,7 +128,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleOnMain();
+    if (cur) await settleOnMain(cur.taskId);
     await sync(next);
   },
 
@@ -159,8 +165,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // Optimistic: the clock stops on this frame; the recorded duration is
     // whatever the main process settles, adopted in settleOnMain.
     set({ timer: null, phasePendingAdvance: null });
-    if (!cur) return;
-    await settleOnMain();
+    if (cur) await settleOnMain(cur.taskId);
+    // Unconditional clear. settleOnMain only removes the timer on a successful
+    // settle, so without this the main process could keep an activeTimer the UI
+    // already shows as stopped — and a later start() would find it and bill its
+    // elapsed time onto whichever task came along next.
+    await sync(null);
   },
 
   tick: () => set({ now: Date.now() }),

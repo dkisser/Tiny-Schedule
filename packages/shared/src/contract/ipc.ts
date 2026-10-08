@@ -2,7 +2,15 @@ import { z } from 'zod';
 import type { AppData, ChatSession } from '../domain/appData';
 import { FollowUpSchema } from '../domain/followUp';
 import { IdeaEntrySchema, IdeaSchema } from '../domain/idea';
+import { PROJECT_TITLE_MAX_LENGTH } from '../domain/project';
 import { ActiveTimerSchema, TaskSchema } from '../domain/task';
+
+/**
+ * 项目名的 wire 约束。必须与 domain 侧强制的常量同源：schema 放宽而 service
+ * 截断的话，用户会看到"保存成功"但落库的是被静默砍掉的名字，且两个同前缀的
+ * 名字会撞成同名项目。
+ */
+const projectTitleSchema = z.string().trim().min(1).max(PROJECT_TITLE_MAX_LENGTH);
 
 export const Ipc = {
   dataLoad: 'data:load',
@@ -101,6 +109,14 @@ export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
 /** 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。 */
 export type IdeaCommandRejection = { ok: false; error: string };
 
+/**
+ * 跟进状态命令的结果。刻意不用 `AppData | null`：渲染进程把返回值整份当成
+ * 数据集采纳，null 会让 App 停在"加载中"且无从区分"这条跟进没了"和"还没加载"。
+ */
+export type FollowUpCommandResult =
+  | { ok: true; data: AppData }
+  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
+
 export const IdeaIdReqSchema = z.object({ id: z.string().min(1) });
 export type IdeaIdReq = z.infer<typeof IdeaIdReqSchema>;
 
@@ -113,7 +129,7 @@ export type IdeaConvertToTaskReq = z.infer<typeof IdeaConvertToTaskReqSchema>;
 
 export const IdeaUpgradeToProjectReqSchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1).max(100),
+  title: projectTitleSchema,
   icon: z.string().optional(),
   primaryColor: z.string().optional(),
   /** 验证目标：怎么算验证成功（CONTEXT.md 的"验证目标"）。 */
@@ -135,7 +151,7 @@ export const OrderSetReqSchema = z.object({
 export type OrderSetReq = z.infer<typeof OrderSetReqSchema>;
 
 export const ProjectCreateReqSchema = z.object({
-  title: z.string().trim().min(1).max(100),
+  title: projectTitleSchema,
   icon: z.string().optional(),
   primaryColor: z.string().optional(),
 });
@@ -149,7 +165,7 @@ export type TagCreateReq = z.infer<typeof TagCreateReqSchema>;
 
 export const ProjectUpdateReqSchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1).max(100).optional(),
+  title: projectTitleSchema.optional(),
   // Explicit null clears the color; undefined leaves the existing one intact.
   primaryColor: z.string().nullable().optional(),
   // Archive hides the project from the sidebar but keeps its tasks in stats.
@@ -379,10 +395,28 @@ export type IdeaUpgradeResult =
 /**
  * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
  * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
+ *
+ * 拒绝分支也带 data：主进程在拒绝前可能已经丢弃了 activeTimer（任务已完成的
+ * 情况就是这样），渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着
+ * 一次结算根本没动过的旧 timeSpent。
  */
 export type TimingStopResult =
   | { ok: true; data: AppData; settledMs: number }
-  | { ok: false; error: 'NO_ACTIVE_TIMER' | 'TASK_NOT_FOUND' };
+  | {
+      ok: false;
+      error: 'NO_ACTIVE_TIMER' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
+      data: AppData;
+    };
+
+export const TimingStopReqSchema = z.object({
+  /**
+   * 调用方要结算的那次计时所属的任务。带上它，主进程就只会结算**这一次**：
+   * 渲染进程换表与心跳 sync() 之间的竞态就不会把时长记到刚起步的新表上。
+   * 省略则结算当前 activeTimer（quit / 无人等待的路径）。
+   */
+  taskId: z.string().min(1).optional(),
+});
+export type TimingStopReq = z.infer<typeof TimingStopReqSchema>;
 
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
@@ -412,12 +446,12 @@ export const IpcInvokeContract = {
   followUpResolve: {
     ch: Ipc.followUpResolve,
     req: FollowUpDeleteReqSchema,
-    res: null as unknown as AppData | null,
+    res: null as unknown as FollowUpCommandResult,
   },
   followUpReopen: {
     ch: Ipc.followUpReopen,
     req: FollowUpDeleteReqSchema,
-    res: null as unknown as AppData | null,
+    res: null as unknown as FollowUpCommandResult,
   },
   ideaUpsert: {
     ch: Ipc.ideaUpsert,
@@ -485,7 +519,11 @@ export const IpcInvokeContract = {
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
-  timingStop: { ch: Ipc.timingStop, res: null as unknown as TimingStopResult },
+  timingStop: {
+    ch: Ipc.timingStop,
+    req: TimingStopReqSchema,
+    res: null as unknown as TimingStopResult,
+  },
   importRun: { ch: Ipc.importRun, res: null as unknown as ImportRunResult },
   exportMarkdown: {
     ch: Ipc.exportMarkdown,

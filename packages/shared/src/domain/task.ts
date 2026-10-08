@@ -107,6 +107,10 @@ export const ActiveTimerSchema = z.object({
   phaseAccumulatedMs: z.number().optional(),
   phaseDurationMs: z.number().optional(),
   cyclesCompleted: z.number().int().min(0).optional(),
+  // Must stay in lockstep with the interface: zod strips keys the schema does
+  // not declare, and every save runs through this schema — omitting the field
+  // here silently zeroed banked pomodoro focus at settlement time.
+  focusAccumulatedMs: z.number().optional(),
 });
 
 // ---------------------------------------------------------------------------

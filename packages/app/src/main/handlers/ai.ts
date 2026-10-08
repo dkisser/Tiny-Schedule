@@ -5,6 +5,7 @@ import { streamChat, testConnection } from '../infra/ai/client';
 import { getProviderDef, PROVIDER_REGISTRY, toProviderInfo } from '../infra/ai/providers';
 import type { DataStore } from '../infra/dataStore';
 import { decryptKey } from '../infra/keys';
+import type { AiHistoryService } from '../services/aiHistoryService';
 import { buildAnalysisData, renderPrompt } from '../services/prompts';
 import { sendSafe } from './deps';
 
@@ -16,10 +17,12 @@ export function aiHandlers({
   store,
   logger,
   getWindow,
+  aiHistory,
 }: {
   store: DataStore;
   logger: { info: (o: object) => void; error: (o: object) => void };
   getWindow: () => BrowserWindow | null;
+  aiHistory: AiHistoryService;
 }) {
   return {
     aiRegistry: () => PROVIDER_REGISTRY.map(toProviderInfo),
@@ -77,20 +80,10 @@ export function aiHandlers({
             full += delta;
             sendSafe(win, Ipc.aiChunk, { requestId, delta });
           }
-          // Persist before signaling done so the renderer can reload and see the history entry.
-          store.update((d) => {
-            const history = [
-              {
-                id: randomUUID(),
-                scope: req.scope,
-                ...(req.projectId ? { projectId: req.projectId } : {}),
-                createdAt: Date.now(),
-                content: full,
-              },
-              ...((d.misc.aiHistory ?? []) as unknown[]),
-            ].slice(0, 50);
-            return { ...d, misc: { ...d.misc, aiHistory: history } };
-          });
+          // Persist before signaling done so the renderer can reload and see
+          // the history entry. The write belongs to the service; the handler
+          // only orchestrates the stream.
+          aiHistory.append({ scope: req.scope, projectId: req.projectId, content: full });
           sendSafe(win, Ipc.aiDone, { requestId, full });
           logger.info({ action: 'ai:analyze:done', requestId, length: full.length });
         } catch (err) {
