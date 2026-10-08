@@ -24,6 +24,7 @@ import { createFollowUpService } from './services/followUpService';
 import { createIdeaService } from './services/ideaService';
 import { createImportService } from './services/importService';
 import { createProjectService } from './services/projectService';
+import { createSettingsService } from './services/settingsService';
 import { createTaskService, type TaskService } from './services/taskService';
 
 export interface IpcDeps {
@@ -58,6 +59,7 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   const projects = createProjectService(serviceDeps);
   const imports = createImportService(serviceDeps);
   const aiHistory = createAiHistoryService(serviceDeps);
+  const settings = createSettingsService(serviceDeps);
   const chatSink: ChatEventSink = {
     chunk: (sessionId, requestId, delta) =>
       sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),
@@ -95,7 +97,7 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
     ...ideaHandlers(handlerDeps),
     ...followUpHandlers(handlerDeps),
     ...projectHandlers(handlerDeps),
-    ...settingsHandlers({ store, logger }),
+    ...settingsHandlers({ settings }),
     ...chatHandlers(chatManager),
     ...aiHandlers({ store, logger, getWindow, aiHistory }),
     ...appHandlers({ store, logger, getWindow, getVersion, imports }),

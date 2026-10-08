@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type AppData,
+  AppDataSchema,
   emptyAppData,
   type Idea,
   IdeaEditSchema,
@@ -21,8 +22,13 @@ function setup(ideas: Record<string, Idea> = { i1: idea() }) {
   const store = {
     get: () => data,
     update: (fn: (c: AppData) => AppData) => {
+      // Parse exactly as DataStore.save does. Without it this double is blind to
+      // every AppDataSchema defect: 'an explicit null clears the color' asserted
+      // null while the identical call against a real store threw. Object.assign
+      // alone would let a schema-breaking write pass green here and only
+      // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return data;
+      return AppDataSchema.parse(data) as AppData;
     },
   } as unknown as DataStore;
   return { data, service: createIdeaService({ store, logger }) };
@@ -36,8 +42,13 @@ function countingSetup(ideas: Record<string, Idea>) {
     get: () => data,
     update: (fn: (c: AppData) => AppData) => {
       writes += 1;
+      // Parse exactly as DataStore.save does. Without it this double is blind to
+      // every AppDataSchema defect: 'an explicit null clears the color' asserted
+      // null while the identical call against a real store threw. Object.assign
+      // alone would let a schema-breaking write pass green here and only
+      // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return data;
+      return AppDataSchema.parse(data) as AppData;
     },
   } as unknown as DataStore;
   return { data, service: createIdeaService({ store, logger }), writes: () => writes };

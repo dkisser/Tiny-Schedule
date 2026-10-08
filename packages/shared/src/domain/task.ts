@@ -310,11 +310,15 @@ export function advancePomodoroPhase(
     const nextCompleted = completed + 1;
     // Fold only the post-last-fold delta so pause's earlier fold and
     // advance's fold don't double-count the same segment. The pause path
-    // already rebased phaseStartedAt to the pause instant, so
-    // `now - phaseStartedAt` is the trailing delta only.
+    // rebases phaseStartedAt to the pause instant, so `now - phaseStartedAt`
+    // is the trailing delta only.
+    //
+    // Only while running: a timer auto-paused by the sleep/idle watcher and
+    // advanced two hours later would otherwise bill those two hours as
+    // focused work. The wall clock kept running; the user's attention did not.
+    const focusDelta = t.isPaused ? 0 : Math.max(0, now - (t.phaseStartedAt ?? now));
     const focusFold = {
-      focusAccumulatedMs:
-        (t.focusAccumulatedMs ?? 0) + Math.max(0, now - (t.phaseStartedAt ?? now)),
+      focusAccumulatedMs: (t.focusAccumulatedMs ?? 0) + focusDelta,
     };
     if (nextCompleted >= POMODORO_CYCLES_PER_SET) {
       // Last focus in this set ended: freeze both clocks at `now`, leave the

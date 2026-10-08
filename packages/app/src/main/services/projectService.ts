@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { type AppData, INBOX_PROJECT_ID, PROJECT_TITLE_MAX_LENGTH } from '@tiny-schedule/shared';
+import {
+  type AppData,
+  INBOX_PROJECT_ID,
+  newProject,
+  PROJECT_TITLE_MAX_LENGTH,
+} from '@tiny-schedule/shared';
 import { listMeta, type MetaResult } from './projectQueries';
 import type { ServiceDeps } from './taskService';
 
@@ -24,22 +29,16 @@ export interface ProjectUpdateInput {
 export function createProjectService({ store, logger }: ServiceDeps) {
   return {
     create(req: ProjectCreateInput): { data: AppData; projectId: string } {
-      const title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
-      const projectId = `p_${randomUUID()}`;
+      const project = newProject(req);
+      const projectId = project.id;
       const next = store.update((d) => ({
         ...d,
         projects: {
           ...d.projects,
-          [projectId]: {
-            id: projectId,
-            title,
-            icon: req.icon,
-            isArchived: false,
-            primaryColor: req.primaryColor,
-          },
+          [projectId]: project,
         },
       }));
-      logger.info({ action: 'project:create', title });
+      logger.info({ action: 'project:create', title: project.title });
       return { data: next, projectId };
     },
 

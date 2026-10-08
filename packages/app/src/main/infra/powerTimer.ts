@@ -1,12 +1,27 @@
-import { autoPauseTimer, dropStaleTiming, Ipc, idleThresholdReached } from '@tiny-schedule/shared';
+import { type ActiveTimer, type AppData, autoPauseTimer, Ipc } from '@tiny-schedule/shared';
 import { type BrowserWindow, powerMonitor } from 'electron';
 import type { Logger } from 'pino';
-import type { DataStore } from './dataStore';
+
+/** Just enough of taskService to read and write a timer, and nothing more. */
+export interface TimerPort {
+  current(): ActiveTimer | null;
+  sync(timer: ActiveTimer | null): { data: AppData; dropped: boolean };
+}
 
 export interface PowerTimerDeps {
-  store: DataStore;
   logger: Logger;
   getWindow: () => BrowserWindow | null;
+  /**
+   * The narrow port, so the "no timer on a done task" rule lives in one place.
+   * This watcher used to reach past the services into the store and inline its
+   * own dropStaleTiming, making it the fourth copy of a rule that
+   * taskService.upsert, syncTimer and importService also enforce — and
+   * taskService.remove already had to special-case the deleted-task variant,
+   * which is what that duplication costs when the rule next changes.
+   */
+  timers: TimerPort;
+  /** The idle threshold lives in settings; this watcher only applies it. */
+  idleReached: (idleMs: number) => boolean;
 }
 
 // Poll faster than any sensible threshold so the pause point (backdated by
@@ -18,14 +33,17 @@ const IDLE_POLL_MS = 20_000;
  * the main process — the renderer is frozen during sleep and cannot observe
  * either itself. Paused timers stay paused; resuming is always manual.
  */
-export function startPowerTimerWatcher({ store, logger, getWindow }: PowerTimerDeps): void {
+export function startPowerTimerWatcher({
+  logger,
+  getWindow,
+  timers,
+  idleReached,
+}: PowerTimerDeps): void {
   const applyAutoPause = (reason: 'sleep' | 'idle', backdateMs = 0): void => {
-    const timer = store.get().activeTimer;
+    const timer = timers.current();
     if (!timer || timer.isPaused) return;
-    const paused = autoPauseTimer(timer, Date.now(), reason, backdateMs);
-    // Same invariant as the task/timer write paths: a timer may never be
-    // persisted for a task that is already done.
-    const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: paused }));
+    const paused: ActiveTimer = autoPauseTimer(timer, Date.now(), reason, backdateMs);
+    const { data: next } = timers.sync(paused);
     const win = getWindow();
     if (!next.activeTimer) {
       // Tell the renderer the clock is gone. Without this its TimerBar keeps
@@ -43,7 +61,7 @@ export function startPowerTimerWatcher({ store, logger, getWindow }: PowerTimerD
 
   const poll = setInterval(() => {
     const idleMs = powerMonitor.getSystemIdleTime() * 1000;
-    if (idleThresholdReached(store.get().settings, idleMs)) applyAutoPause('idle', idleMs);
+    if (idleReached(idleMs)) applyAutoPause('idle', idleMs);
   }, IDLE_POLL_MS);
   poll.unref(); // never keep the process alive just for this check
 }

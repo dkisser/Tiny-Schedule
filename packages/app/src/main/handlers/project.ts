@@ -4,8 +4,10 @@ import { masked } from './deps';
 /** 项目/标签/排序的 handler：只转调 projectService。 */
 export function projectHandlers({ projects }: HandlerDeps) {
   return {
-    projectCreate: (req: { title: string; icon?: string; primaryColor?: string }) =>
-      masked(projects.create(req).data),
+    projectCreate: (req: { title: string; icon?: string; primaryColor?: string }) => {
+      const { data, projectId } = projects.create(req);
+      return { data: masked(data), projectId };
+    },
 
     projectUpdate: (req: {
       id: string;

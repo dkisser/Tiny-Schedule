@@ -39,3 +39,35 @@ export const TagSchema = z.object({
   title: z.string(),
   color: z.string().optional(),
 });
+
+/**
+ * The single place a Project record is built.
+ *
+ * Both projectService.create and ideaService.upgradeToProject minted their own
+ * id and their own literal. Every Project field is optional, so adding one
+ * with a default produced a type-clean divergence: sidebar-created projects
+ * got the field and 升级为项目 ones did not, and switching the id scheme meant
+ * finding both by grep.
+ */
+export function newProject(input: {
+  title: string;
+  icon?: string;
+  primaryColor?: string | null;
+}): Project {
+  return {
+    id: newProjectId(),
+    title: input.title.slice(0, PROJECT_TITLE_MAX_LENGTH),
+    icon: input.icon,
+    isArchived: false,
+    primaryColor: input.primaryColor ?? undefined,
+  };
+}
+
+/**
+ * Same shape as newTaskId / newIdeaId / newFollowUpId, and for the same
+ * reason: `shared` is imported by the renderer, so it cannot reach for
+ * node:crypto.
+ */
+export function newProjectId(): string {
+  return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}

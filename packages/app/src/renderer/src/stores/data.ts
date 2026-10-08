@@ -1,7 +1,7 @@
 import type {
   AppData,
   AppSettings,
-  FollowUp,
+  FollowUpEdit,
   Idea,
   IdeaVerdict,
   Project,
@@ -48,18 +48,25 @@ export type IdeaPatch = Omit<Idea, 'validationGoal' | 'timeline'> & {
  * the user concludes the click did nothing. Surfacing it as a rejection keeps
  * every caller's existing `if (!outcome.ok) toast.error(...)` path honest.
  */
-async function adoptCommand(
-  promise: Promise<{ ok: true; data: AppData } | { ok: false; error: string }>,
-): Promise<IdeaCommandOutcome> {
-  let result: { ok: true; data: AppData } | { ok: false; error: string };
+async function adoptCommand<T extends { ok: true; data: AppData } | { ok: false; error: string }>(
+  promise: Promise<T>,
+): Promise<IdeaCommandOutcome & Partial<T>> {
+  let result: T;
   try {
     result = await promise;
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'COMMAND_FAILED' };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'COMMAND_FAILED',
+    } as IdeaCommandOutcome & Partial<T>;
   }
-  if (!result.ok) return { ok: false, error: result.error };
+  if (!result.ok) return { ok: false, error: result.error } as IdeaCommandOutcome & Partial<T>;
   useDataStore.setState({ data: result.data });
-  return ACCEPTED;
+  // Forwarded rather than dropped: the contract adds taskId/projectId to some
+  // commands precisely so the renderer does not have to guess them back out
+  // of the returned dataset. Widening the parameter erased them, and nothing
+  // caught it because a widened parameter type-checks.
+  return { ...result, ok: true };
 }
 
 // Renderer-side provider draft carries plain-text apiKey for editing
@@ -79,7 +86,8 @@ interface DataState {
   load: () => Promise<void>;
   upsertTask: (task: Task) => Promise<{ data: AppData; settledMs: number }>;
   deleteTask: (id: string) => Promise<void>;
-  upsertFollowUp: (followUp: FollowUp) => Promise<void>;
+  /** 字段编辑（标题/备注/条目/下次跟进日）；状态只能走 resolve/reopen 命令。 */
+  upsertFollowUp: (followUp: FollowUpEdit) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
   /** 字段编辑（标题/备注/验证目标）；状态与演进日志只能走意图命令。 */
   upsertIdea: (idea: IdeaPatch) => Promise<void>;
@@ -111,7 +119,7 @@ interface DataState {
   reopenFollowUp: (id: string) => Promise<FollowUpCommandOutcome>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   // Returns the newly created project (callers like 想法升级为项目 need its id).
-  createProject: (title: string) => Promise<Project | null>;
+  createProject: (title: string) => Promise<string>;
   updateProject: (
     id: string,
     patch: { title?: string; primaryColor?: string | null; isArchived?: boolean },
@@ -146,7 +154,20 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   upsertFollowUp: async (followUp) => {
-    const data = await api().followUpUpsert(followUp);
+    // Hand-picked fields: the caller usually spreads its render-time snapshot,
+    // and the state fields are not on the edit contract. Sending them anyway
+    // would just have zod strip them — or, if that ever changed, silently
+    // undo a 办结 the user had already performed.
+    const data = await api().followUpUpsert({
+      id: followUp.id,
+      title: followUp.title,
+      notes: followUp.notes,
+      createdAt: followUp.createdAt,
+      entries: followUp.entries ?? [],
+      ...(followUp.nextFollowUpDay !== undefined
+        ? { nextFollowUpDay: followUp.nextFollowUpDay }
+        : {}),
+    });
     set({ data });
   },
   deleteFollowUp: async (id) => {
@@ -204,10 +225,13 @@ export const useDataStore = create<DataState>((set, get) => ({
     void api().orderSet({ viewKey, ids });
   },
   createProject: async (title) => {
-    const prevIds = new Set(Object.keys(get().data?.projects ?? {}));
-    const data = await api().projectCreate({ title });
+    // projectService.create returns the id directly. It used to be recovered
+    // by diffing the whole project list, which returns the wrong project if
+    // two creations interleave — and the caller that comment cited has since
+    // moved to the atomic ideaUpgradeToProject, leaving the diff dead.
+    const { data, projectId } = await api().projectCreate({ title });
     set({ data });
-    return Object.values(data.projects).find((p) => !prevIds.has(p.id)) ?? null;
+    return projectId;
   },
   updateProject: async (id, patch) => {
     const data = await api().projectUpdate({ id, ...patch });

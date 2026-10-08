@@ -128,7 +128,14 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // would make the main process settle `next` instead and leave the old
     // task's elapsed time unbilled.
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleOnMain(cur.taskId);
+    // Honour the settle's verdict. On TIMER_MISMATCH main is running a
+    // different session and deliberately left it alone; persisting `next` on
+    // top of it anyway would destroy that session's accumulated time with no
+    // TimeEntry and no log — the very outcome the pin exists to prevent.
+    if (cur) {
+      const { cleared } = await settleOnMain(cur.taskId);
+      if (!cleared) return;
+    }
     await sync(next);
   },
 
@@ -138,7 +145,10 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleOnMain(cur.taskId);
+    if (cur) {
+      const { cleared } = await settleOnMain(cur.taskId);
+      if (!cleared) return;
+    }
     await sync(next);
   },
 

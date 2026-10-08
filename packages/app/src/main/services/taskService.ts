@@ -79,6 +79,12 @@ export function createTaskService({ store, logger }: ServiceDeps) {
     const data = store.update((d) => {
       const t = d.tasks[timer.taskId];
       if (!t) return { ...d, activeTimer: null };
+      // A zero-length stop records nothing. Without this guard a timer started
+      // and stopped in the same millisecond appends a phantom TimeEntry and a
+      // zero-valued timeSpentOnDay key — and those two are what the worklog
+      // and the delete-confirmation dialog read to decide "this task has
+      // recorded time". completeTask keeps the same `ms <= 0` rule.
+      if (settlement.ms <= 0) return { ...d, activeTimer: null };
       return {
         ...d,
         tasks: { ...d.tasks, [t.id]: applySettlement(t, settlement) },
@@ -135,6 +141,11 @@ export function createTaskService({ store, logger }: ServiceDeps) {
       return next;
     },
 
+    /** The timer currently on record, or null. Read-only. */
+    currentTimer(): ActiveTimer | null {
+      return store.get().activeTimer;
+    },
+
     /**
      * Persist a timer the renderer reports. Same invariant as upsert: a timer
      * may never be persisted for a task that is already done, whoever is
@@ -143,6 +154,12 @@ export function createTaskService({ store, logger }: ServiceDeps) {
      */
     syncTimer(timer: ActiveTimer | null): { data: AppData; dropped: boolean } {
       if (!timer) {
+        // Nothing to clear. Every write re-validates the whole dataset and
+        // copies the backup, and stop() clears unconditionally after settling
+        // — so skipping the no-op keeps a stop at one write instead of two and
+        // stops the 30s heartbeat from rewriting an unchanged file.
+        const current = store.get();
+        if (!current.activeTimer) return { data: current, dropped: false };
         return { data: store.update((d) => ({ ...d, activeTimer: null })), dropped: false };
       }
       const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));

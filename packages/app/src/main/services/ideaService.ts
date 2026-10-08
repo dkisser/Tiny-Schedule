@@ -15,7 +15,7 @@ import {
   type IdeaUpgradeResult,
   INBOX_PROJECT_ID,
   ideaToTask,
-  PROJECT_TITLE_MAX_LENGTH,
+  newProject,
   type Project,
   reopenIdea,
   updateIdeaEntry,
@@ -42,17 +42,6 @@ export interface IdeaUpgradeInput {
   validationGoal?: string;
 }
 
-/**
- * Every status may carry a timeline entry; the commands below are not
- * transitions. Derived from the schema rather than listed by hand, so a status
- * added to the contract is editable on the timeline by construction.
- */
-const ALL_STATUSES: readonly Idea['status'][] = Object.values(IdeaStatusSchema.enum);
-
-function newProjectId(): string {
-  return `p_${randomUUID()}`;
-}
-
 export function createIdeaService({ store, logger }: ServiceDeps) {
   /** Fetch an idea or reject with a stable error code. */
   const load = (id: string): { idea: Idea; data: AppData } | { error: string } => {
@@ -72,6 +61,22 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     logger.info({ action: 'idea:transition', ideaId: id });
     return { ok: true, data: next };
   };
+
+  /**
+   * Append / update / delete a timeline entry.
+   *
+   * Deliberately NOT routed through transitionFrom: these are not transitions,
+   * they hold in every status, and expressing that as an allow-list that can
+   * never reject leaves a `rejectError` argument that is dead code today and a
+   * silently wrong rejection code for whoever copies the shape next.
+   */
+  const editTimeline =
+    (apply2: (idea: Idea) => Idea) =>
+    (id: string): IdeaCommandResult => {
+      const found = load(id);
+      if ('error' in found) return { ok: false, error: found.error };
+      return apply(id, apply2);
+    };
 
   /**
    * Guard + transition, shared by the single-field commands.
@@ -193,9 +198,13 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         logger.error({ action: 'idea:convertToTask', ideaId: id, reason: 'no-inbox' });
         throw new Error('Inbox project is missing');
       }
-      // 标题覆盖：调用方可以给任务换名，但备注恒随想法带入。
-      const source = title ? { ...found.idea, title } : found.idea;
-      const { task, converted } = ideaToTask(source, inbox);
+      // ideaToTask derives BOTH records from its argument, so overriding the
+      // idea's title would rename the stored idea too. The request documents
+      // this parameter as overriding the *task*; the idea is terminal and stays
+      // in the 已了结 list, where losing the user's original wording would be a
+      // side effect of naming the task.
+      const { task, converted } = ideaToTask(found.idea, inbox);
+      const named = title ? { ...task, title } : task;
       const now = Date.now();
       const next = store.update((d) => {
         // Route the task write through the shared invariant helper rather than
@@ -204,11 +213,11 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         // task still being timed". Splicing skipped it, so a stale activeTimer
         // survived the conversion and later billed time onto a finished task.
         // Running it inside this same update keeps the two writes atomic.
-        const r = upsertTaskWithTiming(d, task, now);
+        const r = upsertTaskWithTiming(d, named, now);
         return { ...r.data, ideas: { ...r.data.ideas, [id]: converted } };
       });
-      logger.info({ action: 'idea:convertToTask', ideaId: id, taskId: task.id });
-      return { ok: true, data: next, taskId: task.id };
+      logger.info({ action: 'idea:convertToTask', ideaId: id, taskId: named.id });
+      return { ok: true, data: next, taskId: named.id };
     },
 
     /**
@@ -223,14 +232,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       if (found.idea.status !== 'open') {
         return { ok: false, error: 'IDEA_NOT_IN_OPEN' };
       }
-      const projectId = newProjectId();
-      const project: Project = {
-        id: projectId,
-        title: input.title.slice(0, PROJECT_TITLE_MAX_LENGTH),
-        icon: input.icon,
-        isArchived: false,
-        primaryColor: input.primaryColor,
-      };
+      // Same factory the sidebar path uses, so a Project field added with a
+      // default cannot land on one path and not the other. The write still
+      // happens in this one store.update, which is what makes the upgrade
+      // atomic.
+      const project = newProject(input);
+      const projectId = project.id;
       const upgraded = upgradeIdeaToProject(found.idea, projectId, input.validationGoal);
       const next = store.update((d) => ({
         ...d,
@@ -257,32 +264,17 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * timeline and to the scalar fields independent.
      */
     addEntry(id: string, text: string): IdeaCommandResult {
-      return transitionFrom(
-        id,
-        ALL_STATUSES,
-        (idea) => appendIdeaEntry(idea, text),
-        'IDEA_NOT_FOUND',
-      );
+      return editTimeline((idea) => appendIdeaEntry(idea, text))(id);
     },
 
     /** 改一条演进日志的正文。同 addEntry：改的是主进程存的那条。 */
     updateEntry(id: string, entryId: string, text: string): IdeaCommandResult {
-      return transitionFrom(
-        id,
-        ALL_STATUSES,
-        (idea) => updateIdeaEntry(idea, entryId, text),
-        'IDEA_NOT_FOUND',
-      );
+      return editTimeline((idea) => updateIdeaEntry(idea, entryId, text))(id);
     },
 
     /** 删掉一条演进日志。同 addEntry：改的是主进程存的那条，不是渲染进程的快照。 */
     deleteEntry(id: string, entryId: string): IdeaCommandResult {
-      return transitionFrom(
-        id,
-        ALL_STATUSES,
-        (idea) => deleteIdeaEntry(idea, entryId),
-        'IDEA_NOT_FOUND',
-      );
+      return editTimeline((idea) => deleteIdeaEntry(idea, entryId))(id);
     },
 
     closeWithVerdict(

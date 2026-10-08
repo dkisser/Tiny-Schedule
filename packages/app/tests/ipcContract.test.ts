@@ -219,7 +219,13 @@ describe('new command channels dispatch through their real handlers', () => {
   test('ideaUpsert refuses a request carrying status fields', () => {
     // The narrowed write contract: a status can only be written by a command.
     // A stray `status` in the payload is stripped by zod rather than honoured.
-    const before = (call('dataLoad') as AppData).ideas.i2?.status;
+    // Seeds its own id: this used to read `i2` seeded by an earlier test, so
+    // it passed in a full run and failed standalone under `-t`, `--bail` or a
+    // sharded runner — for the wrong reason when it passed.
+    call('ideaUpsert', { id: 'iStatus', title: '种子', notes: '', createdAt: 1 });
+    call('ideaComplete', { id: 'iStatus' });
+    const before = (call('dataLoad') as AppData).ideas.iStatus?.status;
+    expect(before).toBe('done');
     call('ideaUpsert', {
       id: 'i2',
       title: '偷偷改状态',
@@ -227,7 +233,7 @@ describe('new command channels dispatch through their real handlers', () => {
       createdAt: 1,
       status: 'discarded',
     });
-    expect((call('dataLoad') as AppData).ideas.i2?.status).toBe(before);
+    expect((call('dataLoad') as AppData).ideas.iStatus?.status).toBe(before);
   });
 
   test('ideaUpsert still edits the non-status fields', () => {
@@ -238,14 +244,8 @@ describe('new command channels dispatch through their real handlers', () => {
   });
 
   test('the followUp resolve/reopen channels drive the transition', () => {
-    call('followUpUpsert', {
-      id: 'f1',
-      title: '等审核',
-      notes: '',
-      entries: [],
-      createdAt: 1,
-      isResolved: false,
-    });
+    // No isResolved: the field edit no longer carries state at all.
+    call('followUpUpsert', { id: 'f1', title: '等审核', notes: '', createdAt: 1 });
     const resolved = call('followUpResolve', { id: 'f1' }) as { ok: boolean; data: AppData };
     expect(resolved.ok).toBe(true);
     expect(resolved.data.followUps.f1?.isResolved).toBe(true);
@@ -276,14 +276,7 @@ describe('new command channels dispatch through their real handlers', () => {
         ],
       },
     }));
-    call('followUpUpsert', {
-      id: 'f9',
-      title: '待办',
-      notes: '',
-      entries: [],
-      createdAt: 1,
-      isResolved: false,
-    });
+    call('followUpUpsert', { id: 'f9', title: '待办', notes: '', createdAt: 1 });
     const resolved = call('followUpResolve', { id: 'f9' }) as { ok: boolean; data: AppData };
     expect(resolved.ok).toBe(true);
     expect(resolved.data.settings.aiProviders[0]?.apiKeyEncrypted).toBe('');

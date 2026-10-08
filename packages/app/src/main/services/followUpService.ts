@@ -2,10 +2,14 @@ import {
   type AppData,
   type FollowUp,
   type FollowUpCommandResult,
+  type FollowUpEdit,
   reopenFollowUp,
   resolveFollowUp,
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
+
+/** The only fields a field edit may write. State advances by command only. */
+const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUpDay'] as const;
 
 /**
  * 跟进的写侧唯一入口（ADR-0003）。跟进的状态机足够简单，保持 upsert + 守卫
@@ -22,10 +26,47 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
     return next;
   };
 
+  /**
+   * Field edits are a *merge*, never a whole-record overwrite.
+   *
+   * The renderer edits with `upsertFollowUp({ ...followUp, ...patch })`, always
+   * spreading its render-time snapshot including isResolved/resolvedAt. A
+   * write-back from a stale snapshot therefore undid a resolve that had
+   * already happened — deterministically, not on a race: MarkdownEditor's
+   * cleanup closure captured the mount-time followUp, so resolving from the
+   * list row beside an open notes editor and then closing it reverted the
+   * 办结 with no error and no log. Ideas got this merge for the same reason.
+   */
+  const merge = (patch: FollowUpEdit): AppData => {
+    const next = store.update((d) => {
+      const stored = d.followUps[patch.id];
+      // An allowlist, not "filter out undefined": the state fields are not on
+      // the edit contract, and a caller that supplies them anyway (a spread
+      // straight from a stale record) must not be able to move the state. The
+      // schema strips them at the wire, but the enforcement point is here, so
+      // it does not rely on that.
+      const changes: Record<string, unknown> = {};
+      for (const key of EDITABLE_FIELDS) {
+        const value = (patch as Record<string, unknown>)[key];
+        if (value !== undefined) changes[key] = value;
+      }
+      // A new follow-up is 等待中 by definition; nothing else supplies the
+      // state fields.
+      const merged = (
+        stored
+          ? { ...stored, ...changes, id: patch.id }
+          : { ...changes, id: patch.id, isResolved: false, entries: [] }
+      ) as FollowUp;
+      return { ...d, followUps: { ...d.followUps, [patch.id]: merged } };
+    });
+    logger.info({ action: 'followUp:edit', followUpId: patch.id, title: patch.title });
+    return next;
+  };
+
   return {
-    /** Legacy unconditional overwrite write; the transition rules below ride on it. */
-    upsert(followUp: FollowUp): AppData {
-      return persist(followUp);
+    /** 字段编辑（标题/备注/条目）；状态推进只能走 resolve/reopen。 */
+    edit(patch: FollowUpEdit): AppData {
+      return merge(patch);
     },
 
     remove(id: string): AppData {

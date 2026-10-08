@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emptyAppData } from '@tiny-schedule/shared';
@@ -90,3 +90,88 @@ function emptyTask() {
     created: 0,
   };
 }
+
+describe('DataStore — a bad record must not cost the whole library', () => {
+  function seed(dir: string, data: unknown) {
+    writeFileSync(join(dir, 'data.json'), JSON.stringify(data), 'utf8');
+  }
+  const full = () => ({
+    ...emptyAppData(),
+    version: emptyAppData().version,
+    tasks: {
+      t1: {
+        id: 't1',
+        title: 'x',
+        projectId: 'p1',
+        tagIds: [],
+        subTaskIds: [],
+        isDone: false,
+        timeEstimate: 0,
+        timeSpent: 0,
+        timeSpentOnDay: {},
+        timeEntries: [],
+        notes: '',
+        created: 1,
+      },
+    },
+    ideas: { i1: { id: 'i1', title: '想法', notes: '', createdAt: 1, status: 'open' } },
+  });
+
+  test('one idea with an unknown status is quarantined, the rest loads', () => {
+    // IdeaStatusSchema deliberately throws on a status this build does not
+    // know, so that a closed idea from a newer build is never silently
+    // downgraded to open. A strict parse would reject the whole document and
+    // cost the user every task; the quarantine keeps the blast radius at one
+    // record.
+    const dir = tmpDir();
+    seed(dir, {
+      ...full(),
+      ideas: {
+        ...full().ideas,
+        i2: { id: 'i2', title: '未来状态', notes: '', createdAt: 1, status: 'archived' },
+      },
+    });
+    const store = new DataStore(dir, logger);
+    const data = store.load();
+    expect(Object.keys(data.tasks)).toEqual(['t1']);
+    expect(Object.keys(data.ideas)).toEqual(['i1']);
+  });
+
+  test('a quarantined idea does not block saving the rest', () => {
+    const dir = tmpDir();
+    seed(dir, {
+      ...full(),
+      ideas: { i2: { id: 'i2', title: 'x', notes: '', createdAt: 1, status: 'archived' } },
+    });
+    const store = new DataStore(dir, logger);
+    store.load();
+    // The primary parsed via quarantine, so it is no longer "unreadable" and
+    // normal writes resume.
+    expect(() =>
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } })),
+    ).not.toThrow();
+  });
+
+  test('a genuinely unreadable data.json is never overwritten by a fallback load', () => {
+    // The destruction chain: a strict parse fails, the cache is a fallback,
+    // and the first ordinary write replaces the only good copy.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'again' } }));
+    // Both files still hold exactly what the user left there.
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe('{ not json');
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+  });
+
+  test('a readable data.json still saves normally', () => {
+    const dir = tmpDir();
+    seed(dir, full());
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('me');
+  });
+});

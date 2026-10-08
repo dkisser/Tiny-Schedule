@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { Ipc } from '@tiny-schedule/shared';
+import { Ipc, idleThresholdReached } from '@tiny-schedule/shared';
 import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
 import type { Logger } from 'pino';
 import { DataStore } from './infra/dataStore';
@@ -141,7 +141,15 @@ app.whenReady().then(async () => {
     getWindow: () => win,
     getVersion: () => app.getVersion(),
   }));
-  startPowerTimerWatcher({ store, logger, getWindow: () => win });
+  const dataStore = store;
+  startPowerTimerWatcher({
+    logger,
+    getWindow: () => win,
+    timers: { current: tasks.currentTimer, sync: tasks.syncTimer },
+    // Captured, not closed over: the module-level `store` is `let ... | null`,
+    // and this predicate runs long after whenReady has returned.
+    idleReached: (idleMs) => idleThresholdReached(dataStore.get().settings, idleMs),
+  });
   Menu.setApplicationMenu(
     buildMenu(() => {
       if (win && !win.isDestroyed()) win.webContents.send(Ipc.uiNewTask);

@@ -166,6 +166,17 @@ export type IdeaUpgradeToProjectReq = z.infer<typeof IdeaUpgradeToProjectReqSche
  */
 export const FollowUpIdReqSchema = z.object({ id: z.string().min(1) });
 
+/**
+ * The follow-up *field* edit. Derived from FollowUpSchema by omission so the
+ * two cannot drift: isResolved/resolvedAt advance only through the
+ * resolve/reopen commands, so a write-back of the renderer's snapshot cannot
+ * silently undo a 办结 the user already performed.
+ */
+export const FollowUpEditSchema = FollowUpSchema.omit({ isResolved: true, resolvedAt: true });
+// z.input, not z.infer: entries carries a .default([]) so it is required in the
+// *output* type but optional in the request.
+export type FollowUpEdit = z.input<typeof FollowUpEditSchema>;
+
 export const IdeaAddEntryReqSchema = z.object({
   id: z.string().min(1),
   text: z.string().trim().min(1),
@@ -491,7 +502,7 @@ export const IpcInvokeContract = {
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
   followUpUpsert: {
     ch: Ipc.followUpUpsert,
-    req: FollowUpSchema,
+    req: FollowUpEditSchema,
     res: null as unknown as AppData,
   },
   followUpDelete: {
@@ -570,7 +581,10 @@ export const IpcInvokeContract = {
   projectCreate: {
     ch: Ipc.projectCreate,
     req: ProjectCreateReqSchema,
-    res: null as unknown as AppData,
+    // The id comes back with the dataset: the renderer used to recover it by
+    // diffing the whole project list, which picks the wrong project if two
+    // creations interleave.
+    res: null as unknown as { data: AppData; projectId: string },
   },
   projectUpdate: {
     ch: Ipc.projectUpdate,

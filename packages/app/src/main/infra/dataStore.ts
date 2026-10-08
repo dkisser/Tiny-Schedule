@@ -7,11 +7,25 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { type AppData, AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
+import {
+  type AppData,
+  AppDataSchema,
+  emptyAppData,
+  type Idea,
+  IdeaSchema,
+} from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 
 export class DataStore {
   private cache: AppData | null = null;
+  /**
+   * Set when data.json exists but will not parse, with the reason. While it is
+   * set, save() refuses to write: the loaded cache is a fallback (the backup,
+   * or empty), and persisting it would replace the only surviving copy of the
+   * user's data with a degraded one — the failure mode where an ordinary
+   * settings change or a 30s heartbeat destroys everything.
+   */
+  private primaryUnreadable: string | null = null;
 
   constructor(
     private readonly dir: string,
@@ -36,6 +50,7 @@ export class DataStore {
     const problems: string[] = [];
     const read = (path: string) => this.readValidated(path, (r) => problems.push(r));
     const primary = read(this.filePath);
+    this.primaryUnreadable = problems[0] ?? null;
     if (primary) {
       this.cache = primary;
     } else {
@@ -72,6 +87,20 @@ export class DataStore {
   }
 
   save(data: AppData): void {
+    if (this.primaryUnreadable) {
+      // Refuse rather than persist a degraded cache over the only good copy.
+      // Without this, the first ordinary write — a settings change, finishDay,
+      // the 30s heartbeat — rewrites data.json from a fallback load and the
+      // second one overwrites the backup, leaving nothing recoverable. The
+      // data stays on disk exactly as the user left it.
+      this.logger.error({
+        action: 'dataStore:save:refused',
+        reason: this.primaryUnreadable,
+        file: this.filePath,
+        note: 'not written; the unreadable data.json has been left in place',
+      });
+      return;
+    }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;
     if (existsSync(this.filePath)) {
@@ -108,10 +137,50 @@ export class DataStore {
       return null;
     }
     const result = AppDataSchema.safeParse(json);
-    if (!result.success) {
-      onUnreadable(`schema mismatch: ${result.error.issues[0]?.path.join('.') ?? '(unknown)'}`);
-      return null;
-    }
-    return result.data as AppData;
+    if (result.success) return result.data as AppData;
+
+    // A strict parse rejects the whole document for one bad record, so a single
+    // idea written by a newer build used to cost the user every task, project
+    // and follow-up on disk. Retry after quarantining the individual records
+    // that fail: one unreadable idea now costs one idea, and the rest of the
+    // library loads. The drop is reported, never silent — the alternative
+    // (tolerating the field) is what silently revived closed ideas.
+    const recovered = quarantineBadIdeas(json, (id, why) =>
+      onUnreadable(`quarantined idea ${id}: ${why}`),
+    );
+    if (recovered) return recovered;
+    onUnreadable(`schema mismatch: ${result.error.issues[0]?.path.join('.') ?? '(unknown)'}`);
+    return null;
   }
+}
+
+/**
+ * Drop the idea records that will not parse and re-validate the rest.
+ *
+ * Returns null when the failure is not confined to `ideas` — only then is the
+ * whole document genuinely unreadable, and only then may the caller fall back
+ * to the backup. Quarantine, not repair: the offending record is reported and
+ * left out rather than coerced into something that parses, because a coerced
+ * value is how a terminal state quietly becomes an open one.
+ */
+function quarantineBadIdeas(
+  json: unknown,
+  onQuarantined: (id: string, why: string) => void,
+): AppData | null {
+  if (typeof json !== 'object' || json === null) return null;
+  const ideas = (json as { ideas?: unknown }).ideas;
+  if (typeof ideas !== 'object' || ideas === null) return null;
+
+  const kept: Record<string, Idea> = {};
+  for (const [id, value] of Object.entries(ideas as Record<string, unknown>)) {
+    const parsed = IdeaSchema.safeParse(value);
+    if (parsed.success) {
+      kept[id] = parsed.data;
+    } else {
+      const issue = parsed.error.issues[0];
+      onQuarantined(id, `${issue?.path.join('.') ?? '(root)'}: ${issue?.message ?? 'invalid'}`);
+    }
+  }
+  const result = AppDataSchema.safeParse({ ...(json as object), ideas: kept });
+  return result.success ? (result.data as AppData) : null;
 }
