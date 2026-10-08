@@ -1,16 +1,18 @@
-import { addDays, type FollowUp, localDate } from '@tiny-schedule/shared';
+import {
+  addDays,
+  blankFollowUp,
+  type FollowUp,
+  isFollowUpDue,
+  localDate,
+} from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
-import {
-  blankFollowUp,
-  isFollowUpDue,
-  openFollowUps,
-  resolvedFollowUps,
-  waitingDays,
-} from '../lib/followUps';
+import { openFollowUps, resolvedFollowUps, waitingDays } from '../lib/followUps';
+import { followUpRejectionMessage } from '../lib/ideaRejection';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -22,6 +24,7 @@ function formatDay(day: string): string {
 
 function FollowUpRow({ followUp }: { followUp: FollowUp }) {
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const resolveFollowUp = useDataStore((s) => s.resolveFollowUp);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const selected = useUiStore((s) => s.selectedFollowUpId === followUp.id);
   const due = isFollowUpDue(followUp);
@@ -90,7 +93,11 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertFollowUp({ ...followUp, isResolved: true, resolvedAt: Date.now() });
+            // 走主进程的命令，而不是自己拼 isResolved/resolvedAt 覆盖整条记录：
+            // 整条覆盖意味着主进程无法强制这条转移规则（ADR-0003 的成功判据之一）。
+            void resolveFollowUp(followUp.id).then((o) => {
+              if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+            });
           }}
         >
           <CheckCircle2 />
@@ -104,6 +111,7 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
 export function FollowUpsPage() {
   const data = useDataStore((s) => s.data);
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const reopenFollowUp = useDataStore((s) => s.reopenFollowUp);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
   const [draft, setDraft] = useState('');
@@ -177,7 +185,9 @@ export function FollowUpsPage() {
                     className="shrink-0 opacity-0 group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void upsertFollowUp({ ...f, isResolved: false, resolvedAt: undefined });
+                      void reopenFollowUp(f.id).then((o) => {
+                        if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+                      });
                     }}
                   >
                     <RotateCcw />

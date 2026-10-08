@@ -1,14 +1,18 @@
 import { describe, expect, test } from 'bun:test';
-import { completeTask, dropStaleTiming, upsertTaskWithTiming } from '../src/completeTask';
-import type { ActiveTimer, AppData, Task } from '../src/models';
+import type { AppData } from '../src/domain/appData';
+import type { ActiveTimer, Task } from '../src/domain/task';
 import {
   advancePomodoroPhase,
+  completeTask,
+  dropStaleTiming,
   POMODORO_BREAK_MS,
+  POMODORO_CYCLES_PER_SET,
   POMODORO_FOCUS_MS,
   pauseTimer,
   startPomodoroFocus,
   startTimer,
-} from '../src/timer';
+  upsertTaskWithTiming,
+} from '../src/domain/task';
 
 const T0 = 1_785_700_000_000;
 
@@ -136,6 +140,19 @@ function dataOf(t: Task, activeTimer: ActiveTimer | null = null): AppData {
   return { tasks: { [t.id]: t }, activeTimer } as unknown as AppData;
 }
 
+/**
+ * `t1` plus a real, unfinished `t2`, for the cases that need a timer running
+ * on *another* task. A timer whose task is absent from the dataset is a ghost
+ * that dropStaleTiming is now expected to remove, so the fixture has to model
+ * the situation it claims to test.
+ */
+function dataOfWithOther(t: Task, other: ActiveTimer, extra: Record<string, Task> = {}): AppData {
+  return {
+    tasks: { [t.id]: t, [other.taskId]: { ...task(), id: other.taskId }, ...extra },
+    activeTimer: other,
+  } as unknown as AppData;
+}
+
 describe('upsertTaskWithTiming', () => {
   test('completing a timed task settles it and clears the timer in one transition', () => {
     const d = dataOf(task(), startTimer('t1', T0));
@@ -166,26 +183,38 @@ describe('upsertTaskWithTiming', () => {
 
   test('completing a task leaves a timer on a different task running', () => {
     const other = startTimer('t2', T0);
-    const r = upsertTaskWithTiming(dataOf(task(), other), { ...task(), isDone: true }, T0 + 90_000);
-    expect(r.data.activeTimer).toBe(other);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(task(), other),
+      { ...task(), isDone: true },
+      T0 + 90_000,
+    );
+    expect(r.data.activeTimer).toEqual(other);
     expect(r.settledMs).toBe(0);
   });
 
   test('re-saving an already-done task does not touch the timer', () => {
     const other = startTimer('t2', T0);
     const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
-    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, title: '改名' }, T0 + 90_000);
-    expect(r.data.activeTimer).toBe(other);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(done, other),
+      { ...done, title: '改名' },
+      T0 + 90_000,
+    );
+    expect(r.data.activeTimer).toEqual(other);
     expect(r.settledMs).toBe(0);
   });
 
   test('un-completing clears doneAt and does not disturb timing', () => {
     const other = startTimer('t2', T0);
     const done = { ...task(), isDone: true, doneAt: T0 + 1000 };
-    const r = upsertTaskWithTiming(dataOf(done, other), { ...done, isDone: false }, T0 + 90_000);
+    const r = upsertTaskWithTiming(
+      dataOfWithOther(done, other),
+      { ...done, isDone: false },
+      T0 + 90_000,
+    );
     expect(r.data.tasks.t1?.isDone).toBe(false);
     expect(r.data.tasks.t1?.doneAt).toBeUndefined();
-    expect(r.data.activeTimer).toBe(other);
+    expect(r.data.activeTimer).toEqual(other);
   });
 
   test('normalizes doneAt on completion and keeps a supplied one', () => {
@@ -306,5 +335,78 @@ describe('dropStaleTiming', () => {
   test('leaves no-timer data alone', () => {
     const d = dataOf(task());
     expect(dropStaleTiming(d)).toBe(d);
+  });
+});
+
+describe('advancePomodoroPhase — a paused timer bills no wall clock', () => {
+  const focus = (over = {}) => ({
+    taskId: 't1',
+    startedAt: T0,
+    accumulatedMs: 0,
+    isPaused: false,
+    sessionStartedAt: T0,
+    mode: 'pomodoro' as const,
+    phase: 'focus' as const,
+    phaseStartedAt: T0,
+    phaseAccumulatedMs: 0,
+    phaseDurationMs: POMODORO_FOCUS_MS,
+    cyclesCompleted: 0,
+    ...over,
+  });
+
+  test('a normal advance folds the elapsed focus segment', () => {
+    const r = advancePomodoroPhase(focus(), T0 + 300_000);
+    expect(r.next.focusAccumulatedMs).toBe(300_000);
+  });
+
+  test('a running final cycle still adds to all three clocks', () => {
+    // The guard above must not zero the running case: accumulatedMs and
+    // phaseAccumulatedMs are what the worklog and the settled TimeEntry read,
+    // so a regression that dropped them would still settle correctly for
+    // pomodoro (which uses focusAccumulatedMs) and be invisible here.
+    const r = advancePomodoroPhase(
+      focus({
+        accumulatedMs: 1_000,
+        phaseAccumulatedMs: 2_000,
+        cyclesCompleted: POMODORO_CYCLES_PER_SET - 1,
+      }),
+      T0 + 300_000,
+    );
+    expect(r.setComplete).toBe(true);
+    expect(r.next.accumulatedMs).toBe(301_000);
+    expect(r.next.phaseAccumulatedMs).toBe(302_000);
+    expect(r.next.focusAccumulatedMs).toBe(300_000);
+  });
+
+  test('a paused advance adds nothing, in either branch', () => {
+    // The sleep/idle watcher rebases phaseStartedAt to the pause instant, so
+    // the delta from there measures absence, not work. The setComplete branch
+    // has two further clocks; accumulatedMs is what the worklog and the
+    // settled TimeEntry read, so an unguarded pause inflated the whole
+    // session by the length of the gap.
+    const paused = focus({
+      isPaused: true,
+      pausedAt: T0 + 300_000,
+      phaseStartedAt: T0 + 300_000,
+      startedAt: T0 + 300_000,
+      accumulatedMs: 300_000,
+      phaseAccumulatedMs: 300_000,
+      focusAccumulatedMs: 300_000,
+    });
+    const normal = advancePomodoroPhase(paused, T0 + 2 * 3_600_000);
+    expect(normal.next.focusAccumulatedMs).toBe(300_000);
+    expect(normal.next.accumulatedMs).toBe(300_000);
+    // The phase became `break`, so its own clock legitimately restarts.
+    expect(normal.next.phaseAccumulatedMs).toBe(0);
+    expect(normal.next.phase).toBe('break');
+
+    const last = advancePomodoroPhase(
+      { ...paused, cyclesCompleted: POMODORO_CYCLES_PER_SET - 1 },
+      T0 + 2 * 3_600_000,
+    );
+    expect(last.setComplete).toBe(true);
+    expect(last.next.focusAccumulatedMs).toBe(300_000);
+    expect(last.next.accumulatedMs).toBe(300_000);
+    expect(last.next.phaseAccumulatedMs).toBe(300_000);
   });
 });

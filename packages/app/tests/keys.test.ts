@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const { decryptKey, encryptKey, initKeyStore, _resetKeyCacheForTest } = await import(
-  '../src/main/keys'
+  '../src/main/infra/keys'
 );
 
 let tmpDir: string;

@@ -2,7 +2,6 @@ import {
   type ActiveTimer,
   type AppData,
   advancePomodoroPhase,
-  applySettlement,
   computeElapsed,
   computeFocusElapsed,
   dropStaleTiming,
@@ -12,7 +11,6 @@ import {
   type PomodoroPhase,
   pauseTimer,
   resumeTimer,
-  settleTimer,
   startPomodoroFocus,
   startTimer,
 } from '@tiny-schedule/shared';
@@ -55,12 +53,48 @@ async function sync(timer: ActiveTimer | null) {
   await api().timerSync({ timer });
 }
 
-async function settleInto(cur: ActiveTimer, now: number): Promise<void> {
-  const settlement = settleTimer(cur, now);
-  const task = useDataStore.getState().data?.tasks[cur.taskId];
-  if (task && settlement.ms > 0) {
-    await useDataStore.getState().upsertTask(applySettlement(task, settlement));
-  }
+/**
+ * 结算由主进程做（ADR-0003）：渲染进程不再自己算时长再写回去。
+ * 调用方先乐观地停表，所以这里只负责采纳主进程的答案——返回它记录的 ms。
+ *
+ * `expectedTaskId` 钉住要结算的是哪一次：换表与心跳 sync() 是异步的，不钉住的话
+ * 主进程可能结算到刚起步的新表，把旧任务的时长记错地方。拒绝时也采纳返回的
+ * 数据集——主进程可能已经丢弃了 activeTimer，渲染进程必须跟着收敛。
+ *
+ * 返回码区分"主进程那边已经没有表了"和"主进程跑的不是我指定的那次"：后者
+ * 必须留着,调用方要拿它来决定还要不要补一次清空。两种情况都返回 0。
+ */
+async function settleOnMain(
+  expectedTaskId?: string,
+): Promise<{ settledMs: number; cleared: boolean }> {
+  const result = await api().timingStop({ taskId: expectedTaskId });
+  useDataStore.setState({ data: result.data });
+  if (result.ok) return { settledMs: result.settledMs, cleared: true };
+  // TIMER_MISMATCH means a *different* session is running on the main side and
+  // was deliberately left alone. Reporting "cleared" here would have the
+  // caller wipe that session's accumulated time with no TimeEntry, no log and
+  // no toast.
+  return { settledMs: 0, cleared: result.error !== 'TIMER_MISMATCH' };
+}
+
+/**
+ * Settle the session the renderer is switching away from, and report whether
+ * it is safe to persist the new one.
+ *
+ * On TIMER_MISMATCH the main process is running a different session and
+ * deliberately declined to settle it. Writing the new timer over it would
+ * destroy that session's accumulated time with no TimeEntry and no log — the
+ * very outcome the pin exists to prevent. So on a decline we adopt main's
+ * truth locally rather than merely skipping the write: leaving our own `next`
+ * in state would be a lie the 30s heartbeat then faithfully syncs, undoing
+ * the protection thirty seconds later.
+ */
+async function settlePrevious(taskId: string): Promise<boolean> {
+  const { cleared } = await settleOnMain(taskId);
+  if (cleared) return true;
+  const { activeTimer } = useDataStore.getState().data ?? {};
+  useTimerStore.setState({ timer: activeTimer ?? null, now: Date.now() });
+  return false;
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -109,9 +143,12 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startTimer(taskId, now);
     // Swap synchronously first so rapid clicks can't race, then settle the
-    // previous timer so its elapsed time isn't lost.
+    // previous timer so its elapsed time isn't lost. The settle is pinned to
+    // the previous task: without the pin, a concurrent sync() landing first
+    // would make the main process settle `next` instead and leave the old
+    // task's elapsed time unbilled.
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
+    if (cur && !(await settlePrevious(cur.taskId))) return;
     await sync(next);
   },
 
@@ -121,7 +158,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
+    if (cur && !(await settlePrevious(cur.taskId))) return;
     await sync(next);
   },
 
@@ -155,10 +192,37 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   stop: async () => {
     const cur = get().timer;
+    // Optimistic: the clock stops on this frame; the recorded duration is
+    // whatever the main process settles, adopted in settleOnMain.
     set({ timer: null, phasePendingAdvance: null });
-    if (!cur) return;
-    await settleInto(cur, Date.now());
-    await sync(null);
+    // Clear the main-side timer unless the settle *declined* it. A decline
+    // (TIMER_MISMATCH) means another session is running over there and the pin
+    // deliberately left it alone — clearing it anyway would destroy that
+    // session's accumulated time with no TimeEntry and no log. The finally
+    // still clears when the settle throws, or main would keep a timer the UI
+    // already shows as stopped.
+    //
+    // With no local timer there is nothing to pin to, so settle whatever main
+    // holds: recording that time on its own task beats discarding it, and
+    // beats leaving a ghost that a later start() would bill somewhere else.
+    // Default to clearing: a throwing settle leaves `cleared` untouched, and
+    // main keeping a timer the UI shows as stopped is the worse of the two
+    // failures. Only an explicit decline turns the clear off.
+    let cleared = true;
+    let settled = false;
+    try {
+      ({ cleared } = await settleOnMain(cur?.taskId));
+      settled = true;
+    } finally {
+      if (cleared) {
+        // Best effort: a failing clear must not replace the settle error that
+        // explains why we are here. With no settle error to preserve, it is
+        // the only failure there is, so it propagates like any other.
+        await sync(null).catch((err: unknown) => {
+          if (settled) throw err;
+        });
+      }
+    }
   },
 
   tick: () => set({ now: Date.now() }),

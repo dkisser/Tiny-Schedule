@@ -5,9 +5,22 @@ import {
   fauxProvider,
   fauxToolCall,
 } from '@earendil-works/pi-ai';
-import type { ChatSession } from '@tiny-schedule/shared';
-import type { ChatEventSink } from '../src/main/ai/chatAgent';
-import { ChatAgentManager } from '../src/main/ai/chatAgent';
+import { AppDataSchema, type ChatSession, emptyAppData } from '@tiny-schedule/shared';
+import type { DataStore } from '../src/main/infra/dataStore';
+import type { ChatEventSink } from '../src/main/services/chatService';
+import { ChatAgentManager } from '../src/main/services/chatService';
+import { createProjectService } from '../src/main/services/projectService';
+import { createTaskService } from '../src/main/services/taskService';
+
+/** Minimal read-only DataStore stand-in for the tool services. */
+function emptyStore(): DataStore {
+  const data = emptyAppData();
+  return {
+    get: () => data,
+    // Parses, as DataStore.save does — see the note on the other store doubles.
+    update: (fn: (c: typeof data) => typeof data) => AppDataSchema.parse(fn(data)) as typeof data,
+  } as unknown as DataStore;
+}
 
 type SetupOptions = {
   /** 'default': 工具调用 + 文本答案两轮；'error': 每次调用都返回 stopReason 'error'；'slow': 慢速流式响应（保持 run in-flight） */
@@ -55,31 +68,10 @@ function setup(options: SetupOptions = {}) {
     ],
     decryptKey: () => 'sk-test',
     today: () => '2026-08-04',
-    getData: () => ({
-      version: 1,
-      tasks: {},
-      projects: {},
-      tags: {},
-      timeTracking: null,
-      notes: null,
-      planner: null,
-      metric: null,
-      boards: null,
-      misc: {},
-      followUps: {},
-      ideas: {},
-      settings: {
-        userName: '',
-        avatar: null,
-        theme: 'system',
-        aiProviders: [],
-        aiPrompt: '',
-        autoAiAnalyzeOnFinishDay: false,
-        idlePauseEnabled: true,
-        idlePauseMinutes: 5,
-      },
-      activeTimer: null,
-    }),
+    // Tools read through services (ADR-0003); the test store is empty, which is
+    // all these cases need — they assert on the agent loop, not on query results.
+    tasks: createTaskService({ store: emptyStore(), logger }),
+    projects: createProjectService({ store: emptyStore(), logger }),
     sink,
     logger,
     ...(timeouts ? { timeouts } : {}),

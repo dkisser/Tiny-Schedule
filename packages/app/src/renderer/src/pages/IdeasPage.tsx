@@ -1,4 +1,4 @@
-import { type Idea, localDate } from '@tiny-schedule/shared';
+import { blankIdea, type Idea, localDate } from '@tiny-schedule/shared';
 import {
   Ban,
   Check,
@@ -9,13 +9,12 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
+import { ideaRejectionMessage } from '../lib/ideaRejection';
 import {
-  blankIdea,
-  completeIdea,
-  discardIdea,
   ideaPendingVerdict,
   ideaProjectOpenTaskCount,
   incubatingIdeas,
@@ -23,7 +22,7 @@ import {
   resolvedIdeas,
 } from '../lib/ideas';
 import { cn } from '../lib/utils';
-import { useDataStore } from '../stores/data';
+import { type IdeaCommandOutcome, useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 
 function formatDay(day: string): string {
@@ -52,8 +51,15 @@ function useIdeaRow(idea: Idea) {
 
 // 收集箱行：整行点击选中；hover 只放轻操作（完成/废弃），转任务与升级在详情面板。
 function OpenIdeaRow({ idea }: { idea: Idea }) {
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const completeIdea = useDataStore((s) => s.completeIdea);
+  const discardIdea = useDataStore((s) => s.discardIdea);
   const { rowProps } = useIdeaRow(idea);
+
+  // 领域拒绝是正常返回值而非异常，主进程说了算，这里只负责提示。
+  const run = async (command: () => Promise<IdeaCommandOutcome>) => {
+    const outcome = await command();
+    if (!outcome.ok) toast.error(ideaRejectionMessage(outcome.error ?? ''));
+  };
 
   return (
     <div {...rowProps}>
@@ -71,7 +77,7 @@ function OpenIdeaRow({ idea }: { idea: Idea }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertIdea(completeIdea(idea));
+            void run(() => completeIdea(idea.id));
           }}
         >
           <Check />
@@ -82,7 +88,7 @@ function OpenIdeaRow({ idea }: { idea: Idea }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertIdea(discardIdea(idea));
+            void run(() => discardIdea(idea.id));
           }}
         >
           <Ban />

@@ -37,7 +37,7 @@
 
 一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器。
 
-- 📦 **本地优先**：所有任务数据保存在本机 SQLite，不依赖任何云服务（除你显式配置的 AI Provider）。
+- 📦 **本地优先**：所有任务数据保存在本机 JSON 文件，不依赖任何云服务（除你显式配置的 AI Provider）。
 - ⌨️ **键盘流**：参考 Super Productivity / Things 的快捷键体验。
 - 🤖 **AI 复盘**：多 Provider OpenAI 兼容接口（OpenAI / DeepSeek / 任意兼容 endpoint），一键生成日报、周报。
 - 🔁 **可迁移**：完整支持 Super Productivity 备份 JSON 整库导入 + 自动备份，避免数据被锁死。
@@ -75,7 +75,7 @@
 - 流式输出、对话视图
 
 ### 📥 导入
-- Super Productivity 备份 JSON 整库覆盖导入
+- Super Productivity 备份 JSON 合并导入
 - 导入前自动备份当前数据
 
 ### 📤 导出
@@ -113,7 +113,7 @@
 | 渲染层 | React 19 + TypeScript 5.7 |
 | 样式 | Tailwind CSS 4 + Radix UI + lucide-react |
 | 状态 | Zustand 5 |
-| 数据 | 本机 SQLite（通过 IPC） |
+| 数据 | 本机 JSON 文件（通过 IPC） |
 | AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)（多 Provider OpenAI 兼容） |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
 | 打包 | electron-builder（DMG, macOS arm64 + x64） |
@@ -139,14 +139,14 @@
 
 ## 从 Super Productivity 导入
 
-Tiny-Schedule 支持 **整库覆盖导入** Super Productivity 的备份 JSON：
+Tiny-Schedule 支持将 Super Productivity 的备份 JSON **合并导入**当前数据：
 
 1. 在 Super Productivity 中导出备份 JSON（设置 → 备份）。
 2. 在 Tiny-Schedule 设置页选择"导入"，选择该 JSON。
-3. 应用会自动备份当前数据，再覆盖导入 SP 数据。
-4. 完成后任务、项目、标签、子任务、计时历史即可使用。
+3. 应用会自动备份当前数据，再将 SP 数据合并进来。
+4. 完成后任务、项目、标签、子任务与按日累计的时长统计即可使用。ID 冲突时以导入方为准；你的想法、跟进、设置与进行中的计时不受影响（SP 的逐条计时记录不会导入）。
 
-> ⚠️ 导入为**整库覆盖**，不是增量合并；导入前会自动备份，必要时可回滚。
+> 💾 导入是**合并**而非覆盖；导入前会自动备份，必要时可回滚。
 
 ---
 
@@ -181,7 +181,7 @@ bun run typecheck  # TypeScript 项目引用构建
 Tiny-Schedule/
 ├── packages/
 │   ├── app/      # Electron 主进程 + 渲染层
-│   └── shared/   # 共享类型（Zod schemas）
+│   └── shared/   # 共享领域模型、规则与 IPC 契约（Zod）
 ├── scripts/      # 仓库级脚本（IPC 字面量校验等）
 ├── docs/         # UI 规范、设计稿
 └── .github/      # GitHub Actions（仅 release.yml）

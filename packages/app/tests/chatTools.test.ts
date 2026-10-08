@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import type { AppData } from '@tiny-schedule/shared';
-import { getSummary, listMeta, queryTasks } from '../src/main/ai/chatTools';
+import { listMeta } from '../src/main/services/projectQueries';
+import { createTaskQueries } from '../src/main/services/taskQueries';
+
+/**
+ * The queries take a reader, not a dataset: going through the factory is the
+ * only way in, which is the point ADR-0003 makes about the read side.
+ */
+function queries(data: AppData) {
+  return createTaskQueries(() => data);
+}
 
 function fixture(): AppData {
   return {
@@ -79,7 +88,7 @@ function fixture(): AppData {
 
 describe('queryTasks', () => {
   test('filters by date range and excludes subtasks', () => {
-    const rows = queryTasks(fixture(), { from: '2026-08-03', to: '2026-08-03' });
+    const rows = queries(fixture()).queryTasks({ from: '2026-08-03', to: '2026-08-03' });
     expect(rows.map((r) => r.id)).toEqual(['t1']);
     expect(rows[0]).toMatchObject({
       title: '写周报',
@@ -89,54 +98,54 @@ describe('queryTasks', () => {
     });
   });
   test('filters by projectId and isDone', () => {
-    const rows = queryTasks(fixture(), { projectId: 'p1', isDone: false });
+    const rows = queries(fixture()).queryTasks({ projectId: 'p1', isDone: false });
     expect(rows.map((r) => r.id).sort()).toEqual(['t2']);
   });
   test('no filters returns all top-level tasks', () => {
-    expect(queryTasks(fixture(), {}).length).toBe(2);
+    expect(queries(fixture()).queryTasks({}).length).toBe(2);
   });
   test('from-only treats the lower bound as open and keeps timeSpentInRangeMs', () => {
-    const rows = queryTasks(fixture(), { from: '2026-08-04' });
+    const rows = queries(fixture()).queryTasks({ from: '2026-08-04' });
     expect(rows.map((r) => r.id)).toEqual(['t2']);
     expect(rows[0]?.timeSpentInRangeMs).toBe(900_000);
   });
   test('to-only treats the upper bound as open and keeps timeSpentInRangeMs', () => {
-    const rows = queryTasks(fixture(), { to: '2026-08-03' });
+    const rows = queries(fixture()).queryTasks({ to: '2026-08-03' });
     expect(rows.map((r) => r.id)).toEqual(['t1']);
     expect(rows[0]?.timeSpentInRangeMs).toBe(1800_000);
   });
   test('filters by due-day range', () => {
-    const rows = queryTasks(fixture(), { dueFrom: '2026-08-04', dueTo: '2026-08-04' });
+    const rows = queries(fixture()).queryTasks({ dueFrom: '2026-08-04', dueTo: '2026-08-04' });
     expect(rows.map((r) => r.id)).toEqual(['t2']);
   });
   test('filters by completion-date range and exposes doneAt', () => {
     const d = fixture();
     (d.tasks.t1 as { doneAt?: number }).doneAt = new Date('2026-08-04T10:00:00').getTime();
-    const rows = queryTasks(d, { doneFrom: '2026-08-04', doneTo: '2026-08-04' });
+    const rows = queries(d).queryTasks({ doneFrom: '2026-08-04', doneTo: '2026-08-04' });
     expect(rows.map((r) => r.id)).toEqual(['t1']);
     expect(rows[0]?.doneAt).toBe('2026-08-04');
   });
   test('completion-date range excludes unfinished tasks', () => {
-    const rows = queryTasks(fixture(), { doneFrom: '1970-01-01' });
+    const rows = queries(fixture()).queryTasks({ doneFrom: '1970-01-01' });
     expect(rows.map((r) => r.id)).toEqual(['t1']);
   });
 });
 
 describe('getSummary', () => {
   test('today summary aggregates', () => {
-    const s = getSummary(fixture(), { scope: 'today', date: '2026-08-04' });
+    const s = queries(fixture()).getSummary({ scope: 'today', date: '2026-08-04' });
     expect(s.taskCount).toBe(1);
     expect(s.doneCount).toBe(0);
     expect(s.totalSpentMs).toBe(900_000);
     expect(s.byProject).toEqual([{ project: '工作', taskCount: 1, spentMs: 900_000 }]);
   });
   test('week summary includes byTag', () => {
-    const s = getSummary(fixture(), { scope: 'week', date: '2026-08-04' });
+    const s = queries(fixture()).getSummary({ scope: 'week', date: '2026-08-04' });
     expect(s.taskCount).toBe(2);
     expect(s.byTag).toEqual([{ tag: '文档', taskCount: 1, spentMs: 1800_000 }]);
   });
   test('project scope without projectId returns an empty summary', () => {
-    const s = getSummary(fixture(), { scope: 'project' });
+    const s = queries(fixture()).getSummary({ scope: 'project' });
     expect(s.range).toBe('');
     expect(s.taskCount).toBe(0);
     expect(s.doneCount).toBe(0);

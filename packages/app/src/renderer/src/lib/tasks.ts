@@ -1,4 +1,4 @@
-import { type AppData, localDate, type Project, type Task } from '@tiny-schedule/shared';
+import { type AppData, localDate, type Task } from '@tiny-schedule/shared';
 
 export function isTopLevel(t: Task): boolean {
   return !t.parentTaskId;
@@ -80,27 +80,8 @@ export function applyManualOrder(tasks: Task[], orderIds?: string[]): Task[] {
   return [...ordered, ...rest];
 }
 
-export function newTaskId(): string {
-  return `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function blankTask(title: string, project: Project): Task {
-  return {
-    id: newTaskId(),
-    title,
-    projectId: project.id,
-    projectTitle: project.title,
-    tagIds: [],
-    subTaskIds: [],
-    isDone: false,
-    timeEstimate: 0,
-    timeSpent: 0,
-    timeSpentOnDay: {},
-    timeEntries: [],
-    notes: '',
-    created: Date.now(),
-  };
-}
+// 任务的 id/出厂工厂已迁入 shared 的 domain/task.ts（ADR-0003），此处原样转调。
+export { blankTask, newTaskId } from '@tiny-schedule/shared';
 
 // Display names come from the task's snapshot first; only tasks created
 // before the snapshot fields existed fall back to the live entity lookup.

@@ -1,40 +1,31 @@
-import { randomUUID } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
 import {
-  type AppData,
-  addDays,
-  type ChatSession,
-  dropStaleTiming,
-  type ImportRunResult,
-  INBOX_PROJECT_ID,
   Ipc,
   IpcInvokeContract,
   type IpcInvokeHandlers,
   type IpcInvokeKey,
-  localDate,
-  maskDataForRenderer,
-  PROJECT_TITLE_MAX_LENGTH,
-  upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
-import {
-  type BrowserWindow,
-  dialog as electronDialog,
-  ipcMain,
-  Notification,
-  shell,
-} from 'electron';
+import { type BrowserWindow, ipcMain } from 'electron';
 import type { Logger } from 'pino';
-import { ChatAgentManager } from './ai/chatAgent';
-import { streamChat, testConnection } from './ai/client';
-import { buildAnalysisData, renderPrompt } from './ai/prompts';
-import { getProviderDef, PROVIDER_REGISTRY, toProviderInfo } from './ai/providers';
-import type { DataStore } from './dataStore';
-import { exportProjectTaskList, exportWorklog } from './exporter';
-import { mergeImport, normalizeBackup } from './importer';
-import { decryptKey, encryptKey } from './keys';
-import { addTaskToMacCalendar } from './macos/calendar';
-import { migrateRemoveTodayTag } from './migrations';
-import { checkForUpdate } from './updater';
+import { aiHandlers } from './handlers/ai';
+import { appHandlers } from './handlers/app';
+import { chatHandlers } from './handlers/chat';
+import type { HandlerDeps } from './handlers/deps';
+import { masked, sendSafe } from './handlers/deps';
+import { followUpHandlers } from './handlers/followUp';
+import { ideaHandlers } from './handlers/idea';
+import { projectHandlers } from './handlers/project';
+import { settingsHandlers } from './handlers/settings';
+import { taskHandlers } from './handlers/task';
+import type { DataStore } from './infra/dataStore';
+import { decryptKey } from './infra/keys';
+import { createAiHistoryService } from './services/aiHistoryService';
+import { type ChatEventSink, createChatService } from './services/chatService';
+import { createFollowUpService } from './services/followUpService';
+import { createIdeaService } from './services/ideaService';
+import { createImportService } from './services/importService';
+import { createProjectService } from './services/projectService';
+import { createSettingsService } from './services/settingsService';
+import { createTaskService, type TaskService } from './services/taskService';
 
 export interface IpcDeps {
   store: DataStore;
@@ -43,551 +34,73 @@ export interface IpcDeps {
   getVersion: () => string;
 }
 
-function masked(data: AppData): AppData {
-  return maskDataForRenderer(data);
+/**
+ * The services this function built. main.ts needs the very same TaskService
+ * instance for its quit path: a second one would mean a second copy of any
+ * in-flight state a service acquires, so a settle guard live on the IPC path
+ * would be empty on the quit path — the single-enforcement-point property
+ * ADR-0003 rests on.
+ */
+export interface RegisterResult {
+  tasks: TaskService;
 }
 
-function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {
-  // check-ipc: ok — callers pass Ipc.* constants only
-  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
-}
-
-export function registerIpcHandlers(deps: IpcDeps): void {
+/**
+ * 组装点，不是逻辑所在：这里只做三件事——建 services、拼 handlers、跑注册循环。
+ * 每个 handler 模块只做 zod 校验（由注册循环统一执行）与转调；领域规则在 services。
+ */
+export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   const { store, logger, getWindow, getVersion } = deps;
 
-  const chatManager = new ChatAgentManager({
-    getSessions: () => (store.get().misc.chatSessions ?? []) as ChatSession[],
-    saveSession: (s) => {
-      store.update((d) => {
-        const list = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== s.id);
-        return { ...d, misc: { ...d.misc, chatSessions: [s, ...list] } };
-      });
-    },
-    deleteStoredSession: (id) => {
-      let next: ChatSession[] = [];
-      store.update((d) => {
-        next = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== id);
-        return { ...d, misc: { ...d.misc, chatSessions: next } };
-      });
-      return next;
-    },
-    getProviders: () => store.get().settings.aiProviders,
-    decryptKey,
-    getData: () => store.get(),
-    today: () => localDate(Date.now()),
-    sink: {
-      chunk: (sessionId, requestId, delta) =>
-        sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),
-      tool: (ev) => sendSafe(getWindow(), Ipc.chatToolEvent, ev),
-      status: (ev) => sendSafe(getWindow(), Ipc.chatStatus, ev),
-      done: (sessionId, requestId) => sendSafe(getWindow(), Ipc.chatDone, { sessionId, requestId }),
-      error: (ev) => sendSafe(getWindow(), Ipc.chatError, ev),
-    },
+  const serviceDeps = { store, logger };
+  const tasks = createTaskService(serviceDeps);
+  const ideas = createIdeaService(serviceDeps);
+  const followUps = createFollowUpService(serviceDeps);
+  const projects = createProjectService(serviceDeps);
+  const imports = createImportService(serviceDeps);
+  const aiHistory = createAiHistoryService(serviceDeps);
+  const settings = createSettingsService(serviceDeps);
+  const chatSink: ChatEventSink = {
+    chunk: (sessionId, requestId, delta) =>
+      sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),
+    tool: (ev) => sendSafe(getWindow(), Ipc.chatToolEvent, ev),
+    status: (ev) => sendSafe(getWindow(), Ipc.chatStatus, ev),
+    done: (sessionId, requestId) => sendSafe(getWindow(), Ipc.chatDone, { sessionId, requestId }),
+    error: (ev) => sendSafe(getWindow(), Ipc.chatError, ev),
+  };
+
+  const chatManager = createChatService({
+    store,
     logger,
+    tasks,
+    projects,
+    decryptKey,
+    sink: chatSink,
   });
+
+  const handlerDeps: HandlerDeps = {
+    logger,
+    getWindow,
+    getVersion,
+    tasks,
+    ideas,
+    followUps,
+    projects,
+  };
 
   // IpcInvokeHandlers is exhaustive over IpcInvokeContract: forgetting a
   // handler (or adding a contract entry without implementing it) is a
   // compile error.
   const handlers: IpcInvokeHandlers = {
     dataLoad: () => masked(store.get()),
-
-    taskUpsert: (task) => {
-      // The single enforcement point for "completing a task ends its timing":
-      // every write path funnels through here, so no entry point can leave a
-      // done task being timed. upsertTaskWithTiming also normalizes doneAt and
-      // moves the task and the timer in one atomic transition. settledMs goes
-      // back to the caller so the renderer reports what was actually recorded
-      // instead of predicting it.
-      let settledMs = 0;
-      const next = store.update((d) => {
-        const r = upsertTaskWithTiming(d, task, Date.now());
-        settledMs = r.settledMs;
-        return r.data;
-      });
-      logger.info({
-        action: 'task:upsert',
-        taskId: task.id,
-        title: task.title,
-        settledMs,
-      });
-      return { data: masked(next), settledMs };
-    },
-
-    taskDelete: ({ id }) => {
-      const next = store.update((d) => {
-        const tasks = { ...d.tasks };
-        delete tasks[id];
-        // detach from parent's subTaskIds
-        for (const t of Object.values(tasks)) {
-          if (t.subTaskIds.includes(id)) {
-            tasks[t.id] = { ...t, subTaskIds: t.subTaskIds.filter((s) => s !== id) };
-          }
-        }
-        return { ...d, tasks };
-      });
-      logger.info({ action: 'task:delete', taskId: id });
-      return masked(next);
-    },
-
-    followUpUpsert: (followUp) => {
-      const next = store.update((d) => ({
-        ...d,
-        followUps: { ...d.followUps, [followUp.id]: followUp },
-      }));
-      logger.info({ action: 'followUp:upsert', followUpId: followUp.id, title: followUp.title });
-      return masked(next);
-    },
-
-    followUpDelete: ({ id }) => {
-      const next = store.update((d) => {
-        const followUps = { ...d.followUps };
-        delete followUps[id];
-        return { ...d, followUps };
-      });
-      logger.info({ action: 'followUp:delete', followUpId: id });
-      return masked(next);
-    },
-
-    ideaUpsert: (idea) => {
-      const next = store.update((d) => ({
-        ...d,
-        ideas: { ...d.ideas, [idea.id]: idea },
-      }));
-      logger.info({ action: 'idea:upsert', ideaId: idea.id, title: idea.title });
-      return masked(next);
-    },
-
-    ideaDelete: ({ id }) => {
-      const next = store.update((d) => {
-        const ideas = { ...d.ideas };
-        delete ideas[id];
-        return { ...d, ideas };
-      });
-      logger.info({ action: 'idea:delete', ideaId: id });
-      return masked(next);
-    },
-
-    orderSet: ({ viewKey, ids }) => {
-      store.update((d) => {
-        const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;
-        return { ...d, misc: { ...d.misc, taskOrder: { ...taskOrder, [viewKey]: ids } } };
-      });
-      logger.info({ action: 'order:set', viewKey, count: ids.length });
-    },
-
-    projectCreate: (req) => {
-      const title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
-      const next = store.update((d) => {
-        const id = `p_${randomUUID()}`;
-        return {
-          ...d,
-          projects: {
-            ...d.projects,
-            [id]: {
-              id,
-              title,
-              icon: req.icon,
-              isArchived: false,
-              primaryColor: req.primaryColor,
-            },
-          },
-        };
-      });
-      logger.info({ action: 'project:create', title });
-      return masked(next);
-    },
-
-    projectUpdate: (req) => {
-      const next = store.update((d) => {
-        const prev = d.projects[req.id];
-        // Inbox is a system project: never accept updates through the IPC.
-        if (!prev || req.id === INBOX_PROJECT_ID) return d;
-        // Partial-merge: only apply fields that are explicitly present in the
-        // request. `null` clears (e.g. clearing a project color); `undefined`
-        // leaves the existing value untouched. Mirrors `tagUpdate`.
-        const patch: Partial<typeof prev> = {};
-        if (req.title !== undefined) patch.title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
-        if (req.primaryColor !== undefined) patch.primaryColor = req.primaryColor;
-        if (req.isArchived !== undefined) patch.isArchived = req.isArchived;
-        if (Object.keys(patch).length === 0) return d;
-        return {
-          ...d,
-          projects: { ...d.projects, [req.id]: { ...prev, ...patch } },
-        };
-      });
-      logger.info({
-        action: 'project:update',
-        id: req.id,
-        keys: Object.keys(req).filter((k) => k !== 'id'),
-      });
-      return masked(next);
-    },
-
-    projectDelete: (req) => {
-      if (req.id === INBOX_PROJECT_ID) return masked(store.get());
-      const next = store.update((d) => {
-        if (!d.projects[req.id]) return d;
-        const projects = { ...d.projects };
-        delete projects[req.id];
-        // Tasks keep their projectTitle snapshot; only the grouping moves to Inbox.
-        const tasks = { ...d.tasks };
-        for (const t of Object.values(tasks)) {
-          if (t.projectId === req.id) tasks[t.id] = { ...t, projectId: INBOX_PROJECT_ID };
-        }
-        return { ...d, projects, tasks };
-      });
-      logger.info({ action: 'project:delete', id: req.id });
-      return masked(next);
-    },
-
-    tagCreate: (req) => {
-      const next = store.update((d) => {
-        const id = `tag_${randomUUID()}`;
-        return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
-      });
-      logger.info({ action: 'tag:create', title: req.title });
-      return masked(next);
-    },
-
-    tagUpdate: (req) => {
-      const next = store.update((d) => {
-        const prev = d.tags[req.id];
-        if (!prev) return d;
-        const updated = {
-          ...prev,
-          ...(req.title !== undefined ? { title: req.title } : {}),
-          ...(req.color !== undefined ? { color: req.color } : {}),
-        };
-        return { ...d, tags: { ...d.tags, [req.id]: updated } };
-      });
-      logger.info({ action: 'tag:update', id: req.id, title: req.title });
-      return masked(next);
-    },
-
-    tagDelete: (req) => {
-      const next = store.update((d) => {
-        if (!d.tags[req.id]) return d;
-        const tags = { ...d.tags };
-        delete tags[req.id];
-        // Tasks keep tagIds + snapshot labels so their chips stay visible.
-        return { ...d, tags };
-      });
-      logger.info({ action: 'tag:delete', id: req.id });
-      return masked(next);
-    },
-
-    settingsUpdate: (patch) => {
-      const next = store.update((d) => {
-        const settings = { ...d.settings };
-        if (patch.userName !== undefined) settings.userName = patch.userName;
-        if (patch.avatar !== undefined) settings.avatar = patch.avatar;
-        if (patch.theme !== undefined) settings.theme = patch.theme;
-        if (patch.aiPrompt !== undefined) settings.aiPrompt = patch.aiPrompt;
-        if (patch.autoAiAnalyzeOnFinishDay !== undefined) {
-          settings.autoAiAnalyzeOnFinishDay = patch.autoAiAnalyzeOnFinishDay;
-        }
-        if (patch.idlePauseEnabled !== undefined)
-          settings.idlePauseEnabled = patch.idlePauseEnabled;
-        if (patch.idlePauseMinutes !== undefined)
-          settings.idlePauseMinutes = patch.idlePauseMinutes;
-        if (patch.aiProviders !== undefined) {
-          settings.aiProviders = patch.aiProviders.map((p) => {
-            const prev = d.settings.aiProviders.find((x) => x.id === p.id);
-            return {
-              id: p.id,
-              registryId: p.registryId,
-              baseUrl: p.baseUrl,
-              apiKeyEncrypted:
-                p.apiKey === '<unchanged>' && prev ? prev.apiKeyEncrypted : encryptKey(p.apiKey),
-              model: p.model,
-              isDefault: p.isDefault,
-            };
-          });
-        }
-        return { ...d, settings };
-      });
-      logger.info({ action: 'settings:update', keys: Object.keys(patch) });
-      return masked(next);
-    },
-
-    timerSync: ({ timer }) => {
-      if (!timer) {
-        store.update((d) => ({ ...d, activeTimer: null }));
-        return;
-      }
-      // Same invariant as taskUpsert: a timer may never be persisted for a task
-      // that is already done, whoever is asking to sync it.
-      const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
-      if (!next.activeTimer) {
-        // Announce the drop. Staying silent would leave the renderer's clock
-        // ticking for a session the main process just discarded — and its next
-        // stop would settle that time into the done task.
-        sendSafe(getWindow(), Ipc.timerChanged, null);
-        logger.info({ action: 'timer:drop:sync', taskId: timer.taskId });
-        return;
-      }
-      logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
-    },
-
-    finishDay: (_req) => {
-      // payload date is validated but not used for logic: finishing always applies to the local "today"
-      const today = localDate(Date.now());
-      const tomorrow = addDays(today, 1);
-      const next = store.update((d) => {
-        const tasks = { ...d.tasks };
-        for (const t of Object.values(tasks)) {
-          // Roll unfinished tasks due today to tomorrow so they remain visible
-          // in the dueDay-driven Today view instead of silently disappearing.
-          if (!t.isDone && t.dueDay === today) {
-            tasks[t.id] = { ...t, dueDay: tomorrow };
-          }
-        }
-        return { ...d, tasks, misc: { ...d.misc, lastFinishDay: today } };
-      });
-      logger.info({ action: 'day:finish', date: today });
-      return masked(next);
-    },
-
-    importRun: async (): Promise<ImportRunResult> => {
-      const win = getWindow();
-      if (!win) return { ok: false, error: 'NO_WINDOW' };
-      const picked = await electronDialog.showOpenDialog(win, {
-        title: '导入 Super Productivity 备份',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-        properties: ['openFile'],
-      });
-      if (picked.canceled || picked.filePaths.length === 0)
-        return { ok: false, error: 'CANCELLED' };
-      try {
-        const raw = JSON.parse(await readFile(picked.filePaths[0] as string, 'utf8'));
-        const { data: imported, counts } = normalizeBackup(raw);
-        const taskCount = Object.keys(store.get().tasks).length;
-        if (taskCount > 0) {
-          const confirm = await electronDialog.showMessageBox(win, {
-            type: 'question',
-            buttons: ['合并', '取消'],
-            defaultId: 0,
-            cancelId: 1,
-            message: '本地已有数据',
-            detail: `导入将追加合并到当前 ${taskCount} 个任务中（ID 相同时以导入数据为准，现有 AI 会话与其余任务保留）。`,
-          });
-          if (confirm.response !== 0) return { ok: false, error: 'CANCELLED' };
-        }
-        // The merge keeps the current activeTimer while letting an imported
-        // task win an id collision, so it can hand us a done task that is still
-        // being timed. Sweep it here rather than leaving the state for a later
-        // write to clean up, and tell the renderer so its clock stops too.
-        const hadTimer = !!store.get().activeTimer;
-        const next = store.update((d) =>
-          dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
-        );
-        if (hadTimer && !next.activeTimer) {
-          sendSafe(getWindow(), Ipc.timerChanged, null);
-          logger.info({ action: 'timer:drop:import' });
-        }
-        logger.info({
-          action: 'import:run',
-          counts,
-          file: picked.filePaths[0],
-          keptTimer: !!next.activeTimer,
-        });
-        return { ok: true, counts };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        logger.error({ action: 'import:run', error: message });
-        return { ok: false, error: message };
-      }
-    },
-
-    exportMarkdown: async (req) => {
-      const win = getWindow();
-      if (!win) return { savedPath: null, error: 'NO_WINDOW' };
-      const data = store.get();
-      let content: string;
-      let defaultName: string;
-      try {
-        if (req.mode === 'projectList') {
-          if (!req.projectId) return { savedPath: null, error: 'MISSING_PROJECT_ID' };
-          content = exportProjectTaskList(data, req.projectId);
-          defaultName = `${data.projects[req.projectId]?.title ?? 'project'}-任务清单.md`;
-        } else {
-          const from = req.from ?? '1970-01-01';
-          const to = req.to ?? '2999-12-31';
-          content = exportWorklog(data, { from, to, projectId: req.projectId });
-          defaultName = `工作日志-${from}-${to}.md`;
-        }
-      } catch (err) {
-        return { savedPath: null, error: err instanceof Error ? err.message : String(err) };
-      }
-      const save = await electronDialog.showSaveDialog(win, { defaultPath: defaultName });
-      if (save.canceled || !save.filePath) return { savedPath: null };
-      await writeFile(save.filePath, content, 'utf8');
-      logger.info({ action: 'export:markdown', mode: req.mode, path: save.filePath });
-      return { savedPath: save.filePath };
-    },
-
-    aiRegistry: () => PROVIDER_REGISTRY.map(toProviderInfo),
-
-    selectAvatar: async () => {
-      const win = getWindow();
-      if (!win) return null;
-      const picked = await electronDialog.showOpenDialog(win, {
-        title: '选择头像图片',
-        filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }],
-        properties: ['openFile'],
-      });
-      if (picked.canceled || picked.filePaths.length === 0) return null;
-      const filePath = picked.filePaths[0] as string;
-      const buf = await readFile(filePath);
-      const ext = filePath.split('.').pop()?.toLowerCase() ?? 'png';
-      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : `image/${ext}`;
-      return `data:${mime};base64,${buf.toString('base64')}`;
-    },
-
-    aiTestProvider: async ({ providerId }) => {
-      const cfg = store.get().settings.aiProviders.find((p) => p.id === providerId);
-      if (!cfg) return { ok: false, error: 'PROVIDER_NOT_CONFIGURED' };
-      const def = getProviderDef(cfg.registryId);
-      const baseUrl = cfg.baseUrl ?? def?.baseUrl ?? '';
-      if (!baseUrl) return { ok: false, error: 'MISSING_BASE_URL' };
-      const result = await testConnection(baseUrl, decryptKey(cfg.apiKeyEncrypted));
-      logger.info({ action: 'ai:testProvider', providerId, ok: result.ok });
-      return result;
-    },
-
-    aiProviderKeyReveal: ({ providerId }) => {
-      const cfg = store.get().settings.aiProviders.find((p) => p.id === providerId);
-      if (!cfg) return { apiKey: '' };
-      return { apiKey: decryptKey(cfg.apiKeyEncrypted) };
-    },
-
-    aiAnalyze: async (req) => {
-      const requestId = randomUUID();
-      const data = store.get();
-      const providers = data.settings.aiProviders;
-      const cfg = req.providerId
-        ? providers.find((p) => p.id === req.providerId)
-        : (providers.find((p) => p.isDefault) ?? providers[0]);
-      if (!cfg) {
-        sendSafe(getWindow(), Ipc.aiError, { requestId, error: 'NO_PROVIDER_CONFIGURED' });
-        return { requestId };
-      }
-      const def = getProviderDef(cfg.registryId);
-      const baseUrl = cfg.baseUrl ?? def?.baseUrl ?? '';
-      const today = localDate(Date.now());
-      const prompt = renderPrompt(data.settings.aiPrompt, {
-        date: today,
-        data: buildAnalysisData(data, { scope: req.scope, date: today, projectId: req.projectId }),
-      });
-      logger.info({ action: 'ai:analyze', requestId, scope: req.scope, providerId: cfg.id });
-      void (async () => {
-        const win = getWindow();
-        let full = '';
-        try {
-          for await (const delta of streamChat({
-            baseUrl,
-            apiKey: decryptKey(cfg.apiKeyEncrypted),
-            model: cfg.model,
-            messages: [{ role: 'user', content: prompt }],
-          })) {
-            full += delta;
-            sendSafe(win, Ipc.aiChunk, { requestId, delta });
-          }
-          // Persist before signaling done so the renderer can reload and see the history entry.
-          store.update((d) => {
-            const history = [
-              {
-                id: randomUUID(),
-                scope: req.scope,
-                ...(req.projectId ? { projectId: req.projectId } : {}),
-                createdAt: Date.now(),
-                content: full,
-              },
-              ...((d.misc.aiHistory ?? []) as unknown[]),
-            ].slice(0, 50);
-            return { ...d, misc: { ...d.misc, aiHistory: history } };
-          });
-          sendSafe(win, Ipc.aiDone, { requestId, full });
-          logger.info({ action: 'ai:analyze:done', requestId, length: full.length });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          sendSafe(win, Ipc.aiError, { requestId, error: message, full });
-          logger.error({ action: 'ai:analyze:error', requestId, error: message });
-        }
-      })();
-      return { requestId };
-    },
-
-    chatSessionsList: () => chatManager.listSessions(),
-    chatSessionCreate: (req) => chatManager.createSession(req.providerId),
-    chatSessionDelete: (req) => chatManager.deleteSession(req.sessionId),
-    chatSend: (req) => chatManager.send(req.sessionId, req.text, req.providerId),
-    chatContinue: (req) => chatManager.continue(req.sessionId),
-    chatStop: async (req) => {
-      chatManager.stop(req.sessionId);
-      // 等 run 结算（含 aborted 尾部的 persist），渲染端随后 load() 才能看到中断内容
-      await chatManager.waitForIdle(req.sessionId);
-    },
-
-    appCheckUpdate: () => checkForUpdate(getVersion()),
-
-    calendarAddTask: async ({ taskId }) => {
-      const snapshot = store.get();
-      const task = snapshot.tasks[taskId];
-      if (!task) {
-        logger.warn({ action: 'calendar:addTask', taskId, reason: 'not-found' });
-        return { ok: false, code: 'unknown', message: '任务不存在' } as const;
-      }
-      const project = snapshot.projects[task.projectId];
-      const result = await addTaskToMacCalendar({ task, project });
-      if (!result.ok) {
-        logger.warn({
-          action: 'calendar:addTask',
-          taskId,
-          code: result.code,
-          message: result.message,
-        });
-      } else {
-        logger.info({ action: 'calendar:addTask', taskId, eventId: result.eventId });
-      }
-      return result;
-    },
-
-    appOpenExternal: async ({ url }) => {
-      // Only https: reaches shell.openExternal; other schemes (file:,
-      // javascript:, ...) are refused so this channel cannot launch local apps.
-      if (!url.startsWith('https://')) {
-        logger.warn({ action: 'app:openExternal', url, blocked: true });
-        return;
-      }
-      await shell.openExternal(url);
-      logger.info({ action: 'app:openExternal', url });
-    },
-
-    notifyPhaseComplete: ({ phase, title, body }) => {
-      // Use the OS notification so the user gets a sound + center-screen
-      // banner even if the renderer is hidden or the user is on another
-      // desktop. Notification is supported on macOS/Windows out of the box;
-      // on Linux it depends on libnotify.
-      if (!Notification.isSupported()) {
-        logger.warn({ action: 'notify:phaseComplete', phase, supported: false });
-        return;
-      }
-      const n = new Notification({ title, body, silent: false });
-      n.show();
-      logger.info({ action: 'notify:phaseComplete', phase });
-    },
-
-    setAlwaysOnTopWindow: ({ enabled }) => {
-      const win = getWindow();
-      if (!win || win.isDestroyed()) return;
-      // 'screen-saver' floats above full-screen apps on macOS; 'floating'
-      // is sufficient on Windows / Linux and avoids stealing focus.
-      win.setAlwaysOnTop(enabled, enabled ? 'floating' : 'normal');
-      if (enabled) win.show();
-      logger.info({ action: 'window:setAlwaysOnTop', enabled });
-    },
+    ...taskHandlers(handlerDeps),
+    ...ideaHandlers(handlerDeps),
+    ...followUpHandlers(handlerDeps),
+    ...projectHandlers(handlerDeps),
+    ...settingsHandlers({ settings }),
+    ...chatHandlers(chatManager),
+    ...aiHandlers({ store, logger, getWindow, aiHistory }),
+    ...appHandlers({ store, logger, getWindow, getVersion, imports }),
   };
 
   type ContractEntry = { ch: string; req?: { parse(raw: unknown): unknown } };
@@ -600,4 +113,6 @@ export function registerIpcHandlers(deps: IpcDeps): void {
     // check-ipc: ok — entry.ch comes from IpcInvokeContract
     ipcMain.handle(entry.ch, (_e, raw: unknown) => handler(entry.req ? entry.req.parse(raw) : raw));
   }
+
+  return { tasks };
 }

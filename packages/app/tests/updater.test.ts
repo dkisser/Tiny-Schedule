@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { BrowserWindow } from 'electron';
 import type { Logger } from 'pino';
-import { checkForUpdate, type FetchImpl, startupUpdateCheck } from '../src/main/updater';
+import { checkForUpdate, type FetchImpl, startupUpdateCheck } from '../src/main/infra/updater';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

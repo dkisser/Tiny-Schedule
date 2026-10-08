@@ -1,27 +1,7 @@
-import type {
-  AppData,
-  Idea,
-  IdeaEntry,
-  IdeaStatus,
-  IdeaVerdict,
-  Project,
-  Task,
-} from '@tiny-schedule/shared';
-import { blankTask } from './tasks';
+import type { AppData, Idea, IdeaStatus } from '@tiny-schedule/shared';
 
-export function newIdeaId(): string {
-  return `i_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function blankIdea(title: string): Idea {
-  return {
-    id: newIdeaId(),
-    title,
-    notes: '',
-    createdAt: Date.now(),
-    status: 'open',
-  };
-}
+// 想法的模型与生命周期转移规则归 shared 的 domain/idea.ts 所有（ADR-0003）；
+// 本文件只剩读侧 selector。写侧一律经由主进程的想法意图命令，见 stores/data.ts。
 
 // 收集箱：未处理的想法，新建的在最前。
 export function openIdeas(data: AppData): Idea[] {
@@ -76,68 +56,4 @@ export function resolvedIdeas(data: AppData): Idea[] {
   return Object.values(data.ideas)
     .filter((i) => RESOLVED_STATUSES.includes(i.status))
     .sort((a, b) => (b.resolvedAt ?? b.convertedAt ?? 0) - (a.resolvedAt ?? a.convertedAt ?? 0));
-}
-
-// 想法转任务：任务进 Inbox，备注随标题一起带入；返回新任务与更新后的想法，
-// 由调用方负责 upsertTask / upsertIdea。
-export function ideaToTask(idea: Idea, inbox: Project): { task: Task; converted: Idea } {
-  const task: Task = { ...blankTask(idea.title, inbox), notes: idea.notes };
-  return {
-    task,
-    converted: { ...idea, status: 'converted', convertedAt: Date.now(), convertedTaskId: task.id },
-  };
-}
-
-// 直接完成：记录即完成（今天的感受、天气…）。
-export function completeIdea(idea: Idea): Idea {
-  return { ...idea, status: 'done', resolvedAt: Date.now() };
-}
-
-// 废弃：觉得没必要做了；可重新打开。
-export function discardIdea(idea: Idea): Idea {
-  return { ...idea, status: 'discarded', resolvedAt: Date.now() };
-}
-
-// 重新打开：仅 done/discarded 允许，回到收集箱。
-export function reopenIdea(idea: Idea): Idea {
-  if (idea.status !== 'done' && idea.status !== 'discarded') return idea;
-  return { ...idea, status: 'open', resolvedAt: undefined };
-}
-
-// 升级为项目：关联专属项目并进入验证中。项目由调用方先通过 project:create 建好。
-export function upgradeIdeaToProject(idea: Idea, projectId: string, validationGoal?: string): Idea {
-  return {
-    ...idea,
-    status: 'incubating',
-    projectId,
-    validationGoal: validationGoal || undefined,
-    incubatedAt: Date.now(),
-  };
-}
-
-export function appendIdeaEntry(idea: Idea, text: string): Idea {
-  const entry: IdeaEntry = { id: newIdeaId(), createdAt: Date.now(), text };
-  return { ...idea, timeline: [...(idea.timeline ?? []), entry] };
-}
-
-export function updateIdeaEntry(idea: Idea, entryId: string, text: string): Idea {
-  return {
-    ...idea,
-    timeline: (idea.timeline ?? []).map((e) => (e.id === entryId ? { ...e, text } : e)),
-  };
-}
-
-export function deleteIdeaEntry(idea: Idea, entryId: string): Idea {
-  return { ...idea, timeline: (idea.timeline ?? []).filter((e) => e.id !== entryId) };
-}
-
-// 给出结论：incubating → closed；已 closed 时复用来修改结论（状态不变，只更新 verdict）。
-export function closeIdeaWithVerdict(
-  idea: Idea,
-  result: IdeaVerdict['result'],
-  text?: string,
-): Idea {
-  const verdict: IdeaVerdict = { result, text: text || undefined, closedAt: Date.now() };
-  if (idea.status === 'closed') return { ...idea, verdict };
-  return { ...idea, status: 'closed', verdict, resolvedAt: Date.now() };
 }

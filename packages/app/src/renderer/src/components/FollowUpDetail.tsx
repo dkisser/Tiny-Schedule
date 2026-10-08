@@ -1,8 +1,10 @@
-import type { FollowUp } from '@tiny-schedule/shared';
+import { type FollowUp, newFollowUpId } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import { CheckCircle2, ChevronLeft, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import { newFollowUpId, waitingDays } from '../lib/followUps';
+import { toast } from 'sonner';
+import { waitingDays } from '../lib/followUps';
+import { followUpRejectionMessage } from '../lib/ideaRejection';
 import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -12,6 +14,11 @@ import { Input } from './ui/input';
 import { Markdown } from './ui/markdown';
 import { Textarea } from './ui/textarea';
 
+/** A field edit, where an explicit null clears and undefined leaves alone. */
+type FollowUpEditPatch = Omit<Partial<FollowUp>, 'nextFollowUpDay'> & {
+  nextFollowUpDay?: string | null;
+};
+
 function formatEntryAt(at: number): string {
   const d = new Date(at);
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -20,6 +27,8 @@ function formatEntryAt(at: number): string {
 
 export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const resolveFollowUp = useDataStore((s) => s.resolveFollowUp);
+  const reopenFollowUp = useDataStore((s) => s.reopenFollowUp);
   const deleteFollowUp = useDataStore((s) => s.deleteFollowUp);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -35,7 +44,11 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
     }
   });
 
-  const save = (patch: Partial<FollowUp>) => void upsertFollowUp({ ...followUp, ...patch });
+  // The patch may null a field out; the store re-picks only the editable keys,
+  // so a null never becomes `undefined` on the wire.
+  // No cast: the structural type already accepts this, and dropping it lets
+  // the checker flag a future edit that smuggles a state field into the patch.
+  const save = (patch: FollowUpEditPatch) => void upsertFollowUp({ ...followUp, ...patch });
 
   const addEntry = () => {
     const text = entryDraft.trim();
@@ -69,7 +82,7 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
         <Input
           type="date"
           value={followUp.nextFollowUpDay ?? ''}
-          onChange={(e) => save({ nextFollowUpDay: e.target.value || undefined })}
+          onChange={(e) => save({ nextFollowUpDay: e.target.value || null })}
         />
       </div>
 
@@ -168,13 +181,14 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
         <Button
           variant="outline"
           className="flex-1"
-          onClick={() =>
-            save(
-              followUp.isResolved
-                ? { isResolved: false, resolvedAt: undefined }
-                : { isResolved: true, resolvedAt: Date.now() },
-            )
-          }
+          onClick={() => {
+            const outcome = followUp.isResolved
+              ? reopenFollowUp(followUp.id)
+              : resolveFollowUp(followUp.id);
+            void outcome.then((o) => {
+              if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+            });
+          }}
         >
           {followUp.isResolved ? (
             <>

@@ -6,9 +6,15 @@ import {
   ChatSessionDeleteReqSchema,
   ChatStatusEventSchema,
   ChatStopReqSchema,
-  IdeaSchema,
+  IdeaUpgradeToProjectReqSchema,
   Ipc,
-} from '../src/ipc';
+  ProjectCreateReqSchema,
+  ProjectUpdateReqSchema,
+} from '../src/contract/ipc';
+import { type AppData, AppDataSchema, emptyAppData } from '../src/domain/appData';
+import { IdeaSchema } from '../src/domain/idea';
+import { PROJECT_TITLE_MAX_LENGTH } from '../src/domain/project';
+import { ActiveTimerSchema, settleTimer } from '../src/domain/task';
 
 describe('chat IPC schemas', () => {
   test('chat channels exist', () => {
@@ -67,8 +73,13 @@ describe('IdeaSchema status migration', () => {
     expect(IdeaSchema.parse({ ...base, status: 'done', convertedAt: 2 }).status).toBe('done');
   });
 
-  test('invalid status falls back to derivation', () => {
-    expect(IdeaSchema.parse({ ...base, status: 'bogus' }).status).toBe('open');
+  test('an unrecognised status fails loudly instead of resurrecting a closed idea', () => {
+    // Derivation treats a missing status as "not converted", i.e. open. So a
+    // .catch() that downgraded an unknown value to undefined silently turned a
+    // closed idea from a newer build back into an open one in the inbox — with
+    // its verdict still attached and 完成/废弃 enabled. Throwing instead lets
+    // readValidated fall back to the backup, which is the safe failure.
+    expect(() => IdeaSchema.parse({ ...base, status: 'bogus' })).toThrow();
   });
 
   test('new fields round-trip', () => {
@@ -89,5 +100,49 @@ describe('IdeaSchema status migration', () => {
       resolvedAt: 4,
     });
     expect(closed.verdict?.result).toBe('partial');
+  });
+});
+
+describe('ActiveTimerSchema — nothing the interface declares may be stripped', () => {
+  const timer = {
+    taskId: 't1',
+    startedAt: 0,
+    accumulatedMs: 0,
+    isPaused: false,
+    mode: 'pomodoro' as const,
+    phase: 'focus' as const,
+    cyclesCompleted: 1,
+    focusAccumulatedMs: 1_500_000,
+  };
+
+  test('banked pomodoro focus survives a parse', () => {
+    // A zod object strips keys it does not declare, and every save runs this
+    // schema. Omitting the field here zeroed 25 minutes of focus at settlement
+    // time — the migration that backfilled it was undone by the next save.
+    expect(ActiveTimerSchema.parse(timer).focusAccumulatedMs).toBe(1_500_000);
+  });
+
+  test('and survives a whole-dataset parse, which is what save() runs', () => {
+    const parsed = AppDataSchema.parse({ ...emptyAppData(), activeTimer: timer }) as AppData;
+    expect(parsed.activeTimer?.focusAccumulatedMs).toBe(1_500_000);
+    expect(settleTimer(parsed.activeTimer!, 1_500_000).ms).toBe(1_500_000);
+  });
+});
+
+describe('project title length — the wire constraint and the enforced one agree', () => {
+  const long = 'x'.repeat(PROJECT_TITLE_MAX_LENGTH + 10);
+
+  test('a title past the enforced maximum is refused at the wire, not truncated', () => {
+    // The schema used to allow 100 while the service sliced to 32: the user saw
+    // "saved" for a name they never chose, and two ideas sharing a 32-char
+    // prefix produced two identically-titled projects.
+    expect(ProjectCreateReqSchema.safeParse({ title: long }).success).toBe(false);
+    expect(IdeaUpgradeToProjectReqSchema.safeParse({ id: 'i1', title: long }).success).toBe(false);
+    expect(ProjectUpdateReqSchema.safeParse({ id: 'p1', title: long }).success).toBe(false);
+  });
+
+  test('a title at the maximum still gets through', () => {
+    const exact = 'x'.repeat(PROJECT_TITLE_MAX_LENGTH);
+    expect(ProjectCreateReqSchema.safeParse({ title: exact }).success).toBe(true);
   });
 });

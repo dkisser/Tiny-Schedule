@@ -1,6 +1,7 @@
 import { PROJECT_TITLE_MAX_LENGTH } from '@tiny-schedule/shared';
 import { useEffect, useState } from 'react';
-import { upgradeIdeaToProject } from '../lib/ideas';
+import { toast } from 'sonner';
+import { ideaRejectionMessage } from '../lib/ideaRejection';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { Button } from './ui/button';
@@ -9,10 +10,11 @@ import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 
 // 升级为项目：创建专属项目（一对一）并把想法带入验证中。不做 icon/color 选择。
+// 建项目与转状态是**一次**主进程写入（ideaUpgradeToProject），所以中途崩溃
+// 不会留下"项目建好了但想法没转"的孤儿项目。
 export function UpgradeIdeaDialog() {
   const data = useDataStore((s) => s.data);
-  const createProject = useDataStore((s) => s.createProject);
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const upgradeIdeaToProject = useDataStore((s) => s.upgradeIdeaToProject);
   const ideaId = useUiStore((s) => s.upgradeIdeaId);
   const setUpgradeIdea = useUiStore((s) => s.setUpgradeIdea);
   const [title, setTitle] = useState('');
@@ -27,7 +29,7 @@ export function UpgradeIdeaDialog() {
     if (!idea) return;
     setTitle(idea.title.slice(0, PROJECT_TITLE_MAX_LENGTH));
     setGoal(idea.validationGoal ?? '');
-    // 只在弹窗打开（ideaId 变化）时重置草稿；createProject 引起的数据刷新不应清空输入。
+    // 只在弹窗打开（ideaId 变化）时重置草稿；写入引起的数据刷新不应清空输入。
   }, [ideaId]);
 
   if (!idea) return null;
@@ -38,9 +40,15 @@ export function UpgradeIdeaDialog() {
     const trimmed = title.trim();
     const trimmedGoal = goal.trim();
     if (!trimmed) return;
-    const project = await createProject(trimmed);
-    if (!project) return;
-    await upsertIdea(upgradeIdeaToProject(idea, project.id, trimmedGoal || undefined));
+    const result = await upgradeIdeaToProject({
+      id: idea.id,
+      title: trimmed,
+      validationGoal: trimmedGoal || undefined,
+    });
+    if (!result.ok) {
+      toast.error(ideaRejectionMessage(result.error ?? ''));
+      return;
+    }
     setUpgradeIdea(null);
   };
 

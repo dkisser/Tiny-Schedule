@@ -1,13 +1,15 @@
 import { z } from 'zod';
-import type {
-  AppData,
-  AppSettings,
-  ChatSession,
-  FollowUp,
-  FollowUpEntry,
-  Idea,
-  Task,
-} from './models';
+import type { AppData, ChatSession } from '../domain/appData';
+import { FollowUpSchema } from '../domain/followUp';
+import { PROJECT_TITLE_MAX_LENGTH } from '../domain/project';
+import { ActiveTimerSchema, TaskSchema } from '../domain/task';
+
+/**
+ * 项目名的 wire 约束。必须与 domain 侧强制的常量同源：schema 放宽而 service
+ * 截断的话，用户会看到"保存成功"但落库的是被静默砍掉的名字，且两个同前缀的
+ * 名字会撞成同名项目。
+ */
+const projectTitleSchema = z.string().trim().min(1).max(PROJECT_TITLE_MAX_LENGTH);
 
 export const Ipc = {
   dataLoad: 'data:load',
@@ -15,8 +17,19 @@ export const Ipc = {
   taskDelete: 'task:delete',
   followUpUpsert: 'followUp:upsert',
   followUpDelete: 'followUp:delete',
+  followUpResolve: 'followUp:resolve',
+  followUpReopen: 'followUp:reopen',
   ideaUpsert: 'idea:upsert',
   ideaDelete: 'idea:delete',
+  ideaComplete: 'idea:complete',
+  ideaDiscard: 'idea:discard',
+  ideaReopen: 'idea:reopen',
+  ideaConvertToTask: 'idea:convertToTask',
+  ideaUpgradeToProject: 'idea:upgradeToProject',
+  ideaAddEntry: 'idea:addEntry',
+  ideaDeleteEntry: 'idea:deleteEntry',
+  ideaUpdateEntry: 'idea:updateEntry',
+  ideaCloseWithVerdict: 'idea:closeWithVerdict',
   orderSet: 'order:set',
   projectCreate: 'project:create',
   projectUpdate: 'project:update',
@@ -27,6 +40,7 @@ export const Ipc = {
   settingsUpdate: 'settings:update',
   finishDay: 'day:finish',
   timerSync: 'timer:sync',
+  timingStop: 'timing:stop',
   timerChanged: 'timer:changed',
   importRun: 'import:run',
   exportMarkdown: 'export:markdown',
@@ -60,168 +74,147 @@ export const Ipc = {
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
 
-const TimeEntrySchema = z.object({
-  date: z.string(),
-  start: z.number(),
-  end: z.number(),
-  ms: z.number(),
-});
-
-export const TaskSchema = z.object({
-  id: z.string().min(1),
-  title: z.string(),
-  projectId: z.string(),
-  tagIds: z.array(z.string()),
-  projectTitle: z.string().optional(),
-  tagSnapshots: z
-    .record(z.string(), z.object({ title: z.string(), color: z.string().optional() }))
-    .optional(),
-  subTaskIds: z.array(z.string()),
-  parentTaskId: z.string().optional(),
-  isDone: z.boolean(),
-  doneAt: z.number().optional(),
-  dueDay: z.string().optional(),
-  timeEstimate: z.number().min(0),
-  timeSpent: z.number().min(0),
-  timeSpentOnDay: z.record(z.string(), z.number()),
-  timeEntries: z.array(TimeEntrySchema),
-  notes: z.string(),
-  created: z.number(),
-});
-export type TaskPayload = z.infer<typeof TaskSchema>;
-
-const FollowUpEntrySchema = z.object({
-  id: z.string().min(1),
-  at: z.number(),
-  text: z.string(),
-});
-
-export const FollowUpSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().trim().min(1),
-  notes: z.string(),
-  // default([]) lets entries be added to persisted follow-ups later without a migration.
-  entries: z.array(FollowUpEntrySchema).default([]),
-  createdAt: z.number(),
-  nextFollowUpDay: z.string().optional(),
-  isResolved: z.boolean(),
-  resolvedAt: z.number().optional(),
-});
-
-const IdeaEntrySchema = z.object({
-  id: z.string().min(1),
-  createdAt: z.number(),
-  text: z.string(),
-});
-
-const IdeaVerdictSchema = z.object({
-  result: z.enum(['validated', 'invalidated', 'partial']),
-  text: z.string().optional(),
-  closedAt: z.number(),
-});
-
-const IdeaStatusSchema = z.enum(['open', 'done', 'discarded', 'converted', 'incubating', 'closed']);
-
-export const IdeaSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().trim().min(1),
-    notes: z.string(),
-    createdAt: z.number(),
-    convertedAt: z.number().optional(),
-    convertedTaskId: z.string().optional(),
-    // 旧数据没有 status：catch 兜底非法值，transform 按 convertedAt 派生缺失值。
-    status: IdeaStatusSchema.optional().catch(undefined),
-    projectId: z.string().optional(),
-    validationGoal: z.string().optional(),
-    timeline: z.array(IdeaEntrySchema).optional(),
-    verdict: IdeaVerdictSchema.optional(),
-    incubatedAt: z.number().optional(),
-    resolvedAt: z.number().optional(),
-  })
-  .transform(
-    (idea): Idea => ({
-      ...idea,
-      status: idea.status ?? (idea.convertedAt !== undefined ? 'converted' : 'open'),
-    }),
-  );
-
-const AiProviderSchema = z.object({
-  id: z.string(),
-  registryId: z.string(),
-  apiKeyEncrypted: z.string(),
-  hasApiKey: z.boolean().optional(),
-  baseUrl: z.string().optional(),
-  model: z.string(),
-  isDefault: z.boolean(),
-});
-
-const SettingsSchema = z.object({
-  userName: z.string(),
-  avatar: z.string().nullable(),
-  theme: z.enum(['light', 'dark', 'system']),
-  aiProviders: z.array(AiProviderSchema),
-  aiPrompt: z.string(),
-  autoAiAnalyzeOnFinishDay: z.boolean(),
-  // Defaults backfill legacy persisted settings that predate idle auto-pause.
-  idlePauseEnabled: z.boolean().default(true),
-  idlePauseMinutes: z.number().default(5),
-});
-
-const ActiveTimerSchema = z.object({
-  taskId: z.string(),
-  startedAt: z.number(),
-  accumulatedMs: z.number(),
-  isPaused: z.boolean(),
-  pausedAt: z.number().optional(),
-  sessionStartedAt: z.number().optional(),
-  autoPausedBy: z.enum(['sleep', 'idle']).optional(),
-  mode: z.enum(['free', 'pomodoro']).optional(),
-  phase: z.enum(['focus', 'break']).optional(),
-  phaseStartedAt: z.number().optional(),
-  phaseAccumulatedMs: z.number().optional(),
-  phaseDurationMs: z.number().optional(),
-  cyclesCompleted: z.number().int().min(0).optional(),
-});
-
-const ProjectSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  icon: z.string().optional(),
-  isArchived: z.boolean(),
-  primaryColor: z.string().optional(),
-});
-
-const TagSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  color: z.string().optional(),
-});
-
-export const AppDataSchema = z.object({
-  version: z.literal(1),
-  tasks: z.record(z.string(), TaskSchema),
-  projects: z.record(z.string(), ProjectSchema),
-  tags: z.record(z.string(), TagSchema),
-  timeTracking: z.unknown(),
-  notes: z.unknown(),
-  planner: z.unknown(),
-  metric: z.unknown(),
-  boards: z.unknown(),
-  misc: z.record(z.string(), z.unknown()),
-  // Default backfills data.json files written before the FollowUp module existed.
-  followUps: z.record(z.string(), FollowUpSchema).default({}),
-  // Default backfills data.json files written before the Idea module existed.
-  ideas: z.record(z.string(), IdeaSchema).default({}),
-  settings: SettingsSchema,
-  activeTimer: ActiveTimerSchema.nullable(),
-});
-
 export const TaskDeleteReqSchema = z.object({ id: z.string().min(1) });
 
 export const FollowUpDeleteReqSchema = z.object({ id: z.string().min(1) });
 
 export const IdeaDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * ideaUpsert 收紧后的编辑形状：只剩非状态字段。
+ *
+ * 状态与一切转移结果（status/convertedAt/convertedTaskId/projectId/verdict/
+ * incubatedAt/resolvedAt）都不在这里——它们只能由下面的意图命令写入。这正是
+ * ADR-0003 想要的：读契约的人不必再自己推断"哪些字段能改"。
+ *
+ * 注意这是**请求** schema，不是持久化 schema：data.json 里的想法仍按完整的
+ * IdeaSchema 校验，格式不变。
+ */
+export const IdeaEditSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  notes: z.string(),
+  createdAt: z.number(),
+  /**
+   * `undefined` = 不动这个字段，`null` = 清空。两者必须分开：主进程把 edit
+   * 实现成"只覆盖调用方真正设置的键"，否则渲染进程每次都显式带上
+   * `validationGoal: undefined` 就会把已存的值抹掉；而把清空也编码成
+   * undefined 的话，合并就退化成覆盖，同一个 bug 换个方向再犯一次。
+   */
+  validationGoal: z.string().nullable().optional(),
+  // No `timeline` here on purpose. The log is a list the renderer mutates, and
+  // a field edit carrying the renderer's whole snapshot of it rolled the list
+  // back whenever a debounced commit landed after an entry was added. It has
+  // its own commands: ideaAddEntry / ideaUpdateEntry / ideaDeleteEntry.
+});
+export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
+
+/**
+ * IdeaEditSchema 里可被显式置 null 清空的字段。
+ *
+ * 新增可空字段时**必须**同时登记在这里：主进程的 edit() 把 null 一律当作
+ * "清空"跳过合并，再按这张表把键整个摘掉。漏登记的话该字段会静默变成
+ * 不可清空——而"清空验证目标"的 UI 路径恰恰就是发一个 null。
+ */
+export const IDEA_CLEARABLE_FIELDS = ['validationGoal'] as const;
+
+// ---------------------------------------------------------------------------
+// 想法的意图命令
+//
+// 写契约不再说"任何形状的想法都能 upsert"，而是把领域语言（完成/废弃/重新打开/
+// 转为任务/升级为项目/给出结论）直接说成通道。终态规则因此从"需要被校验"变成
+// "契约里根本不存在这个操作"——主进程侧的守卫只对下面这组命令生效。
+// ---------------------------------------------------------------------------
+
+/** 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。 */
+export type IdeaCommandRejection = { ok: false; error: string };
+
+/**
+ * 跟进状态命令的结果。刻意不用 `AppData | null`：渲染进程把返回值整份当成
+ * 数据集采纳，null 会让 App 停在"加载中"且无从区分"这条跟进没了"和"还没加载"。
+ */
+export type FollowUpCommandResult =
+  | { ok: true; data: AppData }
+  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
+
+export const IdeaIdReqSchema = z.object({ id: z.string().min(1) });
+export type IdeaIdReq = z.infer<typeof IdeaIdReqSchema>;
+
+export const IdeaConvertToTaskReqSchema = z.object({
+  id: z.string().min(1),
+  /** 覆盖转换后任务的标题；缺省沿用想法标题。 */
+  title: z.string().trim().min(1).optional(),
+});
+export type IdeaConvertToTaskReq = z.infer<typeof IdeaConvertToTaskReqSchema>;
+
+export const IdeaUpgradeToProjectReqSchema = z.object({
+  id: z.string().min(1),
+  title: projectTitleSchema,
+  icon: z.string().optional(),
+  primaryColor: z.string().optional(),
+  /** 验证目标：怎么算验证成功（CONTEXT.md 的"验证目标"）。 */
+  validationGoal: z.string().optional(),
+});
+export type IdeaUpgradeToProjectReq = z.infer<typeof IdeaUpgradeToProjectReqSchema>;
+
+/** The two follow-up state commands take the same body as a delete: an id. */
+/**
+ * The two follow-up state commands' request body. Declared independently of
+ * FollowUpDeleteReqSchema on purpose: an alias is the same object, so a field
+ * added to the delete schema would go on changing these commands' wire shape
+ * with nothing to notice.
+ */
+export const FollowUpIdReqSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * The follow-up *field* edit. Derived from FollowUpSchema by omission so the
+ * two cannot drift: isResolved/resolvedAt advance only through the
+ * resolve/reopen commands, so a write-back of the renderer's snapshot cannot
+ * silently undo a 办结 the user already performed.
+ */
+export const FollowUpEditSchema = FollowUpSchema.omit({
+  isResolved: true,
+  resolvedAt: true,
+  // null clears, undefined leaves alone. The renderer always builds this
+  // payload by hand, so an omitted key is the only way to say "don't touch",
+  // and clearing a date input has to stay expressible.
+  nextFollowUpDay: true,
+}).extend({ nextFollowUpDay: z.string().nullable().optional() });
+
+/**
+ * FollowUpEditSchema fields that may be explicitly nulled to clear them.
+ * Register a newly nullable field here, or it will silently be unclearable.
+ */
+export const FOLLOW_UP_CLEARABLE_FIELDS = ['nextFollowUpDay'] as const;
+// z.input, not z.infer: entries carries a .default([]) so it is required in the
+// *output* type but optional in the request.
+export type FollowUpEdit = z.input<typeof FollowUpEditSchema>;
+
+export const IdeaAddEntryReqSchema = z.object({
+  id: z.string().min(1),
+  text: z.string().trim().min(1),
+});
+export type IdeaAddEntryReq = z.infer<typeof IdeaAddEntryReqSchema>;
+
+export const IdeaDeleteEntryReqSchema = z.object({
+  id: z.string().min(1),
+  entryId: z.string().min(1),
+});
+export type IdeaDeleteEntryReq = z.infer<typeof IdeaDeleteEntryReqSchema>;
+
+export const IdeaUpdateEntryReqSchema = z.object({
+  id: z.string().min(1),
+  entryId: z.string().min(1),
+  text: z.string().trim().min(1),
+});
+export type IdeaUpdateEntryReq = z.infer<typeof IdeaUpdateEntryReqSchema>;
+
+export const IdeaCloseWithVerdictReqSchema = z.object({
+  id: z.string().min(1),
+  result: z.enum(['validated', 'invalidated', 'partial']),
+  text: z.string().optional(),
+});
+export type IdeaCloseWithVerdictReq = z.infer<typeof IdeaCloseWithVerdictReqSchema>;
 
 export const OrderSetReqSchema = z.object({
   viewKey: z.string().min(1),
@@ -230,7 +223,7 @@ export const OrderSetReqSchema = z.object({
 export type OrderSetReq = z.infer<typeof OrderSetReqSchema>;
 
 export const ProjectCreateReqSchema = z.object({
-  title: z.string().trim().min(1).max(100),
+  title: projectTitleSchema,
   icon: z.string().optional(),
   primaryColor: z.string().optional(),
 });
@@ -244,7 +237,7 @@ export type TagCreateReq = z.infer<typeof TagCreateReqSchema>;
 
 export const ProjectUpdateReqSchema = z.object({
   id: z.string().min(1),
-  title: z.string().trim().min(1).max(100).optional(),
+  title: projectTitleSchema.optional(),
   // Explicit null clears the color; undefined leaves the existing one intact.
   primaryColor: z.string().nullable().optional(),
   // Archive hides the project from the sidebar but keeps its tasks in stats.
@@ -457,6 +450,54 @@ export type ChatEvent =
   | { channel: typeof Ipc.chatDone; payload: ChatDoneEvent }
   | { channel: typeof Ipc.chatError; payload: ChatErrorEvent };
 
+/**
+ * 想法命令的返回值。领域拒绝（如对已闭环的想法执行 reopen）走 ok:false 分支，
+ * 系统错误继续 throw —— 与 importRun/aiTestProvider 的既有惯例一致。
+ */
+export type IdeaCommandResult = { ok: true; data: AppData } | IdeaCommandRejection;
+
+/** 转为任务额外带回生成的任务：渲染进程据此高亮/跳转，无需再猜 id。 */
+export type IdeaConvertResult = { ok: true; data: AppData; taskId: string } | IdeaCommandRejection;
+
+/** 升级为项目额外带回新建的项目：原子转换的另一半，调用方需要它的 id。 */
+export type IdeaUpgradeResult =
+  | { ok: true; data: AppData; projectId: string }
+  | IdeaCommandRejection;
+
+/**
+ * 停止计时的拒绝码，各自对应一件不同的事，调用方要能分开：
+ * - NO_ACTIVE_TIMER：本来就没有在计时。
+ * - TIMER_MISMATCH：主进程跑的不是调用方指定的那次（渲染进程的换表与心跳
+ *   sync() 之间发生了竞态）。此时**有**计时器在跑，所以复用 NO_ACTIVE_TIMER
+ *   会让调用方以为无事发生，从而错过那次没被结算的时长。
+ * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
+ */
+/**
+ * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
+ * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
+ *
+ * 拒绝分支也带 data：主进程在拒绝前可能已经丢弃了 activeTimer（任务已完成的
+ * 情况就是这样），渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着
+ * 一次结算根本没动过的旧 timeSpent。
+ */
+export type TimingStopResult =
+  | { ok: true; data: AppData; settledMs: number }
+  | {
+      ok: false;
+      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
+      data: AppData;
+    };
+
+export const TimingStopReqSchema = z.object({
+  /**
+   * 调用方要结算的那次计时所属的任务。带上它，主进程就只会结算**这一次**：
+   * 渲染进程换表与心跳 sync() 之间的竞态就不会把时长记到刚起步的新表上。
+   * 省略则结算当前 activeTimer（quit / 无人等待的路径）。
+   */
+  taskId: z.string().min(1).optional(),
+});
+export type TimingStopReq = z.infer<typeof TimingStopReqSchema>;
+
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
 // compile time (IpcInvokeHandlers in main, RendererApi in preload).
@@ -474,7 +515,7 @@ export const IpcInvokeContract = {
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
   followUpUpsert: {
     ch: Ipc.followUpUpsert,
-    req: FollowUpSchema,
+    req: FollowUpEditSchema,
     res: null as unknown as AppData,
   },
   followUpDelete: {
@@ -482,9 +523,21 @@ export const IpcInvokeContract = {
     req: FollowUpDeleteReqSchema,
     res: null as unknown as AppData,
   },
+  followUpResolve: {
+    ch: Ipc.followUpResolve,
+    // Not FollowUpDeleteReqSchema: a field added to the delete schema would
+    // otherwise silently change the wire shape of this command.
+    req: FollowUpIdReqSchema,
+    res: null as unknown as FollowUpCommandResult,
+  },
+  followUpReopen: {
+    ch: Ipc.followUpReopen,
+    req: FollowUpIdReqSchema,
+    res: null as unknown as FollowUpCommandResult,
+  },
   ideaUpsert: {
     ch: Ipc.ideaUpsert,
-    req: IdeaSchema,
+    req: IdeaEditSchema,
     res: null as unknown as AppData,
   },
   ideaDelete: {
@@ -492,11 +545,59 @@ export const IpcInvokeContract = {
     req: IdeaDeleteReqSchema,
     res: null as unknown as AppData,
   },
+  ideaComplete: {
+    ch: Ipc.ideaComplete,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaDiscard: {
+    ch: Ipc.ideaDiscard,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaReopen: {
+    ch: Ipc.ideaReopen,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaConvertToTask: {
+    ch: Ipc.ideaConvertToTask,
+    req: IdeaConvertToTaskReqSchema,
+    res: null as unknown as IdeaConvertResult,
+  },
+  ideaUpgradeToProject: {
+    ch: Ipc.ideaUpgradeToProject,
+    req: IdeaUpgradeToProjectReqSchema,
+    res: null as unknown as IdeaUpgradeResult,
+  },
+  ideaAddEntry: {
+    ch: Ipc.ideaAddEntry,
+    req: IdeaAddEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaDeleteEntry: {
+    ch: Ipc.ideaDeleteEntry,
+    req: IdeaDeleteEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaUpdateEntry: {
+    ch: Ipc.ideaUpdateEntry,
+    req: IdeaUpdateEntryReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaCloseWithVerdict: {
+    ch: Ipc.ideaCloseWithVerdict,
+    req: IdeaCloseWithVerdictReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
   orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
   projectCreate: {
     ch: Ipc.projectCreate,
     req: ProjectCreateReqSchema,
-    res: null as unknown as AppData,
+    // The id comes back with the dataset: the renderer used to recover it by
+    // diffing the whole project list, which picks the wrong project if two
+    // creations interleave.
+    res: null as unknown as { data: AppData; projectId: string },
   },
   projectUpdate: {
     ch: Ipc.projectUpdate,
@@ -518,6 +619,11 @@ export const IpcInvokeContract = {
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
+  timingStop: {
+    ch: Ipc.timingStop,
+    req: TimingStopReqSchema,
+    res: null as unknown as TimingStopResult,
+  },
   importRun: { ch: Ipc.importRun, res: null as unknown as ImportRunResult },
   exportMarkdown: {
     ch: Ipc.exportMarkdown,
@@ -635,5 +741,3 @@ export function maskDataForRenderer(data: AppData): AppData {
     },
   };
 }
-
-export type { AppData, AppSettings, FollowUp, FollowUpEntry, Idea, Task };

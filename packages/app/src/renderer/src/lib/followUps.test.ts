@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { emptyAppData, type FollowUp } from '@tiny-schedule/shared';
-import {
-  dueFollowUps,
-  isFollowUpDue,
-  openFollowUps,
-  resolvedFollowUps,
-  waitingDays,
-} from './followUps';
+import { emptyAppData, type FollowUp, isFollowUpDue } from '@tiny-schedule/shared';
+import { dueFollowUps, openFollowUps, resolvedFollowUps, waitingDays } from './followUps';
 
 // 2026-09-07 12:00 local time; localDate(now) === '2026-09-07'
 const NOW = new Date(2026, 8, 7, 12, 0, 0).getTime();

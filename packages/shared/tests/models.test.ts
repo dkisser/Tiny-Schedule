@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { Task } from '../src/models';
-import { defaultSettings, emptyAppData, SYSTEM_TAG_IDS } from '../src/models';
+import { defaultSettings, emptyAppData } from '../src/domain/appData';
+import { SYSTEM_TAG_IDS } from '../src/domain/project';
+import type { Task } from '../src/domain/task';
 
 describe('emptyAppData', () => {
   test('has version 1 and empty collections', () => {

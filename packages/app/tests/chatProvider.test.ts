@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { AiProviderConfig } from '@tiny-schedule/shared';
-import { buildChatModel } from '../src/main/ai/chatProvider';
+import { buildChatModel } from '../src/main/infra/ai/chatProvider';
 
 const cfg: AiProviderConfig = {
   id: 'c1',
