@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { emptyAppData } from '@tiny-schedule/shared';
+import { AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import { DataStore } from '../src/main/infra/dataStore';
 
@@ -202,6 +202,47 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     const refused = lines.filter((l) => l.action === 'dataStore:save:refused');
     expect(refused).toHaveLength(1);
     expect(String(refused[0]?.reason)).toContain('invalid json');
+  });
+
+  test('deleting the unreadable file keeps the backup as the base', () => {
+    // Handing back emptyAppData() here looked like a resolution and was its
+    // own destruction: the next write persisted that empty set to data.json,
+    // and the one after that rotated it over the still-intact backup. Deleting
+    // one corrupt file must not lose every task.
+    const dir = tmpDir();
+    seed(dir, full());
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'a' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'b' } }));
+    // data.json and the backup both hold t1/i1; corrupt then delete the primary.
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const reloaded = new DataStore(dir, logger);
+    reloaded.load();
+    expect(Object.keys(reloaded.get().tasks)).toEqual(['t1']);
+    unlinkSync(join(dir, 'data.json'));
+    reloaded.update((d) => ({ ...d, settings: { ...d.settings, userName: 'w1' } }));
+    reloaded.update((d) => ({ ...d, settings: { ...d.settings, userName: 'w2' } }));
+    const after = new DataStore(dir, logger).load();
+    expect(Object.keys(after.tasks)).toEqual(['t1']);
+    expect(Object.keys(after.ideas)).toEqual(['i1']);
+    expect(after.settings.userName).toBe('w2');
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t1']);
+  });
+
+  test('an empty dataset never rotates over a readable backup', () => {
+    const dir = tmpDir();
+    seed(dir, full());
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'a' } }));
+    // Both files now hold t1. An empty write must not demote the backup.
+    store.update(() => emptyAppData());
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t1']);
   });
 
   test('deleting the unreadable file unblocks writing instead of latching forever', () => {
