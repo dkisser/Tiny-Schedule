@@ -2,7 +2,9 @@ import { type FollowUp, newFollowUpId } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import { CheckCircle2, ChevronLeft, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { waitingDays } from '../lib/followUps';
+import { followUpRejectionMessage } from '../lib/ideaRejection';
 import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -170,9 +172,14 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
         <Button
           variant="outline"
           className="flex-1"
-          onClick={() =>
-            void (followUp.isResolved ? reopenFollowUp(followUp.id) : resolveFollowUp(followUp.id))
-          }
+          onClick={() => {
+            const outcome = followUp.isResolved
+              ? reopenFollowUp(followUp.id)
+              : resolveFollowUp(followUp.id);
+            void outcome.then((o) => {
+              if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+            });
+          }}
         >
           {followUp.isResolved ? (
             <>

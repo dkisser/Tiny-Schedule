@@ -29,6 +29,12 @@ export interface FollowUpCommandOutcome {
 }
 
 /**
+ * An idea edit, with the one distinction the wire contract draws: an absent
+ * validationGoal leaves it alone, an explicit null clears it.
+ */
+export type IdeaPatch = Omit<Idea, 'validationGoal'> & { validationGoal?: string | null };
+
+/**
  * Run an idea intent command and adopt its dataset. The main process is the
  * only place that decides whether a transition is legal, so the verdict is
  * forwarded rather than second-guessed here.
@@ -40,7 +46,7 @@ export interface FollowUpCommandOutcome {
  * the user concludes the click did nothing. Surfacing it as a rejection keeps
  * every caller's existing `if (!outcome.ok) toast.error(...)` path honest.
  */
-async function adoptIdeaCommand(
+async function adoptCommand(
   promise: Promise<{ ok: true; data: AppData } | { ok: false; error: string }>,
 ): Promise<IdeaCommandOutcome> {
   let result: { ok: true; data: AppData } | { ok: false; error: string };
@@ -53,6 +59,9 @@ async function adoptIdeaCommand(
   useDataStore.setState({ data: result.data });
   return ACCEPTED;
 }
+
+/** Idea intent commands all funnel through here, so they share the handling. */
+const adoptIdeaCommand = adoptCommand;
 
 // Renderer-side provider draft carries plain-text apiKey for editing
 export interface ProviderDraft {
@@ -74,7 +83,7 @@ interface DataState {
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
   /** 字段编辑（标题/备注/验证目标/演进日志）；状态只能走意图命令。 */
-  upsertIdea: (idea: Idea) => Promise<void>;
+  upsertIdea: (idea: IdeaPatch) => Promise<void>;
   deleteIdea: (id: string) => Promise<void>;
   /**
    * 想法的写路径是意图命令而非 upsert（ADR-0003）：终态规则由主进程强制，
@@ -150,7 +159,9 @@ export const useDataStore = create<DataState>((set, get) => ({
       title: idea.title,
       notes: idea.notes,
       createdAt: idea.createdAt,
-      validationGoal: idea.validationGoal,
+      // Omitted when undefined: the main process treats an absent key as "leave
+      // this alone". Only an explicit null clears the field.
+      ...(idea.validationGoal !== undefined ? { validationGoal: idea.validationGoal } : {}),
       timeline: idea.timeline,
     });
     set({ data });
@@ -167,20 +178,11 @@ export const useDataStore = create<DataState>((set, get) => ({
   upgradeIdeaToProject: (req) => adoptIdeaCommand(api().ideaUpgradeToProject(req)),
   closeIdeaWithVerdict: (id, result, text) =>
     adoptIdeaCommand(api().ideaCloseWithVerdict({ id, result, ...(text ? { text } : {}) })),
-  resolveFollowUp: async (id) => {
-    // The transition is applied in the main process; the returned dataset is
-    // the whole answer, so the renderer never composes isResolved itself.
-    const result = await api().followUpResolve({ id });
-    if (!result.ok) return { ok: false as const, error: result.error };
-    set({ data: result.data });
-    return { ok: true as const };
-  },
-  reopenFollowUp: async (id) => {
-    const result = await api().followUpReopen({ id });
-    if (!result.ok) return { ok: false as const, error: result.error };
-    set({ data: result.data });
-    return { ok: true as const };
-  },
+  // Same shape as the idea commands: the main process applies the transition
+  // and returns the dataset, and a rejection comes back as data so the caller
+  // can toast it instead of firing a void-ed promise into the void.
+  resolveFollowUp: (id) => adoptCommand(api().followUpResolve({ id })),
+  reopenFollowUp: (id) => adoptCommand(api().followUpReopen({ id })),
   setTaskOrder: (viewKey, ids) => {
     // Optimistic: apply locally first so dragging stays fluid, then persist.
     set((s) => {

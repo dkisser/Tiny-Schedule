@@ -58,7 +58,7 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         taskId: timer.taskId,
         expectedTaskId,
       });
-      return { ok: false, error: 'NO_ACTIVE_TIMER', data: current };
+      return { ok: false, error: 'TIMER_MISMATCH', data: current };
     }
     const task = current.tasks[timer.taskId];
     if (!task) {

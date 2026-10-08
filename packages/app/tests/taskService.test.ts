@@ -80,7 +80,10 @@ describe('taskService.stopTiming — main-side settlement', () => {
     // and the previous task's elapsed time would go unbilled.
     const { data, service } = setup({ t1: task(), t2: task({ id: 't2' }) }, timerAt(NOW, 60_000));
     const r = service.stopTiming(NOW, 't2');
-    expect(r).toMatchObject({ ok: false, error: 'NO_ACTIVE_TIMER' });
+    // A distinct code, not NO_ACTIVE_TIMER: a timer *is* running, just not the
+    // pinned one. Reporting "nothing was being timed" would tell the caller
+    // there was nothing to miss.
+    expect(r).toMatchObject({ ok: false, error: 'TIMER_MISMATCH' });
     // Untouched: still running, still unbilled — but on the right session.
     expect(data.activeTimer).not.toBeNull();
     expect(data.tasks.t1?.timeSpent).toBe(0);

@@ -165,12 +165,16 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // Optimistic: the clock stops on this frame; the recorded duration is
     // whatever the main process settles, adopted in settleOnMain.
     set({ timer: null, phasePendingAdvance: null });
-    if (cur) await settleOnMain(cur.taskId);
-    // Unconditional clear. settleOnMain only removes the timer on a successful
-    // settle, so without this the main process could keep an activeTimer the UI
-    // already shows as stopped — and a later start() would find it and bill its
-    // elapsed time onto whichever task came along next.
-    await sync(null);
+    try {
+      if (cur) await settleOnMain(cur.taskId);
+    } finally {
+      // Unconditional, and in a finally: settleOnMain only removes the timer on
+      // a successful settle, so without this the main process could keep an
+      // activeTimer the UI already shows as stopped — and a later start() would
+      // find it and bill its elapsed time onto whichever task came along next.
+      // In a finally so a throwing settle cannot skip the clear either.
+      await sync(null);
+    }
   },
 
   tick: () => set({ now: Date.now() }),

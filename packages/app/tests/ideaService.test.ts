@@ -299,15 +299,41 @@ describe('ideaService.edit — the narrowed write contract', () => {
     expect(data.ideas.i1?.title).toBe('只改标题');
   });
 
-  test('an explicitly nulled optional field still clears it', () => {
-    // Filtering undefined must not turn into "ignore everything optional":
-    // clearing a field has to stay expressible.
+  test('an omitted optional field is left alone', () => {
     const { data, service } = setup({
       i1: idea({ validationGoal: '验证一下' }),
     });
-    service.edit({ id: 'i1', title: 't', notes: '', createdAt: 1, validationGoal: undefined });
-    // validationGoal is optional, so an omitted key means "leave it alone".
+    service.edit({ id: 'i1', title: 't', notes: '', createdAt: 1 });
     expect(data.ideas.i1?.validationGoal).toBe('验证一下');
+  });
+
+  test('an explicit null clears the field', () => {
+    // Clearing has to stay expressible. Encoding it as `undefined` would have
+    // collided with "leave it alone" and made the field unclearable — and
+    // emptying the 验证目标 input in the UI is exactly that call.
+    const { data, service } = setup({
+      i1: idea({ validationGoal: '验证一下' }),
+    });
+    const patch = IdeaEditSchema.parse({
+      id: 'i1',
+      title: 't',
+      notes: '',
+      createdAt: 1,
+      validationGoal: null,
+    });
+    service.edit(patch);
+    expect(data.ideas.i1?.validationGoal).toBeUndefined();
+    // The key is gone, not set to undefined, so the idea really has no goal.
+    expect('validationGoal' in (data.ideas.i1 as object)).toBe(false);
+  });
+
+  test('clearing one optional field leaves the other stored fields intact', () => {
+    const { data, service } = setup({
+      i1: idea({ validationGoal: '验证一下', timeline: [{ id: 'e1', createdAt: 1, text: '记' }] }),
+    });
+    service.edit({ id: 'i1', title: 't', notes: '', createdAt: 1, validationGoal: null });
+    expect(data.ideas.i1?.validationGoal).toBeUndefined();
+    expect(data.ideas.i1?.timeline).toHaveLength(1);
   });
 
   test('editing the timeline leaves the status untouched', () => {

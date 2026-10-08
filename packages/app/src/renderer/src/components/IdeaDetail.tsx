@@ -50,7 +50,9 @@ function ValidationGoalEditor({ idea }: { idea: Idea }) {
   const [goal, setGoal, flushGoal] = useDebouncedCommit(idea.validationGoal ?? '', (v) => {
     const trimmed = v.trim();
     if (trimmed !== (idea.validationGoal ?? '')) {
-      void upsertIdea({ ...idea, validationGoal: trimmed || undefined });
+      // `null` clears the field, `undefined` would mean "leave it alone" —
+      // emptying the input is a clear, not a no-op.
+      void upsertIdea({ ...idea, validationGoal: trimmed || null });
     }
   });
   return (

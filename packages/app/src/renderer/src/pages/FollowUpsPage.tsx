@@ -7,10 +7,12 @@ import {
 } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
 import { openFollowUps, resolvedFollowUps, waitingDays } from '../lib/followUps';
+import { followUpRejectionMessage } from '../lib/ideaRejection';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -93,7 +95,9 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
             e.stopPropagation();
             // 走主进程的命令，而不是自己拼 isResolved/resolvedAt 覆盖整条记录：
             // 整条覆盖意味着主进程无法强制这条转移规则（ADR-0003 的成功判据之一）。
-            void resolveFollowUp(followUp.id);
+            void resolveFollowUp(followUp.id).then((o) => {
+              if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+            });
           }}
         >
           <CheckCircle2 />
@@ -181,7 +185,9 @@ export function FollowUpsPage() {
                     className="shrink-0 opacity-0 group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void reopenFollowUp(f.id);
+                      void reopenFollowUp(f.id).then((o) => {
+                        if (!o.ok) toast.error(followUpRejectionMessage(o.error ?? ''));
+                      });
                     }}
                   >
                     <RotateCcw />

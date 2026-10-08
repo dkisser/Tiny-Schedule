@@ -105,14 +105,30 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       // `timeline: undefined`) erase the stored value — the schema was
       // deliberately loosened so callers could send partial edits, and every
       // one of them would have been silently destructive.
-      const defined = Object.fromEntries(
-        Object.entries(patch).filter(([, v]) => v !== undefined),
-      ) as Partial<IdeaEdit>;
+      //
+      // `null` is the separate "clear it" signal: filtering it out alongside
+      // undefined would make optional fields unclearable, and the only clear
+      // path in the UI (emptying the 验证目标 input) sends exactly that.
+      const changes: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined || value === null) continue;
+        changes[key] = value;
+      }
       const next = store.update((d) => {
         const stored = d.ideas[patch.id];
-        const idea: Idea = stored
-          ? { ...stored, ...defined, id: patch.id }
-          : { ...patch, status: 'open' as const };
+        const merged: Idea = stored
+          ? { ...stored, ...changes, id: patch.id }
+          : ({ ...changes, status: 'open' as const } as Idea);
+        const idea: Idea =
+          patch.validationGoal === null
+            ? // Drop the key outright rather than writing undefined: a stored
+              // idea should genuinely have no validation goal.
+              (({ validationGoal: _cleared, ...rest }) => rest)(
+                merged as Idea & {
+                  validationGoal?: string;
+                },
+              )
+            : merged;
         return { ...d, ideas: { ...d.ideas, [idea.id]: idea } };
       });
       logger.info({ action: 'idea:upsert', ideaId: patch.id, title: patch.title });

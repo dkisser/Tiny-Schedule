@@ -93,7 +93,13 @@ export const IdeaEditSchema = z.object({
   title: z.string().trim().min(1),
   notes: z.string(),
   createdAt: z.number(),
-  validationGoal: z.string().optional(),
+  /**
+   * `undefined` = 不动这个字段，`null` = 清空。两者必须分开：主进程把 edit
+   * 实现成"只覆盖调用方真正设置的键"，否则渲染进程每次都显式带上
+   * `validationGoal: undefined` 就会把已存的值抹掉；而把清空也编码成
+   * undefined 的话，合并就退化成覆盖，同一个 bug 换个方向再犯一次。
+   */
+  validationGoal: z.string().nullable().optional(),
   timeline: z.array(IdeaEntrySchema).optional(),
 });
 export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
@@ -404,10 +410,18 @@ export type TimingStopResult =
   | { ok: true; data: AppData; settledMs: number }
   | {
       ok: false;
-      error: 'NO_ACTIVE_TIMER' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
+      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
       data: AppData;
     };
 
+/**
+ * 停止计时的拒绝码，各自对应一件不同的事，调用方要能分开：
+ * - NO_ACTIVE_TIMER：本来就没有在计时。
+ * - TIMER_MISMATCH：主进程跑的不是调用方指定的那次（渲染进程的换表与心跳
+ *   sync() 之间发生了竞态）。此时**有**计时器在跑，所以复用 NO_ACTIVE_TIMER
+ *   会让调用方以为无事发生，从而错过那次没被结算的时长。
+ * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
+ */
 export const TimingStopReqSchema = z.object({
   /**
    * 调用方要结算的那次计时所属的任务。带上它，主进程就只会结算**这一次**：
