@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { emptyAppData, localDate, POMODORO_FOCUS_MS, SYSTEM_TAG_IDS } from '@tiny-schedule/shared';
-import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from '../src/main/migrations';
+import {
+  migrateActiveTimerPomodoroFocus,
+  migrateRemoveTodayTag,
+} from '../src/main/infra/migrations';
 
 describe('migrateRemoveTodayTag', () => {
   test('strips TODAY tag and backfills dueDay when missing', () => {

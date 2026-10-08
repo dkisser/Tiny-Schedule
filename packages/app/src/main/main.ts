@@ -1,47 +1,25 @@
 import { join } from 'node:path';
 import { is } from '@electron-toolkit/utils';
-import { applySettlement, Ipc, settleTimer } from '@tiny-schedule/shared';
+import { Ipc } from '@tiny-schedule/shared';
 import { app, BrowserWindow, dialog, Menu, type MenuItemConstructorOptions } from 'electron';
 import type { Logger } from 'pino';
-import { DataStore } from './dataStore';
+import { DataStore } from './infra/dataStore';
+import { initKeyStore } from './infra/keys';
+import { createLogger } from './infra/logger';
+import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from './infra/migrations';
+import { startPowerTimerWatcher } from './infra/powerTimer';
+import { startupUpdateCheck } from './infra/updater';
 import { registerIpcHandlers } from './ipcHandlers';
-import { initKeyStore } from './keys';
-import { createLogger } from './logger';
-import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from './migrations';
-import { startPowerTimerWatcher } from './powerTimer';
-import { startupUpdateCheck } from './updater';
+import { createTaskService, type TaskService } from './services/taskService';
 
 let win: BrowserWindow | null = null;
 let store: DataStore | null = null;
 let logger: Logger | null = null;
+let tasks: TaskService | null = null;
 // Set only after the user confirms quitting with a running timer; never latched
 // on the no-timer path, so a later quit attempt still triggers the confirmation.
 let allowQuit = false;
 let quitConfirmOpen = false;
-
-function settleActiveTimer(dataStore: DataStore, log: Logger): void {
-  const timer = dataStore.get().activeTimer;
-  if (!timer) return;
-  const task = dataStore.get().tasks[timer.taskId];
-  if (task?.isDone) {
-    // A done task is never being timed. Clear without recording: the time may
-    // already have been settled, and settling again would bill it twice.
-    dataStore.update((d) => ({ ...d, activeTimer: null }));
-    log.info({ action: 'timer:drop:quit', taskId: timer.taskId });
-    return;
-  }
-  const settlement = settleTimer(timer, Date.now());
-  dataStore.update((d) => {
-    const t = d.tasks[timer.taskId];
-    if (!t) return { ...d, activeTimer: null };
-    return {
-      ...d,
-      tasks: { ...d.tasks, [t.id]: applySettlement(t, settlement) },
-      activeTimer: null,
-    };
-  });
-  log.info({ action: 'timer:settle:quit', taskId: timer.taskId, ms: settlement.ms });
-}
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
@@ -91,7 +69,7 @@ function trackWindow(window: BrowserWindow): void {
       .then(({ response }) => {
         quitConfirmOpen = false;
         if (response !== 0) return;
-        if (store && logger) settleActiveTimer(store, logger);
+        tasks?.settleForQuit();
         allowQuit = true;
         app.quit();
       })
@@ -130,7 +108,7 @@ app.on('before-quit', (e) => {
   if (win && !win.isDestroyed()) {
     win.close();
   } else {
-    if (logger) settleActiveTimer(store, logger);
+    tasks?.settleForQuit();
     allowQuit = true;
     app.quit();
   }
@@ -149,6 +127,7 @@ app.whenReady().then(async () => {
   logger = createLogger(join(userData, 'logs'));
   store = new DataStore(userData);
   store.load();
+  tasks = createTaskService({ store, logger });
   const migrated = migrateRemoveTodayTag(store.get());
   if (migrated !== store.get()) store.save(migrated);
   const migrated2 = migrateActiveTimerPomodoroFocus(store.get());

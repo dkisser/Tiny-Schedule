@@ -2,7 +2,6 @@ import {
   type ActiveTimer,
   type AppData,
   advancePomodoroPhase,
-  applySettlement,
   computeElapsed,
   computeFocusElapsed,
   dropStaleTiming,
@@ -12,7 +11,6 @@ import {
   type PomodoroPhase,
   pauseTimer,
   resumeTimer,
-  settleTimer,
   startPomodoroFocus,
   startTimer,
 } from '@tiny-schedule/shared';
@@ -55,12 +53,15 @@ async function sync(timer: ActiveTimer | null) {
   await api().timerSync({ timer });
 }
 
-async function settleInto(cur: ActiveTimer, now: number): Promise<void> {
-  const settlement = settleTimer(cur, now);
-  const task = useDataStore.getState().data?.tasks[cur.taskId];
-  if (task && settlement.ms > 0) {
-    await useDataStore.getState().upsertTask(applySettlement(task, settlement));
-  }
+/**
+ * 结算由主进程做（ADR-0003）：渲染进程不再自己算时长再写回去。
+ * 调用方先乐观地停表，所以这里只负责采纳主进程的答案——返回它记录的 ms。
+ */
+async function settleOnMain(): Promise<number> {
+  const result = await api().timingStop();
+  if (!result.ok) return 0;
+  useDataStore.setState({ data: result.data });
+  return result.settledMs;
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -111,7 +112,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // Swap synchronously first so rapid clicks can't race, then settle the
     // previous timer so its elapsed time isn't lost.
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
+    if (cur) await settleOnMain();
     await sync(next);
   },
 
@@ -121,7 +122,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
+    if (cur) await settleOnMain();
     await sync(next);
   },
 
@@ -155,10 +156,11 @@ export const useTimerStore = create<TimerState>((set, get) => ({
 
   stop: async () => {
     const cur = get().timer;
+    // Optimistic: the clock stops on this frame; the recorded duration is
+    // whatever the main process settles, adopted in settleOnMain.
     set({ timer: null, phasePendingAdvance: null });
     if (!cur) return;
-    await settleInto(cur, Date.now());
-    await sync(null);
+    await settleOnMain();
   },
 
   tick: () => set({ now: Date.now() }),

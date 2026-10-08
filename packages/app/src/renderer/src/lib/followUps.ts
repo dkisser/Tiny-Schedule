@@ -1,24 +1,7 @@
-import { type AppData, type FollowUp, localDate } from '@tiny-schedule/shared';
+import { type AppData, type FollowUp, isFollowUpDue } from '@tiny-schedule/shared';
 
-export function newFollowUpId(): string {
-  return `f_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function blankFollowUp(title: string): FollowUp {
-  return {
-    id: newFollowUpId(),
-    title,
-    notes: '',
-    entries: [],
-    createdAt: Date.now(),
-    isResolved: false,
-  };
-}
-
-export function isFollowUpDue(f: FollowUp, now = Date.now()): boolean {
-  const today = localDate(now);
-  return !f.isResolved && !!f.nextFollowUpDay && f.nextFollowUpDay <= today;
-}
+// 跟进的模型与状态推进归 shared 的 domain/followUp.ts 所有（ADR-0003）；
+// 本文件只剩读侧 selector。办结/恢复经由主进程的 followUpResolve/Reopen 通道。
 
 // 跟进中列表：到期/逾期的在前按日期升序，其余（未来日期或无日期）在后按开始等待时间升序。
 export function openFollowUps(data: AppData, now = Date.now()): FollowUp[] {

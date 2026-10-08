@@ -1,4 +1,11 @@
-import { type Idea, type IdeaEntry, INBOX_PROJECT_ID, localDate } from '@tiny-schedule/shared';
+import {
+  appendIdeaEntry,
+  deleteIdeaEntry,
+  type Idea,
+  type IdeaEntry,
+  localDate,
+  updateIdeaEntry,
+} from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import {
   Ban,
@@ -13,19 +20,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
-import {
-  appendIdeaEntry,
-  completeIdea,
-  deleteIdeaEntry,
-  discardIdea,
-  ideaPendingVerdict,
-  ideaProjectOpenTaskCount,
-  ideaToTask,
-  reopenIdea,
-  updateIdeaEntry,
-} from '../lib/ideas';
+import { toast } from 'sonner';
+import { ideaRejectionMessage } from '../lib/ideaRejection';
+import { ideaPendingVerdict, ideaProjectOpenTaskCount } from '../lib/ideas';
 import { useDebouncedCommit } from '../lib/useDebouncedCommit';
-import { useDataStore } from '../stores/data';
+import { type IdeaCommandOutcome, useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { MarkdownEditor } from './MarkdownEditor';
 import { Button } from './ui/button';
@@ -191,8 +190,11 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
 
 export function IdeaDetail({ idea }: { idea: Idea }) {
   const data = useDataStore((s) => s.data);
-  const upsertTask = useDataStore((s) => s.upsertTask);
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const completeIdea = useDataStore((s) => s.completeIdea);
+  const discardIdea = useDataStore((s) => s.discardIdea);
+  const reopenIdea = useDataStore((s) => s.reopenIdea);
+  const convertIdeaToTask = useDataStore((s) => s.convertIdeaToTask);
   const selectIdea = useUiStore((s) => s.selectIdea);
   const setView = useUiStore((s) => s.setView);
   const selectTask = useUiStore((s) => s.selectTask);
@@ -216,12 +218,16 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
   const openTaskCount = idea.projectId && data ? ideaProjectOpenTaskCount(data, idea.projectId) : 0;
   const pendingVerdict = data ? ideaPendingVerdict(idea, data) : false;
 
+  /** 转为任务：主进程一次写入里建任务并转状态，不存在只做了一半的中间态。 */
   const convert = async () => {
-    const inbox = data?.projects[INBOX_PROJECT_ID];
-    if (!inbox) return;
-    const { task, converted } = ideaToTask(idea, inbox);
-    await upsertTask(task);
-    await upsertIdea(converted);
+    const outcome = await convertIdeaToTask(idea.id);
+    if (!outcome.ok) toast.error(ideaRejectionMessage(outcome.error ?? ''));
+  };
+
+  /** 领域拒绝不是异常：统一 toast，主进程说什么就是什么（ADR-0003）。 */
+  const runCommand = async (command: () => Promise<IdeaCommandOutcome>) => {
+    const outcome = await command();
+    if (!outcome.ok) toast.error(ideaRejectionMessage(outcome.error ?? ''));
   };
 
   const openTask = () => {
@@ -367,7 +373,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => void upsertIdea(completeIdea(idea))}
+                onClick={() => void runCommand(() => completeIdea(idea.id))}
               >
                 <Check />
                 完成
@@ -375,7 +381,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
               <Button
                 variant="ghost"
                 className="flex-1"
-                onClick={() => void upsertIdea(discardIdea(idea))}
+                onClick={() => void runCommand(() => discardIdea(idea.id))}
               >
                 <Ban />
                 废弃
@@ -399,7 +405,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
           <Button
             variant="outline"
             className="flex-1"
-            onClick={() => void upsertIdea(reopenIdea(idea))}
+            onClick={() => void runCommand(() => reopenIdea(idea.id))}
           >
             <RotateCcw />
             重新打开

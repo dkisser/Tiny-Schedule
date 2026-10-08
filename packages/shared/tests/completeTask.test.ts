@@ -1,14 +1,17 @@
 import { describe, expect, test } from 'bun:test';
-import { completeTask, dropStaleTiming, upsertTaskWithTiming } from '../src/completeTask';
-import type { ActiveTimer, AppData, Task } from '../src/models';
+import type { AppData } from '../src/domain/appData';
+import type { ActiveTimer, Task } from '../src/domain/task';
 import {
   advancePomodoroPhase,
+  completeTask,
+  dropStaleTiming,
   POMODORO_BREAK_MS,
   POMODORO_FOCUS_MS,
   pauseTimer,
   startPomodoroFocus,
   startTimer,
-} from '../src/timer';
+  upsertTaskWithTiming,
+} from '../src/domain/task';
 
 const T0 = 1_785_700_000_000;
 

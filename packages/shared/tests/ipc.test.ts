@@ -1,18 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  AppDataSchema,
   CalendarAddTaskInputSchema,
   CalendarAddTaskOutputSchema,
   ExportMarkdownReqSchema,
-  FollowUpSchema,
-  IdeaSchema,
   Ipc,
   ProjectUpdateReqSchema,
   SettingsUpdateReqSchema,
-  TaskSchema,
   TimerSyncReqSchema,
-} from '../src/ipc';
-import { emptyAppData } from '../src/models';
+} from '../src/contract/ipc';
+import { AppDataSchema, emptyAppData } from '../src/domain/appData';
+import { FollowUpSchema } from '../src/domain/followUp';
+import { IdeaSchema } from '../src/domain/idea';
+import { TaskSchema } from '../src/domain/task';
 
 describe('Ipc channels', () => {
   test('channels are unique', () => {

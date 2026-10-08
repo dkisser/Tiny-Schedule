@@ -116,19 +116,3 @@ export function getSummary(data: AppData, p: SummaryParams): SummaryResult {
     byTag: [...byTag.values()].sort((a, b) => b.spentMs - a.spentMs),
   };
 }
-
-export interface MetaResult {
-  projects: { id: string; title: string; isArchived: boolean }[];
-  tags: { id: string; title: string }[];
-}
-
-export function listMeta(data: AppData): MetaResult {
-  return {
-    projects: Object.values(data.projects).map((p) => ({
-      id: p.id,
-      title: p.title,
-      isArchived: p.isArchived,
-    })),
-    tags: Object.values(data.tags).map((t) => ({ id: t.id, title: t.title })),
-  };
-}

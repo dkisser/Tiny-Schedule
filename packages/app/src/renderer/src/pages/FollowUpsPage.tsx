@@ -1,16 +1,16 @@
-import { addDays, type FollowUp, localDate } from '@tiny-schedule/shared';
+import {
+  addDays,
+  blankFollowUp,
+  type FollowUp,
+  isFollowUpDue,
+  localDate,
+} from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
-import {
-  blankFollowUp,
-  isFollowUpDue,
-  openFollowUps,
-  resolvedFollowUps,
-  waitingDays,
-} from '../lib/followUps';
+import { openFollowUps, resolvedFollowUps, waitingDays } from '../lib/followUps';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';

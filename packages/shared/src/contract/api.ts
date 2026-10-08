@@ -1,5 +1,5 @@
+import type { ActiveTimer } from '../domain/task';
 import type { AiStreamEvent, ChatEvent, CheckUpdateResult, IpcInvokeFn, IpcInvokeKey } from './ipc';
-import type { ActiveTimer } from './models';
 
 // Derived from IpcInvokeContract so the renderer-facing signatures can never
 // drift from the request schemas or response types declared in the contract.

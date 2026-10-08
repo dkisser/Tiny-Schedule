@@ -1,13 +1,8 @@
 import { z } from 'zod';
-import type {
-  AppData,
-  AppSettings,
-  ChatSession,
-  FollowUp,
-  FollowUpEntry,
-  Idea,
-  Task,
-} from './models';
+import type { AppData, ChatSession } from '../domain/appData';
+import { FollowUpSchema } from '../domain/followUp';
+import { IdeaEntrySchema, IdeaSchema } from '../domain/idea';
+import { ActiveTimerSchema, TaskSchema } from '../domain/task';
 
 export const Ipc = {
   dataLoad: 'data:load',
@@ -15,8 +10,16 @@ export const Ipc = {
   taskDelete: 'task:delete',
   followUpUpsert: 'followUp:upsert',
   followUpDelete: 'followUp:delete',
+  followUpResolve: 'followUp:resolve',
+  followUpReopen: 'followUp:reopen',
   ideaUpsert: 'idea:upsert',
   ideaDelete: 'idea:delete',
+  ideaComplete: 'idea:complete',
+  ideaDiscard: 'idea:discard',
+  ideaReopen: 'idea:reopen',
+  ideaConvertToTask: 'idea:convertToTask',
+  ideaUpgradeToProject: 'idea:upgradeToProject',
+  ideaCloseWithVerdict: 'idea:closeWithVerdict',
   orderSet: 'order:set',
   projectCreate: 'project:create',
   projectUpdate: 'project:update',
@@ -27,6 +30,7 @@ export const Ipc = {
   settingsUpdate: 'settings:update',
   finishDay: 'day:finish',
   timerSync: 'timer:sync',
+  timingStop: 'timing:stop',
   timerChanged: 'timer:changed',
   importRun: 'import:run',
   exportMarkdown: 'export:markdown',
@@ -60,168 +64,69 @@ export const Ipc = {
 
 export type IpcChannel = (typeof Ipc)[keyof typeof Ipc];
 
-const TimeEntrySchema = z.object({
-  date: z.string(),
-  start: z.number(),
-  end: z.number(),
-  ms: z.number(),
-});
-
-export const TaskSchema = z.object({
-  id: z.string().min(1),
-  title: z.string(),
-  projectId: z.string(),
-  tagIds: z.array(z.string()),
-  projectTitle: z.string().optional(),
-  tagSnapshots: z
-    .record(z.string(), z.object({ title: z.string(), color: z.string().optional() }))
-    .optional(),
-  subTaskIds: z.array(z.string()),
-  parentTaskId: z.string().optional(),
-  isDone: z.boolean(),
-  doneAt: z.number().optional(),
-  dueDay: z.string().optional(),
-  timeEstimate: z.number().min(0),
-  timeSpent: z.number().min(0),
-  timeSpentOnDay: z.record(z.string(), z.number()),
-  timeEntries: z.array(TimeEntrySchema),
-  notes: z.string(),
-  created: z.number(),
-});
-export type TaskPayload = z.infer<typeof TaskSchema>;
-
-const FollowUpEntrySchema = z.object({
-  id: z.string().min(1),
-  at: z.number(),
-  text: z.string(),
-});
-
-export const FollowUpSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().trim().min(1),
-  notes: z.string(),
-  // default([]) lets entries be added to persisted follow-ups later without a migration.
-  entries: z.array(FollowUpEntrySchema).default([]),
-  createdAt: z.number(),
-  nextFollowUpDay: z.string().optional(),
-  isResolved: z.boolean(),
-  resolvedAt: z.number().optional(),
-});
-
-const IdeaEntrySchema = z.object({
-  id: z.string().min(1),
-  createdAt: z.number(),
-  text: z.string(),
-});
-
-const IdeaVerdictSchema = z.object({
-  result: z.enum(['validated', 'invalidated', 'partial']),
-  text: z.string().optional(),
-  closedAt: z.number(),
-});
-
-const IdeaStatusSchema = z.enum(['open', 'done', 'discarded', 'converted', 'incubating', 'closed']);
-
-export const IdeaSchema = z
-  .object({
-    id: z.string().min(1),
-    title: z.string().trim().min(1),
-    notes: z.string(),
-    createdAt: z.number(),
-    convertedAt: z.number().optional(),
-    convertedTaskId: z.string().optional(),
-    // 旧数据没有 status：catch 兜底非法值，transform 按 convertedAt 派生缺失值。
-    status: IdeaStatusSchema.optional().catch(undefined),
-    projectId: z.string().optional(),
-    validationGoal: z.string().optional(),
-    timeline: z.array(IdeaEntrySchema).optional(),
-    verdict: IdeaVerdictSchema.optional(),
-    incubatedAt: z.number().optional(),
-    resolvedAt: z.number().optional(),
-  })
-  .transform(
-    (idea): Idea => ({
-      ...idea,
-      status: idea.status ?? (idea.convertedAt !== undefined ? 'converted' : 'open'),
-    }),
-  );
-
-const AiProviderSchema = z.object({
-  id: z.string(),
-  registryId: z.string(),
-  apiKeyEncrypted: z.string(),
-  hasApiKey: z.boolean().optional(),
-  baseUrl: z.string().optional(),
-  model: z.string(),
-  isDefault: z.boolean(),
-});
-
-const SettingsSchema = z.object({
-  userName: z.string(),
-  avatar: z.string().nullable(),
-  theme: z.enum(['light', 'dark', 'system']),
-  aiProviders: z.array(AiProviderSchema),
-  aiPrompt: z.string(),
-  autoAiAnalyzeOnFinishDay: z.boolean(),
-  // Defaults backfill legacy persisted settings that predate idle auto-pause.
-  idlePauseEnabled: z.boolean().default(true),
-  idlePauseMinutes: z.number().default(5),
-});
-
-const ActiveTimerSchema = z.object({
-  taskId: z.string(),
-  startedAt: z.number(),
-  accumulatedMs: z.number(),
-  isPaused: z.boolean(),
-  pausedAt: z.number().optional(),
-  sessionStartedAt: z.number().optional(),
-  autoPausedBy: z.enum(['sleep', 'idle']).optional(),
-  mode: z.enum(['free', 'pomodoro']).optional(),
-  phase: z.enum(['focus', 'break']).optional(),
-  phaseStartedAt: z.number().optional(),
-  phaseAccumulatedMs: z.number().optional(),
-  phaseDurationMs: z.number().optional(),
-  cyclesCompleted: z.number().int().min(0).optional(),
-});
-
-const ProjectSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  icon: z.string().optional(),
-  isArchived: z.boolean(),
-  primaryColor: z.string().optional(),
-});
-
-const TagSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  color: z.string().optional(),
-});
-
-export const AppDataSchema = z.object({
-  version: z.literal(1),
-  tasks: z.record(z.string(), TaskSchema),
-  projects: z.record(z.string(), ProjectSchema),
-  tags: z.record(z.string(), TagSchema),
-  timeTracking: z.unknown(),
-  notes: z.unknown(),
-  planner: z.unknown(),
-  metric: z.unknown(),
-  boards: z.unknown(),
-  misc: z.record(z.string(), z.unknown()),
-  // Default backfills data.json files written before the FollowUp module existed.
-  followUps: z.record(z.string(), FollowUpSchema).default({}),
-  // Default backfills data.json files written before the Idea module existed.
-  ideas: z.record(z.string(), IdeaSchema).default({}),
-  settings: SettingsSchema,
-  activeTimer: ActiveTimerSchema.nullable(),
-});
-
 export const TaskDeleteReqSchema = z.object({ id: z.string().min(1) });
 
 export const FollowUpDeleteReqSchema = z.object({ id: z.string().min(1) });
 
 export const IdeaDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * ideaUpsert 收紧后的编辑形状：只剩非状态字段。
+ *
+ * 状态与一切转移结果（status/convertedAt/convertedTaskId/projectId/verdict/
+ * incubatedAt/resolvedAt）都不在这里——它们只能由下面的意图命令写入。这正是
+ * ADR-0003 想要的：读契约的人不必再自己推断"哪些字段能改"。
+ *
+ * 注意这是**请求** schema，不是持久化 schema：data.json 里的想法仍按完整的
+ * IdeaSchema 校验，格式不变。
+ */
+export const IdeaEditSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1),
+  notes: z.string(),
+  createdAt: z.number(),
+  validationGoal: z.string().optional(),
+  timeline: z.array(IdeaEntrySchema).optional(),
+});
+export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
+
+// ---------------------------------------------------------------------------
+// 想法的意图命令
+//
+// 写契约不再说"任何形状的想法都能 upsert"，而是把领域语言（完成/废弃/重新打开/
+// 转为任务/升级为项目/给出结论）直接说成通道。终态规则因此从"需要被校验"变成
+// "契约里根本不存在这个操作"——主进程侧的守卫只对下面这组命令生效。
+// ---------------------------------------------------------------------------
+
+/** 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。 */
+export type IdeaCommandRejection = { ok: false; error: string };
+
+export const IdeaIdReqSchema = z.object({ id: z.string().min(1) });
+export type IdeaIdReq = z.infer<typeof IdeaIdReqSchema>;
+
+export const IdeaConvertToTaskReqSchema = z.object({
+  id: z.string().min(1),
+  /** 覆盖转换后任务的标题；缺省沿用想法标题。 */
+  title: z.string().trim().min(1).optional(),
+});
+export type IdeaConvertToTaskReq = z.infer<typeof IdeaConvertToTaskReqSchema>;
+
+export const IdeaUpgradeToProjectReqSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().trim().min(1).max(100),
+  icon: z.string().optional(),
+  primaryColor: z.string().optional(),
+  /** 验证目标：怎么算验证成功（CONTEXT.md 的"验证目标"）。 */
+  validationGoal: z.string().optional(),
+});
+export type IdeaUpgradeToProjectReq = z.infer<typeof IdeaUpgradeToProjectReqSchema>;
+
+export const IdeaCloseWithVerdictReqSchema = z.object({
+  id: z.string().min(1),
+  result: z.enum(['validated', 'invalidated', 'partial']),
+  text: z.string().optional(),
+});
+export type IdeaCloseWithVerdictReq = z.infer<typeof IdeaCloseWithVerdictReqSchema>;
 
 export const OrderSetReqSchema = z.object({
   viewKey: z.string().min(1),
@@ -457,6 +362,28 @@ export type ChatEvent =
   | { channel: typeof Ipc.chatDone; payload: ChatDoneEvent }
   | { channel: typeof Ipc.chatError; payload: ChatErrorEvent };
 
+/**
+ * 想法命令的返回值。领域拒绝（如对已闭环的想法执行 reopen）走 ok:false 分支，
+ * 系统错误继续 throw —— 与 importRun/aiTestProvider 的既有惯例一致。
+ */
+export type IdeaCommandResult = { ok: true; data: AppData } | IdeaCommandRejection;
+
+/** 转为任务额外带回生成的任务：渲染进程据此高亮/跳转，无需再猜 id。 */
+export type IdeaConvertResult = { ok: true; data: AppData; taskId: string } | IdeaCommandRejection;
+
+/** 升级为项目额外带回新建的项目：原子转换的另一半，调用方需要它的 id。 */
+export type IdeaUpgradeResult =
+  | { ok: true; data: AppData; projectId: string }
+  | IdeaCommandRejection;
+
+/**
+ * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
+ * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
+ */
+export type TimingStopResult =
+  | { ok: true; data: AppData; settledMs: number }
+  | { ok: false; error: 'NO_ACTIVE_TIMER' | 'TASK_NOT_FOUND' };
+
 // Single source of truth for invoke channels: channel name + request schema +
 // response type. Adding an entry here forces both ends to implement it at
 // compile time (IpcInvokeHandlers in main, RendererApi in preload).
@@ -482,15 +409,55 @@ export const IpcInvokeContract = {
     req: FollowUpDeleteReqSchema,
     res: null as unknown as AppData,
   },
+  followUpResolve: {
+    ch: Ipc.followUpResolve,
+    req: FollowUpDeleteReqSchema,
+    res: null as unknown as AppData | null,
+  },
+  followUpReopen: {
+    ch: Ipc.followUpReopen,
+    req: FollowUpDeleteReqSchema,
+    res: null as unknown as AppData | null,
+  },
   ideaUpsert: {
     ch: Ipc.ideaUpsert,
-    req: IdeaSchema,
+    req: IdeaEditSchema,
     res: null as unknown as AppData,
   },
   ideaDelete: {
     ch: Ipc.ideaDelete,
     req: IdeaDeleteReqSchema,
     res: null as unknown as AppData,
+  },
+  ideaComplete: {
+    ch: Ipc.ideaComplete,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaDiscard: {
+    ch: Ipc.ideaDiscard,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaReopen: {
+    ch: Ipc.ideaReopen,
+    req: IdeaIdReqSchema,
+    res: null as unknown as IdeaCommandResult,
+  },
+  ideaConvertToTask: {
+    ch: Ipc.ideaConvertToTask,
+    req: IdeaConvertToTaskReqSchema,
+    res: null as unknown as IdeaConvertResult,
+  },
+  ideaUpgradeToProject: {
+    ch: Ipc.ideaUpgradeToProject,
+    req: IdeaUpgradeToProjectReqSchema,
+    res: null as unknown as IdeaUpgradeResult,
+  },
+  ideaCloseWithVerdict: {
+    ch: Ipc.ideaCloseWithVerdict,
+    req: IdeaCloseWithVerdictReqSchema,
+    res: null as unknown as IdeaCommandResult,
   },
   orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
   projectCreate: {
@@ -518,6 +485,7 @@ export const IpcInvokeContract = {
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
+  timingStop: { ch: Ipc.timingStop, res: null as unknown as TimingStopResult },
   importRun: { ch: Ipc.importRun, res: null as unknown as ImportRunResult },
   exportMarkdown: {
     ch: Ipc.exportMarkdown,
@@ -635,5 +603,3 @@ export function maskDataForRenderer(data: AppData): AppData {
     },
   };
 }
-
-export type { AppData, AppSettings, FollowUp, FollowUpEntry, Idea, Task };

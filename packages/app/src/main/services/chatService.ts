@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { Agent } from '@earendil-works/pi-agent-core';
-import type { AiProviderConfig, AppData, ChatSession } from '@tiny-schedule/shared';
+import type { AiProviderConfig, ChatSession } from '@tiny-schedule/shared';
+import { localDate } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
-import { buildChatTools, CHAT_SYSTEM_PROMPT } from './chatAgentTools';
-import { buildChatModel, type ChatModel, createChatStreamFn } from './chatProvider';
-import { getProviderDef } from './providers';
+import { buildChatModel, type ChatModel, createChatStreamFn } from '../infra/ai/chatProvider';
+import { getProviderDef } from '../infra/ai/providers';
+import type { DataStore } from '../infra/dataStore';
+import { buildChatTools, CHAT_SYSTEM_PROMPT } from './chatTools';
+import type { ProjectService } from './projectService';
+import type { TaskService } from './taskService';
 
 const FIRST_TOKEN_TIMEOUT_MS = 30_000;
 const IDLE_TIMEOUT_MS = 60_000;
@@ -39,7 +43,9 @@ export interface ChatManagerDeps {
   deleteStoredSession: (id: string) => ChatSession[];
   getProviders: () => AiProviderConfig[];
   decryptKey: (encrypted: string) => string;
-  getData: () => AppData;
+  /** Read-only query surface for the agent's tools (ADR-0003: tools read via services). */
+  tasks: TaskService;
+  projects: ProjectService;
   today: () => string;
   sink: ChatEventSink;
   logger: Logger;
@@ -175,10 +181,7 @@ export class ChatAgentManager {
     const cached = this.agents.get(session.id);
     if (cached) return cached;
     const { model, apiKey } = this.resolveProvider(cfg);
-    const tools = buildChatTools(
-      () => this.deps.getData(),
-      () => this.deps.today(),
-    );
+    const tools = buildChatTools(this.deps.tasks, this.deps.projects, this.deps.today);
     const buildAgent = (streamFn: unknown, m: ChatModel) =>
       new Agent({
         initialState: {
@@ -393,4 +396,50 @@ export class ChatAgentManager {
     if (t) clearTimeout(t);
     this.timers.delete(sessionId);
   }
+}
+
+/**
+ * 会话持久化进 misc.chatSessions（与 data.json 的其余部分同一份文档，格式不变）。
+ * 这里是 chat 聚合的写侧：agent 循环与会话落盘同属一个 service，读工具另走
+ * taskService / projectService（ADR-0003）。
+ */
+export function createChatService({
+  store,
+  logger,
+  tasks,
+  projects,
+  decryptKey,
+  sink,
+}: {
+  store: DataStore;
+  logger: Logger;
+  tasks: TaskService;
+  projects: ProjectService;
+  decryptKey: (encrypted: string) => string;
+  sink: ChatEventSink;
+}): ChatAgentManager {
+  return new ChatAgentManager({
+    getSessions: () => (store.get().misc.chatSessions ?? []) as ChatSession[],
+    saveSession: (s) => {
+      store.update((d) => {
+        const list = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== s.id);
+        return { ...d, misc: { ...d.misc, chatSessions: [s, ...list] } };
+      });
+    },
+    deleteStoredSession: (id) => {
+      let next: ChatSession[] = [];
+      store.update((d) => {
+        next = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== id);
+        return { ...d, misc: { ...d.misc, chatSessions: next } };
+      });
+      return next;
+    },
+    getProviders: () => store.get().settings.aiProviders,
+    decryptKey,
+    tasks,
+    projects,
+    today: () => localDate(Date.now()),
+    sink,
+    logger,
+  });
 }

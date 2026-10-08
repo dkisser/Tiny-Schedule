@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { ActiveTimer, Task } from '../src/models';
+import type { ActiveTimer, Task } from '../src/domain/task';
 import {
   addDays,
   advancePomodoroPhase,
@@ -21,7 +21,7 @@ import {
   settleTimer,
   startPomodoroFocus,
   startTimer,
-} from '../src/timer';
+} from '../src/domain/task';
 
 const T0 = 1_785_700_000_000;
 

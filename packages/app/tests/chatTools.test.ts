@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AppData } from '@tiny-schedule/shared';
-import { getSummary, listMeta, queryTasks } from '../src/main/ai/chatTools';
+import { listMeta } from '../src/main/services/projectQueries';
+import { getSummary, queryTasks } from '../src/main/services/taskQueries';
 
 function fixture(): AppData {
   return {

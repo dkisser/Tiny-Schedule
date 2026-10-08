@@ -1,6 +1,7 @@
 import type { IdeaVerdict } from '@tiny-schedule/shared';
 import { useEffect, useState } from 'react';
-import { closeIdeaWithVerdict } from '../lib/ideas';
+import { toast } from 'sonner';
+import { ideaRejectionMessage } from '../lib/ideaRejection';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -16,9 +17,10 @@ const RESULTS: { value: IdeaVerdict['result']; label: string }[] = [
 
 // 验证闭环弹窗。三个触发点：归档项目时、想法详情"给出结论"、"修改结论"。
 // closed 状态下打开即修改结论模式：回填现有 verdict，不显示"暂不确定"。
+// 结论由 ideaCloseWithVerdict 写入，"closed 必须带 verdict"因此无法被绕过。
 export function CloseIdeaDialog() {
   const data = useDataStore((s) => s.data);
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const closeIdeaWithVerdict = useDataStore((s) => s.closeIdeaWithVerdict);
   const ideaId = useUiStore((s) => s.closingIdeaId);
   const setClosingIdea = useUiStore((s) => s.setClosingIdea);
   const [result, setResult] = useState<IdeaVerdict['result']>('validated');
@@ -40,7 +42,11 @@ export function CloseIdeaDialog() {
   if (!idea) return null;
 
   const confirm = async () => {
-    await upsertIdea(closeIdeaWithVerdict(idea, result, text.trim() || undefined));
+    const outcome = await closeIdeaWithVerdict(idea.id, result, text.trim() || undefined);
+    if (!outcome.ok) {
+      toast.error(ideaRejectionMessage(outcome.error ?? ''));
+      return;
+    }
     setClosingIdea(null);
   };
 

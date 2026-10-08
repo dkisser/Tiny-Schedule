@@ -1,6 +1,40 @@
-import type { AppData, AppSettings, FollowUp, Idea, Project, Task } from '@tiny-schedule/shared';
+import type {
+  AppData,
+  AppSettings,
+  FollowUp,
+  Idea,
+  IdeaVerdict,
+  Project,
+  Task,
+} from '@tiny-schedule/shared';
 import { create } from 'zustand';
 import { api } from '../api';
+
+/**
+ * Outcome of an idea intent command: a domain rejection is a normal answer,
+ * not an exception, so it travels back to the UI as data (ADR-0003).
+ */
+export interface IdeaCommandOutcome {
+  ok: boolean;
+  /** Present only on rejection: the stable code the main process decided on. */
+  error?: string;
+}
+
+const ACCEPTED: IdeaCommandOutcome = { ok: true };
+
+/**
+ * Run an idea intent command and adopt its dataset. The main process is the
+ * only place that decides whether a transition is legal, so the verdict is
+ * forwarded rather than second-guessed here.
+ */
+async function adoptIdeaCommand(
+  promise: Promise<{ ok: true; data: AppData } | { ok: false; error: string }>,
+): Promise<IdeaCommandOutcome> {
+  const result = await promise;
+  if (!result.ok) return { ok: false, error: result.error };
+  useDataStore.setState({ data: result.data });
+  return ACCEPTED;
+}
 
 // Renderer-side provider draft carries plain-text apiKey for editing
 export interface ProviderDraft {
@@ -21,8 +55,31 @@ interface DataState {
   deleteTask: (id: string) => Promise<void>;
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
+  /** 字段编辑（标题/备注/验证目标/演进日志）；状态只能走意图命令。 */
   upsertIdea: (idea: Idea) => Promise<void>;
   deleteIdea: (id: string) => Promise<void>;
+  /**
+   * 想法的写路径是意图命令而非 upsert（ADR-0003）：终态规则由主进程强制，
+   * 领域拒绝以 { ok:false, error } 返回，调用方据此提示而不必自己判断合法性。
+   */
+  completeIdea: (id: string) => Promise<IdeaCommandOutcome>;
+  discardIdea: (id: string) => Promise<IdeaCommandOutcome>;
+  reopenIdea: (id: string) => Promise<IdeaCommandOutcome>;
+  convertIdeaToTask: (id: string, title?: string) => Promise<IdeaCommandOutcome>;
+  upgradeIdeaToProject: (req: {
+    id: string;
+    title: string;
+    icon?: string;
+    primaryColor?: string;
+    validationGoal?: string;
+  }) => Promise<IdeaCommandOutcome>;
+  closeIdeaWithVerdict: (
+    id: string,
+    result: IdeaVerdict['result'],
+    text?: string,
+  ) => Promise<IdeaCommandOutcome>;
+  resolveFollowUp: (id: string) => Promise<void>;
+  reopenFollowUp: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   // Returns the newly created project (callers like 想法升级为项目 need its id).
   createProject: (title: string) => Promise<Project | null>;
@@ -68,11 +125,38 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   upsertIdea: async (idea) => {
-    const data = await api().ideaUpsert(idea);
+    // The write contract carries non-status fields only (ADR-0003), so a caller
+    // holding a full Idea cannot smuggle a status change through this path.
+    const data = await api().ideaUpsert({
+      id: idea.id,
+      title: idea.title,
+      notes: idea.notes,
+      createdAt: idea.createdAt,
+      validationGoal: idea.validationGoal,
+      timeline: idea.timeline,
+    });
     set({ data });
   },
   deleteIdea: async (id) => {
     const data = await api().ideaDelete({ id });
+    set({ data });
+  },
+  completeIdea: (id) => adoptIdeaCommand(api().ideaComplete({ id })),
+  discardIdea: (id) => adoptIdeaCommand(api().ideaDiscard({ id })),
+  reopenIdea: (id) => adoptIdeaCommand(api().ideaReopen({ id })),
+  convertIdeaToTask: (id, title) =>
+    adoptIdeaCommand(api().ideaConvertToTask({ id, ...(title ? { title } : {}) })),
+  upgradeIdeaToProject: (req) => adoptIdeaCommand(api().ideaUpgradeToProject(req)),
+  closeIdeaWithVerdict: (id, result, text) =>
+    adoptIdeaCommand(api().ideaCloseWithVerdict({ id, result, ...(text ? { text } : {}) })),
+  resolveFollowUp: async (id) => {
+    // The transition is applied in the main process; the returned dataset is
+    // the whole answer, so the renderer never composes isResolved itself.
+    const data = await api().followUpResolve({ id });
+    set({ data });
+  },
+  reopenFollowUp: async (id) => {
+    const data = await api().followUpReopen({ id });
     set({ data });
   },
   setTaskOrder: (viewKey, ids) => {

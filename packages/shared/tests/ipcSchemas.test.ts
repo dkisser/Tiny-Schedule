@@ -6,9 +6,9 @@ import {
   ChatSessionDeleteReqSchema,
   ChatStatusEventSchema,
   ChatStopReqSchema,
-  IdeaSchema,
   Ipc,
-} from '../src/ipc';
+} from '../src/contract/ipc';
+import { IdeaSchema } from '../src/domain/idea';
 
 describe('chat IPC schemas', () => {
   test('chat channels exist', () => {

@@ -1,7 +1,7 @@
 import type { AgentTool } from '@earendil-works/pi-agent-core';
-import type { AppData } from '@tiny-schedule/shared';
 import { Type } from 'typebox';
-import { getSummary, listMeta, queryTasks } from './chatTools';
+import type { ProjectService } from './projectService';
+import type { TaskService } from './taskService';
 
 export const CHAT_SYSTEM_PROMPT = `你是 Tiny Schedule 的效率分析助手。你可以用工具查询用户的任务、耗时与项目/标签数据，然后基于真实数据回答问题。
 规则：
@@ -36,14 +36,23 @@ const summaryParams = Type.Object({
 
 const listMetaParams = Type.Object({});
 
-export function buildChatTools(getData: () => AppData, today: () => string): AgentTool[] {
+/**
+ * Agent 的三个工具目前全部只读，但它们经由 services 取数而不是直接摸 DataStore
+ * （ADR-0003）：未来给 agent 加写工具时，结构上不存在绕过守卫的调法——写工具必须
+ * 落到 service 方法上，而 service 是不变量的唯一强制点。
+ */
+export function buildChatTools(
+  tasks: TaskService,
+  projects: ProjectService,
+  today: () => string,
+): AgentTool[] {
   const query: AgentTool<typeof queryTasksParams> = {
     name: 'queryTasks',
     label: '查询任务',
     description:
       '按条件查询任务列表及耗时。参数：from/to（工作/完成时间范围）、dueFrom/dueTo（截止日范围）、doneFrom/doneTo（完成日范围，查"某天完成了什么"用它）、projectId、isDone。日期均为 YYYY-MM-DD。',
     parameters: queryTasksParams,
-    execute: async (_toolCallId, params) => json(queryTasks(getData(), params)),
+    execute: async (_toolCallId, params) => json(tasks.queryTasks(params)),
   };
 
   const summary: AgentTool<typeof summaryParams> = {
@@ -53,7 +62,7 @@ export function buildChatTools(getData: () => AppData, today: () => string): Age
       '聚合统计（任务数、完成数、总耗时、按项目/标签分布）。scope：today/week/project；project 范围必须提供 projectId。',
     parameters: summaryParams,
     execute: async (_toolCallId, params) =>
-      json(getSummary(getData(), { ...params, date: params.date ?? today() })),
+      json(tasks.getSummary({ ...params, date: params.date ?? today() })),
   };
 
   const meta: AgentTool<typeof listMetaParams> = {
@@ -61,7 +70,7 @@ export function buildChatTools(getData: () => AppData, today: () => string): Age
     label: '项目与标签',
     description: '列出所有项目与标签。',
     parameters: listMetaParams,
-    execute: async () => json(listMeta(getData())),
+    execute: async () => json(projects.listMeta()),
   };
 
   return [query, summary, meta];
