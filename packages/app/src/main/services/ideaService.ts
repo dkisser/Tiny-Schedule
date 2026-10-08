@@ -4,6 +4,7 @@ import {
   closeIdeaWithVerdict,
   completeIdea,
   discardIdea,
+  IDEA_CLEARABLE_FIELDS,
   type Idea,
   type IdeaCommandResult,
   type IdeaConvertResult,
@@ -110,26 +111,32 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       // undefined would make optional fields unclearable, and the only clear
       // path in the UI (emptying the 验证目标 input) sends exactly that.
       const changes: Record<string, unknown> = {};
+      const cleared = new Set<string>();
       for (const [key, value] of Object.entries(patch)) {
-        if (value === undefined || value === null) continue;
+        if (value === undefined) continue;
+        // `null` means "clear": the key is dropped below rather than written as
+        // null, since the domain type has no null. Driven by the registry so a
+        // newly nullable field cannot be added to the schema and then silently
+        // become unclearable.
+        if (value === null) {
+          if ((IDEA_CLEARABLE_FIELDS as readonly string[]).includes(key)) cleared.add(key);
+          continue;
+        }
         changes[key] = value;
       }
       const next = store.update((d) => {
         const stored = d.ideas[patch.id];
-        const merged: Idea = stored
+        let merged: Idea = stored
           ? { ...stored, ...changes, id: patch.id }
           : ({ ...changes, status: 'open' as const } as Idea);
-        const idea: Idea =
-          patch.validationGoal === null
-            ? // Drop the key outright rather than writing undefined: a stored
-              // idea should genuinely have no validation goal.
-              (({ validationGoal: _cleared, ...rest }) => rest)(
-                merged as Idea & {
-                  validationGoal?: string;
-                },
-              )
-            : merged;
-        return { ...d, ideas: { ...d.ideas, [idea.id]: idea } };
+        for (const key of cleared) {
+          // Drop the key outright rather than writing undefined: a stored idea
+          // should genuinely not have the field.
+          const rest: Record<string, unknown> = { ...merged };
+          delete rest[key];
+          merged = rest as unknown as Idea;
+        }
+        return { ...d, ideas: { ...d.ideas, [merged.id]: merged } };
       });
       logger.info({ action: 'idea:upsert', ideaId: patch.id, title: patch.title });
       return next;

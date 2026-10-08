@@ -104,6 +104,15 @@ export const IdeaEditSchema = z.object({
 });
 export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
 
+/**
+ * IdeaEditSchema 里可被显式置 null 清空的字段。
+ *
+ * 新增可空字段时**必须**同时登记在这里：主进程的 edit() 把 null 一律当作
+ * "清空"跳过合并，再按这张表把键整个摘掉。漏登记的话该字段会静默变成
+ * 不可清空——而"清空验证目标"的 UI 路径恰恰就是发一个 null。
+ */
+export const IDEA_CLEARABLE_FIELDS = ['validationGoal'] as const;
+
 // ---------------------------------------------------------------------------
 // 想法的意图命令
 //
@@ -399,6 +408,14 @@ export type IdeaUpgradeResult =
   | IdeaCommandRejection;
 
 /**
+ * 停止计时的拒绝码，各自对应一件不同的事，调用方要能分开：
+ * - NO_ACTIVE_TIMER：本来就没有在计时。
+ * - TIMER_MISMATCH：主进程跑的不是调用方指定的那次（渲染进程的换表与心跳
+ *   sync() 之间发生了竞态）。此时**有**计时器在跑，所以复用 NO_ACTIVE_TIMER
+ *   会让调用方以为无事发生，从而错过那次没被结算的时长。
+ * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
+ */
+/**
  * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
  * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
  *
@@ -414,14 +431,6 @@ export type TimingStopResult =
       data: AppData;
     };
 
-/**
- * 停止计时的拒绝码，各自对应一件不同的事，调用方要能分开：
- * - NO_ACTIVE_TIMER：本来就没有在计时。
- * - TIMER_MISMATCH：主进程跑的不是调用方指定的那次（渲染进程的换表与心跳
- *   sync() 之间发生了竞态）。此时**有**计时器在跑，所以复用 NO_ACTIVE_TIMER
- *   会让调用方以为无事发生，从而错过那次没被结算的时长。
- * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
- */
 export const TimingStopReqSchema = z.object({
   /**
    * 调用方要结算的那次计时所属的任务。带上它，主进程就只会结算**这一次**：

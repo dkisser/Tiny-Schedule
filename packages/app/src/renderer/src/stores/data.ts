@@ -35,7 +35,7 @@ export interface FollowUpCommandOutcome {
 export type IdeaPatch = Omit<Idea, 'validationGoal'> & { validationGoal?: string | null };
 
 /**
- * Run an idea intent command and adopt its dataset. The main process is the
+ * Run an intent command (idea or follow-up) and adopt its dataset. The main process is the
  * only place that decides whether a transition is legal, so the verdict is
  * forwarded rather than second-guessed here.
  *
@@ -59,9 +59,6 @@ async function adoptCommand(
   useDataStore.setState({ data: result.data });
   return ACCEPTED;
 }
-
-/** Idea intent commands all funnel through here, so they share the handling. */
-const adoptIdeaCommand = adoptCommand;
 
 // Renderer-side provider draft carries plain-text apiKey for editing
 export interface ProviderDraft {
@@ -170,14 +167,14 @@ export const useDataStore = create<DataState>((set, get) => ({
     const data = await api().ideaDelete({ id });
     set({ data });
   },
-  completeIdea: (id) => adoptIdeaCommand(api().ideaComplete({ id })),
-  discardIdea: (id) => adoptIdeaCommand(api().ideaDiscard({ id })),
-  reopenIdea: (id) => adoptIdeaCommand(api().ideaReopen({ id })),
+  completeIdea: (id) => adoptCommand(api().ideaComplete({ id })),
+  discardIdea: (id) => adoptCommand(api().ideaDiscard({ id })),
+  reopenIdea: (id) => adoptCommand(api().ideaReopen({ id })),
   convertIdeaToTask: (id, title) =>
-    adoptIdeaCommand(api().ideaConvertToTask({ id, ...(title ? { title } : {}) })),
-  upgradeIdeaToProject: (req) => adoptIdeaCommand(api().ideaUpgradeToProject(req)),
+    adoptCommand(api().ideaConvertToTask({ id, ...(title ? { title } : {}) })),
+  upgradeIdeaToProject: (req) => adoptCommand(api().ideaUpgradeToProject(req)),
   closeIdeaWithVerdict: (id, result, text) =>
-    adoptIdeaCommand(api().ideaCloseWithVerdict({ id, result, ...(text ? { text } : {}) })),
+    adoptCommand(api().ideaCloseWithVerdict({ id, result, ...(text ? { text } : {}) })),
   // Same shape as the idea commands: the main process applies the transition
   // and returns the dataset, and a rejection comes back as data so the caller
   // can toast it instead of firing a void-ed promise into the void.
