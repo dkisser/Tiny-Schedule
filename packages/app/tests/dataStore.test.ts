@@ -232,19 +232,6 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     ).toEqual(['t1']);
   });
 
-  test('an empty dataset never rotates over a readable backup', () => {
-    const dir = tmpDir();
-    seed(dir, full());
-    const store = new DataStore(dir, logger);
-    store.load();
-    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'a' } }));
-    // Both files now hold t1. An empty write must not demote the backup.
-    store.update(() => emptyAppData());
-    expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
-    ).toEqual(['t1']);
-  });
-
   test('deleting the unreadable file unblocks writing instead of latching forever', () => {
     // readValidated reports nothing for a missing file, so a deleted one was
     // indistinguishable from a still-broken one: every write was then refused

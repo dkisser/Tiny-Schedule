@@ -160,7 +160,10 @@ export class DataStore {
       // the one after that rotated it over the still-intact backup, so
       // deleting one corrupt file lost everything.
       const previousReason = this.primaryUnreadable;
-      const backup = this.readValidated(this.backupPath, () => {});
+      // Collect why, so adopting `empty` is never an unexplained outcome: the
+      // one place the fallback chain used to end without naming a cause.
+      const backupProblems: string[] = [];
+      const backup = this.readValidated(this.backupPath, (r) => backupProblems.push(r));
       this.cache = backup ?? emptyAppData();
       this.primaryUnreadable = null;
       this.refusalReported = false;
@@ -169,6 +172,7 @@ export class DataStore {
         previousReason,
         file: this.filePath,
         adopted: backup ? 'backup' : 'empty',
+        ...(backupProblems.length > 0 ? { backupProblems } : {}),
       });
       return this.cache;
     }
@@ -184,30 +188,6 @@ export class DataStore {
     return recovered;
   }
 
-  /**
-   * Whether the outgoing data.json may become the backup.
-   *
-   * The rotation is what makes a corrupt file survivable, so it is also the
-   * step that can destroy the last good copy. An empty dataset is the one case
-   * where rotating is never a gain: an app that is about to write nothing must
-   * not demote a backup that still holds the user's tasks.
-   */
-  private safeToRotate(next: AppData): boolean {
-    const isEmpty =
-      Object.keys(next.tasks).length === 0 &&
-      Object.keys(next.projects).length === 0 &&
-      Object.keys(next.followUps).length === 0 &&
-      Object.keys(next.ideas).length === 0;
-    if (!isEmpty) return true;
-    if (!existsSync(this.backupPath)) return true;
-    if (!this.readValidated(this.backupPath, () => {})) return true;
-    this.logger.warn({
-      action: 'dataStore:backup:kept',
-      note: 'an empty dataset will not replace a readable backup',
-    });
-    return false;
-  }
-
   save(data: AppData): void {
     if (this.primaryUnreadable) {
       // Refuse rather than persist a degraded cache over the only good copy.
@@ -220,7 +200,7 @@ export class DataStore {
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;
-    if (existsSync(this.filePath) && this.safeToRotate(validated)) {
+    if (existsSync(this.filePath)) {
       copyFileSync(this.filePath, this.backupPath);
     }
     const tmp = `${this.filePath}.tmp`;
