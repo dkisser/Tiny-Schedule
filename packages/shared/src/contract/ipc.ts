@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import type { AppData, ChatSession } from '../domain/appData';
 import { FollowUpSchema } from '../domain/followUp';
-import { IdeaEntrySchema, IdeaSchema } from '../domain/idea';
 import { PROJECT_TITLE_MAX_LENGTH } from '../domain/project';
 import { ActiveTimerSchema, TaskSchema } from '../domain/task';
 

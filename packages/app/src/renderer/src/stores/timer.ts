@@ -189,10 +189,19 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // main keeping a timer the UI shows as stopped is the worse of the two
     // failures. Only an explicit decline turns the clear off.
     let cleared = true;
+    let settled = false;
     try {
       ({ cleared } = await settleOnMain(cur?.taskId));
+      settled = true;
     } finally {
-      if (cleared) await sync(null);
+      if (cleared) {
+        // Best effort: a failing clear must not replace the settle error that
+        // explains why we are here. With no settle error to preserve, it is
+        // the only failure there is, so it propagates like any other.
+        await sync(null).catch((err: unknown) => {
+          if (settled) throw err;
+        });
+      }
     }
   },
 

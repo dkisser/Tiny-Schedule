@@ -114,7 +114,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       // A partial edit is a *merge*, so only the keys the caller actually set
       // may be applied. `{ ...stored, ...patch }` would let an explicitly
       // present-but-undefined optional key (which is what zod hands back for
-      // `timeline: undefined`) erase the stored value — the schema was
+      // `validationGoal: undefined`) erase the stored value — the schema was
       // deliberately loosened so callers could send partial edits, and every
       // one of them would have been silently destructive.
       //
