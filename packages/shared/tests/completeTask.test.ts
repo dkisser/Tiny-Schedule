@@ -6,6 +6,7 @@ import {
   completeTask,
   dropStaleTiming,
   POMODORO_BREAK_MS,
+  POMODORO_CYCLES_PER_SET,
   POMODORO_FOCUS_MS,
   pauseTimer,
   startPomodoroFocus,
@@ -334,5 +335,59 @@ describe('dropStaleTiming', () => {
   test('leaves no-timer data alone', () => {
     const d = dataOf(task());
     expect(dropStaleTiming(d)).toBe(d);
+  });
+});
+
+describe('advancePomodoroPhase — a paused timer bills no wall clock', () => {
+  const focus = (over = {}) => ({
+    taskId: 't1',
+    startedAt: T0,
+    accumulatedMs: 0,
+    isPaused: false,
+    sessionStartedAt: T0,
+    mode: 'pomodoro' as const,
+    phase: 'focus' as const,
+    phaseStartedAt: T0,
+    phaseAccumulatedMs: 0,
+    phaseDurationMs: POMODORO_FOCUS_MS,
+    cyclesCompleted: 0,
+    ...over,
+  });
+
+  test('a normal advance folds the elapsed focus segment', () => {
+    const r = advancePomodoroPhase(focus(), T0 + 300_000);
+    expect(r.next.focusAccumulatedMs).toBe(300_000);
+  });
+
+  test('a paused advance adds nothing, in either branch', () => {
+    // The sleep/idle watcher rebases phaseStartedAt to the pause instant, so
+    // the delta from there measures absence, not work. The setComplete branch
+    // has two further clocks; accumulatedMs is what the worklog and the
+    // settled TimeEntry read, so an unguarded pause inflated the whole
+    // session by the length of the gap.
+    const paused = focus({
+      isPaused: true,
+      pausedAt: T0 + 300_000,
+      phaseStartedAt: T0 + 300_000,
+      startedAt: T0 + 300_000,
+      accumulatedMs: 300_000,
+      phaseAccumulatedMs: 300_000,
+      focusAccumulatedMs: 300_000,
+    });
+    const normal = advancePomodoroPhase(paused, T0 + 2 * 3_600_000);
+    expect(normal.next.focusAccumulatedMs).toBe(300_000);
+    expect(normal.next.accumulatedMs).toBe(300_000);
+    // The phase became `break`, so its own clock legitimately restarts.
+    expect(normal.next.phaseAccumulatedMs).toBe(0);
+    expect(normal.next.phase).toBe('break');
+
+    const last = advancePomodoroPhase(
+      { ...paused, cyclesCompleted: POMODORO_CYCLES_PER_SET - 1 },
+      T0 + 2 * 3_600_000,
+    );
+    expect(last.setComplete).toBe(true);
+    expect(last.next.focusAccumulatedMs).toBe(300_000);
+    expect(last.next.accumulatedMs).toBe(300_000);
+    expect(last.next.phaseAccumulatedMs).toBe(300_000);
   });
 });

@@ -155,9 +155,8 @@ export function createTaskService({ store, logger }: ServiceDeps) {
     syncTimer(timer: ActiveTimer | null): { data: AppData; dropped: boolean } {
       if (!timer) {
         // Nothing to clear. Every write re-validates the whole dataset and
-        // copies the backup, and stop() clears unconditionally after settling
-        // — so skipping the no-op keeps a stop at one write instead of two and
-        // stops the 30s heartbeat from rewriting an unchanged file.
+        // copies the backup, and stop() clears after settling — so skipping
+        // the no-op keeps a stop at one write instead of two.
         const current = store.get();
         if (!current.activeTimer) return { data: current, dropped: false };
         return { data: store.update((d) => ({ ...d, activeTimer: null })), dropped: false };

@@ -1,4 +1,4 @@
-import { type FollowUp, newFollowUpId } from '@tiny-schedule/shared';
+import { type FollowUp, type FollowUpEdit, newFollowUpId } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import { CheckCircle2, ChevronLeft, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -13,6 +13,11 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Markdown } from './ui/markdown';
 import { Textarea } from './ui/textarea';
+
+/** A field edit, where an explicit null clears and undefined leaves alone. */
+type FollowUpEditPatch = Omit<Partial<FollowUpEdit>, 'nextFollowUpDay'> & {
+  nextFollowUpDay?: string | null;
+};
 
 function formatEntryAt(at: number): string {
   const d = new Date(at);
@@ -39,7 +44,10 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
     }
   });
 
-  const save = (patch: Partial<FollowUp>) => void upsertFollowUp({ ...followUp, ...patch });
+  // The patch may null a field out; the store re-picks only the editable keys,
+  // so a null never becomes `undefined` on the wire.
+  const save = (patch: FollowUpEditPatch) =>
+    void upsertFollowUp({ ...followUp, ...patch } as FollowUpEdit);
 
   const addEntry = () => {
     const text = entryDraft.trim();
@@ -73,7 +81,7 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
         <Input
           type="date"
           value={followUp.nextFollowUpDay ?? ''}
-          onChange={(e) => save({ nextFollowUpDay: e.target.value || undefined })}
+          onChange={(e) => save({ nextFollowUpDay: e.target.value || null })}
         />
       </div>
 

@@ -50,7 +50,11 @@ export class DataStore {
     const problems: string[] = [];
     const read = (path: string) => this.readValidated(path, (r) => problems.push(r));
     const primary = read(this.filePath);
-    this.primaryUnreadable = problems[0] ?? null;
+    // Latch only when the primary genuinely failed to yield a dataset. A file
+    // that recovered via quarantine also pushes a problem — and latching on
+    // that made every save refuse, leaving the app permanently read-only,
+    // which is a worse failure than the one it was guarding against.
+    this.primaryUnreadable = primary ? null : (problems[0] ?? null);
     if (primary) {
       this.cache = primary;
     } else {
@@ -88,18 +92,28 @@ export class DataStore {
 
   save(data: AppData): void {
     if (this.primaryUnreadable) {
-      // Refuse rather than persist a degraded cache over the only good copy.
-      // Without this, the first ordinary write — a settings change, finishDay,
-      // the 30s heartbeat — rewrites data.json from a fallback load and the
-      // second one overwrites the backup, leaving nothing recoverable. The
-      // data stays on disk exactly as the user left it.
-      this.logger.error({
-        action: 'dataStore:save:refused',
-        reason: this.primaryUnreadable,
-        file: this.filePath,
-        note: 'not written; the unreadable data.json has been left in place',
-      });
-      return;
+      // The flag is only ever cleared in load(), which runs once at startup,
+      // so a user who repairs data.json by hand would still be locked out.
+      // Re-read before refusing: if the file now yields a dataset, the
+      // problem is gone and the write proceeds.
+      const problems: string[] = [];
+      if (this.readValidated(this.filePath, (r) => problems.push(r))) {
+        this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
+        this.primaryUnreadable = null;
+      } else {
+        // Refuse rather than persist a degraded cache over the only good copy.
+        // Without this, the first ordinary write — a settings change,
+        // finishDay, the 30s heartbeat — rewrites data.json from a fallback
+        // load and the second overwrites the backup, leaving nothing
+        // recoverable. The data stays on disk exactly as the user left it.
+        this.logger.error({
+          action: 'dataStore:save:refused',
+          reason: this.primaryUnreadable,
+          file: this.filePath,
+          note: 'not written; the unreadable data.json has been left in place',
+        });
+        return;
+      }
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;

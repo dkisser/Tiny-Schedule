@@ -1,5 +1,6 @@
 import {
   type AppData,
+  FOLLOW_UP_CLEARABLE_FIELDS,
   type FollowUp,
   type FollowUpCommandResult,
   type FollowUpEdit,
@@ -46,17 +47,31 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
       // schema strips them at the wire, but the enforcement point is here, so
       // it does not rely on that.
       const changes: Record<string, unknown> = {};
+      const cleared = new Set<string>();
       for (const key of EDITABLE_FIELDS) {
         const value = (patch as Record<string, unknown>)[key];
-        if (value !== undefined) changes[key] = value;
+        if (value === undefined) continue; // "leave this alone"
+        // `null` means "clear", and the key is dropped below rather than
+        // written as null — the domain type has no null. Driven by the
+        // registry so a newly nullable field cannot become unclearable.
+        if (value === null) {
+          if ((FOLLOW_UP_CLEARABLE_FIELDS as readonly string[]).includes(key)) cleared.add(key);
+          continue;
+        }
+        changes[key] = value;
       }
       // A new follow-up is 等待中 by definition; nothing else supplies the
       // state fields.
-      const merged = (
+      let merged = (
         stored
           ? { ...stored, ...changes, id: patch.id }
           : { ...changes, id: patch.id, isResolved: false, entries: [] }
       ) as FollowUp;
+      for (const key of cleared) {
+        const rest: Record<string, unknown> = { ...merged };
+        delete rest[key];
+        merged = rest as unknown as FollowUp;
+      }
       return { ...d, followUps: { ...d.followUps, [patch.id]: merged } };
     });
     logger.info({ action: 'followUp:edit', followUpId: patch.id, title: patch.title });

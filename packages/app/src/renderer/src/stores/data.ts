@@ -102,14 +102,17 @@ interface DataState {
   completeIdea: (id: string) => Promise<IdeaCommandOutcome>;
   discardIdea: (id: string) => Promise<IdeaCommandOutcome>;
   reopenIdea: (id: string) => Promise<IdeaCommandOutcome>;
-  convertIdeaToTask: (id: string, title?: string) => Promise<IdeaCommandOutcome>;
+  convertIdeaToTask: (
+    id: string,
+    title?: string,
+  ) => Promise<IdeaCommandOutcome & { taskId?: string }>;
   upgradeIdeaToProject: (req: {
     id: string;
     title: string;
     icon?: string;
     primaryColor?: string;
     validationGoal?: string;
-  }) => Promise<IdeaCommandOutcome>;
+  }) => Promise<IdeaCommandOutcome & { projectId?: string }>;
   closeIdeaWithVerdict: (
     id: string,
     result: IdeaVerdict['result'],
@@ -118,7 +121,8 @@ interface DataState {
   resolveFollowUp: (id: string) => Promise<FollowUpCommandOutcome>;
   reopenFollowUp: (id: string) => Promise<FollowUpCommandOutcome>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
-  // Returns the newly created project (callers like 想法升级为项目 need its id).
+  // Returns the new project's id — the service mints it, so the renderer no
+  // longer recovers it by diffing the project list.
   createProject: (title: string) => Promise<string>;
   updateProject: (
     id: string,

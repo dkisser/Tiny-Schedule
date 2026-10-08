@@ -6,9 +6,10 @@ import type { ServiceDeps } from './taskService';
  * 设置的写侧唯一入口（ADR-0003）。
  *
  * 设置不属于四个聚合中的任何一个，却有自己的写规则：api key 明文入、密文落盘。
- * 规则住在 handler 层就意味着没有下一个写路径能被结构性地检查到——任何新的
- * 设置通道、agent 工具或自动流程都得重新记得 encryptKey，漏一次就是把明文
- * key 写进 data.json。放进 service 之后，这条规则和其余写路径受同一套约束。
+ * 规则住在 handler 层就意味着每条新写路径都得重新记得 encryptKey——任何新的
+ * 设置通道、agent 工具或自动流程漏一次，就是把明文 key 写进 data.json。放进
+ * service 之后，这条规则只剩一处可以审。（encryptKey 仍是按路径 import 的，
+ * 所以约束的是"要审的地方只有一处"，不是"新调用方无法绕过"。）
  */
 
 export interface SettingsUpdatePatch {

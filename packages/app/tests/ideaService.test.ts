@@ -170,8 +170,9 @@ describe('ideaService.convertToTask', () => {
     const store = {
       get: () => data,
       update: (fn: (c: AppData) => AppData) => {
+        // Parse, as DataStore.save does — see the note on the other doubles.
         Object.assign(data, fn(data));
-        return data;
+        return AppDataSchema.parse(data) as AppData;
       },
     } as unknown as DataStore;
     const service = createIdeaService({ store, logger });

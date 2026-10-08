@@ -324,8 +324,14 @@ export function advancePomodoroPhase(
       // Last focus in this set ended: freeze both clocks at `now`, leave the
       // phase as `focus`, and let the renderer decide whether to start a
       // new set or stop the timer.
-      const phaseAcc = (t.phaseAccumulatedMs ?? 0) + Math.max(0, now - (t.phaseStartedAt ?? now));
-      const segAcc = t.accumulatedMs + Math.max(0, now - t.startedAt);
+      // Same isPaused guard as the focus fold above: this branch has two more
+      // clocks, and accumulatedMs is the one the worklog and the settled
+      // TimeEntry read, so a paused final cycle inflated the whole session by
+      // the length of the absence.
+      const running = t.isPaused ? 0 : 1;
+      const phaseAcc =
+        (t.phaseAccumulatedMs ?? 0) + running * Math.max(0, now - (t.phaseStartedAt ?? now));
+      const segAcc = t.accumulatedMs + running * Math.max(0, now - t.startedAt);
       return {
         next: {
           ...t,

@@ -172,7 +172,20 @@ export const FollowUpIdReqSchema = z.object({ id: z.string().min(1) });
  * resolve/reopen commands, so a write-back of the renderer's snapshot cannot
  * silently undo a 办结 the user already performed.
  */
-export const FollowUpEditSchema = FollowUpSchema.omit({ isResolved: true, resolvedAt: true });
+export const FollowUpEditSchema = FollowUpSchema.omit({
+  isResolved: true,
+  resolvedAt: true,
+  // null clears, undefined leaves alone. The renderer always builds this
+  // payload by hand, so an omitted key is the only way to say "don't touch",
+  // and clearing a date input has to stay expressible.
+  nextFollowUpDay: true,
+}).extend({ nextFollowUpDay: z.string().nullable().optional() });
+
+/**
+ * FollowUpEditSchema fields that may be explicitly nulled to clear them.
+ * Register a newly nullable field here, or it will silently be unclearable.
+ */
+export const FOLLOW_UP_CLEARABLE_FIELDS = ['nextFollowUpDay'] as const;
 // z.input, not z.infer: entries carries a .default([]) so it is required in the
 // *output* type but optional in the request.
 export type FollowUpEdit = z.input<typeof FollowUpEditSchema>;

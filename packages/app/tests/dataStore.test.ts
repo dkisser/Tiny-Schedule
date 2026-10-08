@@ -145,11 +145,22 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     });
     const store = new DataStore(dir, logger);
     store.load();
-    // The primary parsed via quarantine, so it is no longer "unreadable" and
-    // normal writes resume.
-    expect(() =>
-      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } })),
-    ).not.toThrow();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    // Assert the value reached the disk, not merely that update() did not
+    // throw: save() returns void when it refuses, so a not.toThrow() here
+    // passed against the store being permanently read-only.
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('me');
+  });
+
+  test('a repaired data.json unblocks saving without a restart', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    // The user repairs the file by hand while the app is still running.
+    seed(dir, full());
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('fixed');
   });
 
   test('a genuinely unreadable data.json is never overwritten by a fallback load', () => {

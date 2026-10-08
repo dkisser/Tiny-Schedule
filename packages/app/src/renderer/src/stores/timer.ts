@@ -77,6 +77,26 @@ async function settleOnMain(
   return { settledMs: 0, cleared: result.error !== 'TIMER_MISMATCH' };
 }
 
+/**
+ * Settle the session the renderer is switching away from, and report whether
+ * it is safe to persist the new one.
+ *
+ * On TIMER_MISMATCH the main process is running a different session and
+ * deliberately declined to settle it. Writing the new timer over it would
+ * destroy that session's accumulated time with no TimeEntry and no log — the
+ * very outcome the pin exists to prevent. So on a decline we adopt main's
+ * truth locally rather than merely skipping the write: leaving our own `next`
+ * in state would be a lie the 30s heartbeat then faithfully syncs, undoing
+ * the protection thirty seconds later.
+ */
+async function settlePrevious(taskId: string): Promise<boolean> {
+  const { cleared } = await settleOnMain(taskId);
+  if (cleared) return true;
+  const { activeTimer } = useDataStore.getState().data ?? {};
+  useTimerStore.setState({ timer: activeTimer ?? null, now: Date.now() });
+  return false;
+}
+
 export const useTimerStore = create<TimerState>((set, get) => ({
   timer: null,
   now: Date.now(),
@@ -128,14 +148,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // would make the main process settle `next` instead and leave the old
     // task's elapsed time unbilled.
     set({ timer: next, now, phasePendingAdvance: null });
-    // Honour the settle's verdict. On TIMER_MISMATCH main is running a
-    // different session and deliberately left it alone; persisting `next` on
-    // top of it anyway would destroy that session's accumulated time with no
-    // TimeEntry and no log — the very outcome the pin exists to prevent.
-    if (cur) {
-      const { cleared } = await settleOnMain(cur.taskId);
-      if (!cleared) return;
-    }
+    if (cur && !(await settlePrevious(cur.taskId))) return;
     await sync(next);
   },
 
@@ -145,10 +158,7 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) {
-      const { cleared } = await settleOnMain(cur.taskId);
-      if (!cleared) return;
-    }
+    if (cur && !(await settlePrevious(cur.taskId))) return;
     await sync(next);
   },
 

@@ -227,7 +227,7 @@ describe('new command channels dispatch through their real handlers', () => {
     const before = (call('dataLoad') as AppData).ideas.iStatus?.status;
     expect(before).toBe('done');
     call('ideaUpsert', {
-      id: 'i2',
+      id: 'iStatus',
       title: '偷偷改状态',
       notes: '',
       createdAt: 1,

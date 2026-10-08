@@ -11,9 +11,10 @@ import type { TaskService } from '../services/taskService';
  * 不调 domain 纯函数、不判断领域规则（ADR-0003）。例外是系统级通道
  * （窗口/通知/更新检查/文件选择）——它们不属于任何聚合，直接用注入的机制。
  *
- * 写 store 的例外只有两处，都不在这里：settings 有自己的写规则（明文入、
- * 密文落盘），留在 handler 层；而导入合并与 AI 历史是整批写，交给
- * importService / aiHistoryService。新增通道前先看这两处，不要就地写 store。
+ * 写 store 必须经过 service，没有例外：每个聚合一个，settings 一个
+ * （它有自己的写规则——明文入、密文落盘），导入合并与 AI 历史也各一个
+ * （整批写，不属于任何聚合）。新增通道前先看这里的清单，不要就地写 store：
+ * encryptKey 那条规则是这么被守住的，漏一次就是把明文 key 写进 data.json。
  */
 export interface HandlerDeps {
   logger: Logger;
