@@ -359,6 +359,25 @@ describe('advancePomodoroPhase — a paused timer bills no wall clock', () => {
     expect(r.next.focusAccumulatedMs).toBe(300_000);
   });
 
+  test('a running final cycle still adds to all three clocks', () => {
+    // The guard above must not zero the running case: accumulatedMs and
+    // phaseAccumulatedMs are what the worklog and the settled TimeEntry read,
+    // so a regression that dropped them would still settle correctly for
+    // pomodoro (which uses focusAccumulatedMs) and be invisible here.
+    const r = advancePomodoroPhase(
+      focus({
+        accumulatedMs: 1_000,
+        phaseAccumulatedMs: 2_000,
+        cyclesCompleted: POMODORO_CYCLES_PER_SET - 1,
+      }),
+      T0 + 300_000,
+    );
+    expect(r.setComplete).toBe(true);
+    expect(r.next.accumulatedMs).toBe(301_000);
+    expect(r.next.phaseAccumulatedMs).toBe(302_000);
+    expect(r.next.focusAccumulatedMs).toBe(300_000);
+  });
+
   test('a paused advance adds nothing, in either branch', () => {
     // The sleep/idle watcher rebases phaseStartedAt to the pause instant, so
     // the delta from there measures absence, not work. The setComplete branch

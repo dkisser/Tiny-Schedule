@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { emptyAppData } from '@tiny-schedule/shared';
+import { AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
 import type { DataStore } from '../src/main/infra/dataStore';
 import { buildChatTools } from '../src/main/services/chatTools';
 import { createProjectService } from '../src/main/services/projectService';
@@ -9,7 +9,11 @@ const logger = { info: () => {}, error: () => {}, warn: () => {} } as never;
 
 /** The tools read through services now (ADR-0003), so build them over a real store. */
 function services(data = emptyAppData()) {
-  const store = { get: () => data, update: (fn: (c: typeof data) => typeof data) => fn(data) };
+  // Parses, as DataStore.save does — see the note on the other store doubles.
+  const store = {
+    get: () => data,
+    update: (fn: (c: typeof data) => typeof data) => AppDataSchema.parse(fn(data)) as typeof data,
+  };
   const deps = { store: store as unknown as DataStore, logger };
   return { tasks: createTaskService(deps), projects: createProjectService(deps) };
 }

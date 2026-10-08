@@ -30,7 +30,6 @@ function setup(data: Partial<AppData> = {}) {
     get: () => state,
     update: (fn: (c: AppData) => AppData) => {
       // Parse exactly as DataStore.save does. Without it this double is blind to
-      // Parse exactly as DataStore.save does. Without it this double is blind to
       // every AppDataSchema defect — a schema-breaking write would pass green
       // here and only corrupt data.json in production.
       Object.assign(state, fn(state));

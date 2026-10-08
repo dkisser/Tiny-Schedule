@@ -5,7 +5,7 @@ import {
   fauxProvider,
   fauxToolCall,
 } from '@earendil-works/pi-ai';
-import { type ChatSession, emptyAppData } from '@tiny-schedule/shared';
+import { AppDataSchema, type ChatSession, emptyAppData } from '@tiny-schedule/shared';
 import type { DataStore } from '../src/main/infra/dataStore';
 import type { ChatEventSink } from '../src/main/services/chatService';
 import { ChatAgentManager } from '../src/main/services/chatService';
@@ -17,7 +17,8 @@ function emptyStore(): DataStore {
   const data = emptyAppData();
   return {
     get: () => data,
-    update: (fn: (c: typeof data) => typeof data) => fn(data),
+    // Parses, as DataStore.save does — see the note on the other store doubles.
+    update: (fn: (c: typeof data) => typeof data) => AppDataSchema.parse(fn(data)) as typeof data,
   } as unknown as DataStore;
 }
 

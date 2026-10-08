@@ -1,4 +1,4 @@
-import { type FollowUp, type FollowUpEdit, newFollowUpId } from '@tiny-schedule/shared';
+import { type FollowUp, newFollowUpId } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import { CheckCircle2, ChevronLeft, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -15,7 +15,7 @@ import { Markdown } from './ui/markdown';
 import { Textarea } from './ui/textarea';
 
 /** A field edit, where an explicit null clears and undefined leaves alone. */
-type FollowUpEditPatch = Omit<Partial<FollowUpEdit>, 'nextFollowUpDay'> & {
+type FollowUpEditPatch = Omit<Partial<FollowUp>, 'nextFollowUpDay'> & {
   nextFollowUpDay?: string | null;
 };
 
@@ -46,8 +46,9 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
 
   // The patch may null a field out; the store re-picks only the editable keys,
   // so a null never becomes `undefined` on the wire.
-  const save = (patch: FollowUpEditPatch) =>
-    void upsertFollowUp({ ...followUp, ...patch } as FollowUpEdit);
+  // No cast: the structural type already accepts this, and dropping it lets
+  // the checker flag a future edit that smuggles a state field into the patch.
+  const save = (patch: FollowUpEditPatch) => void upsertFollowUp({ ...followUp, ...patch });
 
   const addEntry = () => {
     const text = entryDraft.trim();
