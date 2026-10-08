@@ -23,11 +23,8 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
 
     ideaReopen: ({ id }: { id: string }) => maskedResult(ideas.reopen(id)),
 
-    ideaConvertToTask: ({ id, title }: { id: string; title?: string }) => {
-      const result = ideas.convertToTask(id, title);
-      if (!result.ok) return result;
-      return { ok: true as const, data: masked(result.data), taskId: result.taskId };
-    },
+    ideaConvertToTask: ({ id, title }: { id: string; title?: string }) =>
+      maskedResult(ideas.convertToTask(id, title)),
 
     /**
      * 升级为项目：建项目与转状态在 service 内一次 store.update 完成，
@@ -39,11 +36,7 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
       icon?: string;
       primaryColor?: string;
       validationGoal?: string;
-    }) => {
-      const result = ideas.upgradeToProject(req.id, req);
-      if (!result.ok) return result;
-      return { ok: true as const, data: masked(result.data), projectId: result.projectId };
-    },
+    }) => maskedResult(ideas.upgradeToProject(req.id, req)),
 
     /** 追加/删除演进日志：也是命令,改的是主进程存的那条列表。 */
     ideaAddEntry: ({ id, text }: { id: string; text: string }) =>

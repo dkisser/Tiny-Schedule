@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type AppData,
-  appendIdeaEntry,
   emptyAppData,
   type Idea,
   IdeaEditSchema,
@@ -277,26 +276,40 @@ describe('ideaService.edit — the narrowed write contract', () => {
 
   test('a present-but-undefined optional key does not erase the stored value', () => {
     // The wire path is what makes this bite: the renderer builds the payload
-    // literally (`validationGoal: idea.validationGoal, timeline: ...`), so the
-    // keys are always present, and zod hands back undefined for the unset
-    // ones. A plain `{ ...stored, ...patch }` therefore wiped the timeline on
-    // every unrelated title edit — and the service-level tests missed it
-    // because they call edit() directly, past the zod boundary.
-    const stored = idea({ timeline: [{ id: 'e1', createdAt: 1, text: '记一笔' }] });
-    const { data, service } = setup({ i1: stored });
+    // literally (`validationGoal: idea.validationGoal`), so the key is always
+    // present, and zod hands back undefined for it when unset. A plain
+    // `{ ...stored, ...patch }` therefore wiped the stored value on every
+    // unrelated title edit — and the service-level tests missed it because
+    // they call edit() directly, past the zod boundary.
+    const { data, service } = setup({
+      i1: idea({ validationGoal: '验证一下', timeline: [{ id: 'e1', createdAt: 1, text: '记' }] }),
+    });
     const patch = IdeaEditSchema.parse({
       id: 'i1',
       title: '只改标题',
       notes: '',
       createdAt: 1,
-      timeline: undefined,
       validationGoal: undefined,
     });
     // Prove the fixture reproduces what zod actually hands the service.
-    expect('timeline' in patch).toBe(true);
+    expect('validationGoal' in patch).toBe(true);
+    expect(patch.validationGoal).toBeUndefined();
     service.edit(patch);
-    expect(data.ideas.i1?.timeline).toHaveLength(1);
+    expect(data.ideas.i1?.validationGoal).toBe('验证一下');
     expect(data.ideas.i1?.title).toBe('只改标题');
+  });
+
+  test('a timeline smuggled into a field edit is stripped by the schema', () => {
+    // The wire no longer accepts the field at all, so the whole-list rollback
+    // is not merely discouraged by convention — it cannot be expressed.
+    const parsed = IdeaEditSchema.parse({
+      id: 'i1',
+      title: 't',
+      notes: '',
+      createdAt: 1,
+      timeline: [{ id: 'e9', createdAt: 1, text: '偷带' }],
+    });
+    expect(Object.keys(parsed)).toEqual(['id', 'title', 'notes', 'createdAt']);
   });
 
   test('an omitted optional field is left alone', () => {
@@ -336,16 +349,11 @@ describe('ideaService.edit — the narrowed write contract', () => {
     expect(data.ideas.i1?.timeline).toHaveLength(1);
   });
 
-  test('editing the timeline leaves the status untouched', () => {
-    const { data, service } = setup({ i1: idea({ status: 'incubating' }) });
-    const appended = appendIdeaEntry(data.ideas.i1 as Idea, '中途想了想');
-    service.edit({
-      id: 'i1',
-      title: 'x',
-      notes: '',
-      createdAt: 1,
-      timeline: appended.timeline,
+  test('a scalar edit leaves the timeline and the status untouched', () => {
+    const { data, service } = setup({
+      i1: idea({ status: 'incubating', timeline: [{ id: 'e1', createdAt: 1, text: '记一笔' }] }),
     });
+    service.edit({ id: 'i1', title: 'x', notes: '', createdAt: 1 });
     expect(data.ideas.i1?.timeline).toHaveLength(1);
     expect(data.ideas.i1?.status).toBe('incubating');
   });
@@ -387,13 +395,17 @@ describe('ideaService timeline commands — the list is edited on the main side'
     expect(service.deleteEntry('nope', 'e1')).toEqual({ ok: false, error: 'IDEA_NOT_FOUND' });
   });
 
-  test('a scalar edit does not roll back a concurrently added entry', () => {
+  test('a scalar edit cannot roll back a concurrently added entry', () => {
     // The regression, end to end: the stored timeline gains an entry, then a
-    // title edit arrives carrying the renderer's older snapshot.
+    // title edit arrives. The wire no longer permits the edit to carry a
+    // timeline at all, so there is nothing for it to roll back.
     const { data, service } = setup({ i1: idea({ timeline: [entry('e1', '一')] }) });
     service.addEntry('i1', '第二条');
-    const staleSnapshot = { id: 'i1', title: '改标题', notes: '', createdAt: 1 };
-    const patch = IdeaEditSchema.parse({ ...staleSnapshot, timeline: undefined });
+    const patch = IdeaEditSchema.parse({ id: 'i1', title: '改标题', notes: '', createdAt: 1 });
+    // A stray timeline is stripped by the schema, not merged — the field is
+    // gone from IdeaEditSchema, so a caller that still sends one loses it.
+    const smuggled = IdeaEditSchema.parse({ ...patch, timeline: [entry('e9', '偷带')] });
+    expect(Object.keys(smuggled)).toEqual(['id', 'title', 'notes', 'createdAt']);
     service.edit(patch);
     expect(data.ideas.i1?.timeline?.map((e) => e.text)).toEqual(['一', '第二条']);
     expect(data.ideas.i1?.title).toBe('改标题');

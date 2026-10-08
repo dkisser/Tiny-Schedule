@@ -11,6 +11,7 @@ import {
   type IdeaCommandResult,
   type IdeaConvertResult,
   type IdeaEdit,
+  IdeaStatusSchema,
   type IdeaUpgradeResult,
   INBOX_PROJECT_ID,
   ideaToTask,
@@ -41,15 +42,12 @@ export interface IdeaUpgradeInput {
   validationGoal?: string;
 }
 
-/** Every status may carry a timeline entry; the commands below are not transitions. */
-const ALL_STATUSES: readonly Idea['status'][] = [
-  'open',
-  'done',
-  'discarded',
-  'converted',
-  'incubating',
-  'closed',
-];
+/**
+ * Every status may carry a timeline entry; the commands below are not
+ * transitions. Derived from the schema rather than listed by hand, so a status
+ * added to the contract is editable on the timeline by construction.
+ */
+const ALL_STATUSES: readonly Idea['status'][] = Object.values(IdeaStatusSchema.enum);
 
 function newProjectId(): string {
   return `p_${randomUUID()}`;

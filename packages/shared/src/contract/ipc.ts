@@ -103,7 +103,10 @@ export const IdeaEditSchema = z.object({
    * undefined 的话，合并就退化成覆盖，同一个 bug 换个方向再犯一次。
    */
   validationGoal: z.string().nullable().optional(),
-  timeline: z.array(IdeaEntrySchema).optional(),
+  // No `timeline` here on purpose. The log is a list the renderer mutates, and
+  // a field edit carrying the renderer's whole snapshot of it rolled the list
+  // back whenever a debounced commit landed after an entry was added. It has
+  // its own commands: ideaAddEntry / ideaUpdateEntry / ideaDeleteEntry.
 });
 export type IdeaEdit = z.infer<typeof IdeaEditSchema>;
 
@@ -156,7 +159,13 @@ export const IdeaUpgradeToProjectReqSchema = z.object({
 export type IdeaUpgradeToProjectReq = z.infer<typeof IdeaUpgradeToProjectReqSchema>;
 
 /** The two follow-up state commands take the same body as a delete: an id. */
-export const FollowUpIdReqSchema = FollowUpDeleteReqSchema;
+/**
+ * The two follow-up state commands' request body. Declared independently of
+ * FollowUpDeleteReqSchema on purpose: an alias is the same object, so a field
+ * added to the delete schema would go on changing these commands' wire shape
+ * with nothing to notice.
+ */
+export const FollowUpIdReqSchema = z.object({ id: z.string().min(1) });
 
 export const IdeaAddEntryReqSchema = z.object({
   id: z.string().min(1),

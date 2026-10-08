@@ -185,7 +185,10 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // With no local timer there is nothing to pin to, so settle whatever main
     // holds: recording that time on its own task beats discarding it, and
     // beats leaving a ghost that a later start() would bill somewhere else.
-    let cleared = false;
+    // Default to clearing: a throwing settle leaves `cleared` untouched, and
+    // main keeping a timer the UI shows as stopped is the worse of the two
+    // failures. Only an explicit decline turns the clear off.
+    let cleared = true;
     try {
       ({ cleared } = await settleOnMain(cur?.taskId));
     } finally {

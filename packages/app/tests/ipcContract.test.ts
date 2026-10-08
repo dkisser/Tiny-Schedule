@@ -312,12 +312,12 @@ describe('new command channels dispatch through their real handlers', () => {
   });
 
   test('the follow-up state commands do not reuse the delete request schema', () => {
-    // Both take an id today, but a field added to the delete schema would
-    // otherwise silently change the wire shape of two commands.
-    const deleteReq = IpcInvokeContract.followUpDelete.req as { shape: Record<string, unknown> };
-    expect(Object.keys(deleteReq.shape)).toEqual(['id']);
-    expect(IpcInvokeContract.followUpResolve.ch).toBe('followUp:resolve');
-    expect(IpcInvokeContract.followUpReopen.ch).toBe('followUp:reopen');
+    // Distinct *objects*, not just the same shape: an alias would still let a
+    // field added to the delete schema change these two commands' wire shape
+    // with nothing to notice.
+    const deleteReq = IpcInvokeContract.followUpDelete.req as object;
+    expect(IpcInvokeContract.followUpResolve.req).not.toBe(deleteReq);
+    expect(IpcInvokeContract.followUpReopen.req).not.toBe(deleteReq);
   });
 
   test('a followUp command on a missing id rejects instead of returning null', () => {

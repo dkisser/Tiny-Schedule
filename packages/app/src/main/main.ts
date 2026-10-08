@@ -125,7 +125,7 @@ app.whenReady().then(async () => {
   // encryptKey/decryptKey; the result is cached in-process.
   await initKeyStore(userData);
   logger = createLogger(join(userData, 'logs'));
-  store = new DataStore(userData);
+  store = new DataStore(userData, logger);
   store.load();
   const migrated = migrateRemoveTodayTag(store.get());
   if (migrated !== store.get()) store.save(migrated);

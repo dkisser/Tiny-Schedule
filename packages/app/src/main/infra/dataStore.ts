@@ -8,11 +8,15 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { type AppData, AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
+import type { Logger } from 'pino';
 
 export class DataStore {
   private cache: AppData | null = null;
 
-  constructor(private readonly dir: string) {
+  constructor(
+    private readonly dir: string,
+    private readonly logger: Logger,
+  ) {
     mkdirSync(dir, { recursive: true });
   }
 
@@ -38,16 +42,18 @@ export class DataStore {
       const backup = read(this.backupPath);
       if (backup) {
         this.cache = backup;
-        console.warn(
-          `[dataStore] data.json unusable (${problems[0] ?? 'missing'}); loaded backup instead`,
-        );
+        this.logger.warn({
+          action: 'dataStore:load:backup',
+          reason: problems[0] ?? 'missing',
+        });
       } else {
         this.cache = emptyAppData();
         if (problems.length > 0) {
-          console.error(
-            `[dataStore] both data.json and its backup are unusable (${problems.join('; ')}); ` +
-              'starting empty. The files on disk have been left untouched.',
-          );
+          this.logger.error({
+            action: 'dataStore:load:empty',
+            problems,
+            note: 'files left untouched on disk',
+          });
         }
       }
     }
