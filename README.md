@@ -37,7 +37,7 @@
 
 A local-first Electron desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
 
-- 📦 **Local-first**: All task data lives in a local SQLite database. No cloud required (except your explicitly configured AI provider).
+- 📦 **Local-first**: All task data lives in a local JSON file on your machine. No cloud required (except your explicitly configured AI provider).
 - ⌨️ **Keyboard-driven**: Inspired by Super Productivity and Things.
 - 🤖 **AI insights**: Multiple OpenAI-compatible providers (OpenAI, DeepSeek, Azure, self-hosted, Ollama). One-click daily/weekly reports.
 - 🔁 **Portable**: Full backup-JSON import from Super Productivity with auto-backup. Never get locked in.
@@ -113,7 +113,7 @@ A local-first Electron desktop app for people who want **complete ownership of t
 | Renderer | React 19 + TypeScript 5.7 |
 | Styling | Tailwind CSS 4 + Radix UI + lucide-react |
 | State | Zustand 5 |
-| Data | Local SQLite (via IPC) |
+| Data | Local JSON file (via IPC) |
 | AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) (multi-provider, OpenAI-compatible) |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
 | Packaging | electron-builder (DMG, macOS arm64 + x64) |
@@ -139,14 +139,14 @@ A local-first Electron desktop app for people who want **complete ownership of t
 
 ## Importing from Super Productivity
 
-Tiny-Schedule supports **full-database import** of Super Productivity backup JSON:
+Tiny-Schedule imports Super Productivity backup JSON by **merging** it into your current library:
 
 1. In Super Productivity, export a backup JSON (Settings → Backup).
 2. In Tiny-Schedule, open Settings → Import and pick that JSON.
-3. Tiny-Schedule auto-backs up your current data, then overwrites with SP data.
-4. Tasks, projects, tags, subtasks, and timer history become available immediately.
+3. Tiny-Schedule auto-backs up your current data, then merges the SP data in.
+4. Tasks, projects, tags, subtasks, and per-day time totals become available immediately. On ID conflicts the imported entity wins; your ideas, follow-ups, settings, and any running timer are left untouched. (SP's per-session timer history is not imported.)
 
-> ⚠️ Import is **whole-database replace**, not a merge. Auto-backup happens before the overwrite; you can roll back if needed.
+> 💾 Import is a **merge**, not a replace — a backup of your current data is written beforehand, so you can roll back if needed.
 
 ---
 
@@ -181,7 +181,7 @@ This is a Bun-workspaces monorepo:
 Tiny-Schedule/
 ├── packages/
 │   ├── app/      # Electron main + renderer
-│   └── shared/   # Shared types (Zod schemas)
+│   └── shared/   # Shared domain model, rules & IPC contract (Zod)
 ├── scripts/      # Repo-level scripts (e.g. IPC literal checks)
 ├── docs/         # UI conventions, design notes
 └── .github/      # GitHub Actions (release.yml only)
