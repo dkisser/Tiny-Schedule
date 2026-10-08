@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { emptyAppData } from '@tiny-schedule/shared';
@@ -182,16 +182,73 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
   });
 
-  test('a still-unreadable file does not recurse through save()', () => {
+  test('a refused store still tells the operator exactly once', () => {
+    // The refusal log lived only in save(), and update() returns before
+    // reaching it — so the dominant write path dropped every user write with
+    // no signal at all. One line per incident, not one per heartbeat.
     const dir = tmpDir();
-    writeFileSync(join(dir, 'data.json'), '{ still not json', 'utf8');
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const lines: Record<string, unknown>[] = [];
+    const store = new DataStore(dir, {
+      info: () => {},
+      warn: () => {},
+      error: (o: Record<string, unknown>) => lines.push(o),
+    } as unknown as Logger);
+    store.load();
+    lines.length = 0;
+    for (let i = 0; i < 5; i += 1) {
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } }));
+    }
+    const refused = lines.filter((l) => l.action === 'dataStore:save:refused');
+    expect(refused).toHaveLength(1);
+    expect(String(refused[0]?.reason)).toContain('invalid json');
+  });
+
+  test('deleting the unreadable file unblocks writing instead of latching forever', () => {
+    // readValidated reports nothing for a missing file, so a deleted one was
+    // indistinguishable from a still-broken one: every write was then refused
+    // for the life of the process, with the stored reason still quoting a parse
+    // error for a file that no longer existed.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
     const store = new DataStore(dir, logger);
     store.load();
-    // Must terminate rather than retry forever.
-    expect(() =>
-      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } })),
-    ).not.toThrow();
-    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe('{ still not json');
+    expect(store.isWritable).toBe(false);
+    unlinkSync(join(dir, 'data.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fresh' } }));
+    expect(store.isWritable).toBe(true);
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('fresh');
+  });
+
+  test('repeated writes on a still-unreadable file terminate and never write', () => {
+    const dir = tmpDir();
+    const corrupt = '{ still not json';
+    writeFileSync(join(dir, 'data.json'), corrupt, 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    for (let i = 0; i < 200; i += 1) {
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: `x${i}` } }));
+    }
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(corrupt);
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+  });
+
+  test('a direct save() cannot persist a value derived from the fallback', () => {
+    // save() takes an absolute dataset, so unlike update() it has no way to
+    // re-base one against a recovered file. The latch stays armed until
+    // something re-reads, so a direct save of the stale fallback is refused
+    // rather than quietly overwriting the user's repair.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const stale = store.get();
+    // The user repairs the file by hand after the app started.
+    seed(dir, full());
+    store.save(stale);
+    const after = new DataStore(dir, logger).load();
+    expect(Object.keys(after.tasks)).toEqual(['t1']);
+    expect(Object.keys(after.ideas)).toEqual(['i1']);
   });
 
   test('a genuinely unreadable data.json is never overwritten by a fallback load', () => {

@@ -26,8 +26,8 @@ export class DataStore {
    * settings change or a 30s heartbeat destroys everything.
    */
   private primaryUnreadable: string | null = null;
-  /** One-shot guard so tryRecover() cannot recurse through save(). */
-  private retrying = false;
+  /** Latch on the refusal log, so one incident reports once, not per write. */
+  private refusalReported = false;
 
   constructor(
     private readonly dir: string,
@@ -98,10 +98,11 @@ export class DataStore {
    */
   update(fn: (current: AppData) => AppData): AppData {
     let base = this.get();
-    if (this.primaryUnreadable && !this.retrying) {
+    if (this.primaryUnreadable) {
       const recovered = this.tryRecover();
       if (!recovered) {
         // get() here is the degraded cache; do not run the mutation against it.
+        this.refuse();
         return base;
       }
       base = recovered;
@@ -112,40 +113,76 @@ export class DataStore {
   }
 
   /**
+   * False while data.json cannot be written. Recovery is `update`'s job — it
+   * re-runs the mutation against the recovered base — so a direct `save` of a
+   * value derived from the stale fallback has no way to be safe, and callers
+   * that hold an absolute result (the load-time migrations) must check this.
+   */
+  get isWritable(): boolean {
+    return this.primaryUnreadable === null;
+  }
+
+  /**
+   * Report that a write was dropped. Once per incident: a refused store
+   * refuses every heartbeat for the rest of the process, and an operator
+   * needs the one line, not thousands.
+   *
+   * This lived only in save() until a review caught that update() returns
+   * before reaching it — so the dominant write path discarded every user
+   * write with no signal at all.
+   */
+  private refuse(): void {
+    if (this.refusalReported) return;
+    this.refusalReported = true;
+    this.logger.error({
+      action: 'dataStore:save:refused',
+      reason: this.primaryUnreadable,
+      file: this.filePath,
+      note: 'writes are being dropped; the unreadable data.json has been left in place',
+    });
+  }
+
+  /**
    * Try to re-read data.json after a load-time failure.
    *
    * Returns the recovered dataset and adopts it as the cache, or null when
    * the file still will not parse — in which case the refusal stands.
    */
   private tryRecover(): AppData | null {
-    this.retrying = true;
-    try {
-      const recovered = this.readValidated(this.filePath, () => {});
-      if (!recovered) return null;
-      // Adopt it. Clearing the latch while leaving the stale fallback in
-      // `cache` is what made the next write overwrite the repaired file.
-      this.cache = recovered;
+    if (!existsSync(this.filePath)) {
+      // The user deleted the unreadable file, which is a resolution and not a
+      // refusal. Treating it as still-broken left the latch armed forever,
+      // with the stored reason still describing a file that is not there.
+      this.cache = emptyAppData();
       this.primaryUnreadable = null;
-      this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
-      return recovered;
-    } finally {
-      this.retrying = false;
+      this.refusalReported = false;
+      this.logger.warn({
+        action: 'dataStore:save:file-removed',
+        previousReason: this.primaryUnreadable,
+        file: this.filePath,
+      });
+      return this.cache;
     }
+    const recovered = this.readValidated(this.filePath, () => {});
+    if (!recovered) return null;
+    // Adopt it. Clearing the latch while leaving the stale fallback in `cache`
+    // is what made the next write overwrite the repaired file. No recursion
+    // guard is needed: nothing on this path can reach save().
+    this.cache = recovered;
+    this.primaryUnreadable = null;
+    this.refusalReported = false;
+    this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
+    return recovered;
   }
 
   save(data: AppData): void {
-    if (this.primaryUnreadable && !this.tryRecover()) {
+    if (this.primaryUnreadable) {
       // Refuse rather than persist a degraded cache over the only good copy.
       // Without this, the first ordinary write — a settings change,
       // finishDay, the 30s heartbeat — rewrites data.json from a fallback
       // load and the second overwrites the backup, leaving nothing
       // recoverable. The data stays on disk exactly as the user left it.
-      this.logger.error({
-        action: 'dataStore:save:refused',
-        reason: this.primaryUnreadable,
-        file: this.filePath,
-        note: 'not written; the unreadable data.json has been left in place',
-      });
+      this.refuse();
       return;
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.

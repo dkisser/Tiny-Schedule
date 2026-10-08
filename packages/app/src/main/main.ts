@@ -127,10 +127,17 @@ app.whenReady().then(async () => {
   logger = createLogger(join(userData, 'logs'));
   store = new DataStore(userData, logger);
   store.load();
-  const migrated = migrateRemoveTodayTag(store.get());
-  if (migrated !== store.get()) store.save(migrated);
-  const migrated2 = migrateActiveTimerPomodoroFocus(store.get());
-  if (migrated2 !== store.get()) store.save(migrated2);
+  // A migration is an absolute result computed from the loaded dataset, not a
+  // mutation of it, so it cannot be replayed against a recovered base. It only
+  // runs when the store is writable: writing one derived from a fallback load
+  // would put that fallback on disk. (update() handles every other path,
+  // re-running the mutation against whatever it recovered.)
+  if (store.isWritable) {
+    const migrated = migrateRemoveTodayTag(store.get());
+    if (migrated !== store.get()) store.save(migrated);
+    const migrated2 = migrateActiveTimerPomodoroFocus(store.get());
+    if (migrated2 !== store.get()) store.save(migrated2);
+  }
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   // The quit path settles through this same instance. Building a second
   // TaskService here would duplicate any in-flight state a service acquires
