@@ -160,7 +160,38 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     // The user repairs the file by hand while the app is still running.
     seed(dir, full());
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
-    expect(new DataStore(dir, logger).load().settings.userName).toBe('fixed');
+    const after = new DataStore(dir, logger).load();
+    expect(after.settings.userName).toBe('fixed');
+    // The repaired *content* has to survive too. Asserting only the settings
+    // field is what let the destruction through twice: the stale fallback
+    // cache preserved nothing, and the write it produced passed that check
+    // while wiping the tasks and ideas the user had just repaired.
+    expect(Object.keys(after.tasks)).toEqual(['t1']);
+    expect(Object.keys(after.ideas)).toEqual(['i1']);
+  });
+
+  test('an unreadable file refuses every write and leaves the disk untouched', () => {
+    const dir = tmpDir();
+    const corrupt = '{ not json';
+    writeFileSync(join(dir, 'data.json'), corrupt, 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'a' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'b' } }));
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(corrupt);
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+  });
+
+  test('a still-unreadable file does not recurse through save()', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ still not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    // Must terminate rather than retry forever.
+    expect(() =>
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } })),
+    ).not.toThrow();
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe('{ still not json');
   });
 
   test('a genuinely unreadable data.json is never overwritten by a fallback load', () => {

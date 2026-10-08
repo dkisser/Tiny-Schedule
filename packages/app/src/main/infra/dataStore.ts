@@ -26,6 +26,8 @@ export class DataStore {
    * settings change or a 30s heartbeat destroys everything.
    */
   private primaryUnreadable: string | null = null;
+  /** One-shot guard so tryRecover() cannot recurse through save(). */
+  private retrying = false;
 
   constructor(
     private readonly dir: string,
@@ -84,36 +86,67 @@ export class DataStore {
     return this.cache;
   }
 
+  /**
+   * Apply `fn` to the current dataset and persist the result.
+   *
+   * `fn` is re-applied to the *recovered* dataset when a write finds that
+   * data.json has become readable since the last load. Re-running it is what
+   * makes the repair safe: persisting the value computed from the stale
+   * fallback cache would write that cache over the file the user just fixed —
+   * the very destruction the refusal exists to prevent, reached by another
+   * door. One re-entry only, so a file that is still unreadable cannot loop.
+   */
   update(fn: (current: AppData) => AppData): AppData {
-    const next = fn(this.get());
+    let base = this.get();
+    if (this.primaryUnreadable && !this.retrying) {
+      const recovered = this.tryRecover();
+      if (!recovered) {
+        // get() here is the degraded cache; do not run the mutation against it.
+        return base;
+      }
+      base = recovered;
+    }
+    const next = fn(base);
     this.save(next);
     return next;
   }
 
+  /**
+   * Try to re-read data.json after a load-time failure.
+   *
+   * Returns the recovered dataset and adopts it as the cache, or null when
+   * the file still will not parse — in which case the refusal stands.
+   */
+  private tryRecover(): AppData | null {
+    this.retrying = true;
+    try {
+      const recovered = this.readValidated(this.filePath, () => {});
+      if (!recovered) return null;
+      // Adopt it. Clearing the latch while leaving the stale fallback in
+      // `cache` is what made the next write overwrite the repaired file.
+      this.cache = recovered;
+      this.primaryUnreadable = null;
+      this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
+      return recovered;
+    } finally {
+      this.retrying = false;
+    }
+  }
+
   save(data: AppData): void {
-    if (this.primaryUnreadable) {
-      // The flag is only ever cleared in load(), which runs once at startup,
-      // so a user who repairs data.json by hand would still be locked out.
-      // Re-read before refusing: if the file now yields a dataset, the
-      // problem is gone and the write proceeds.
-      const problems: string[] = [];
-      if (this.readValidated(this.filePath, (r) => problems.push(r))) {
-        this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
-        this.primaryUnreadable = null;
-      } else {
-        // Refuse rather than persist a degraded cache over the only good copy.
-        // Without this, the first ordinary write — a settings change,
-        // finishDay, the 30s heartbeat — rewrites data.json from a fallback
-        // load and the second overwrites the backup, leaving nothing
-        // recoverable. The data stays on disk exactly as the user left it.
-        this.logger.error({
-          action: 'dataStore:save:refused',
-          reason: this.primaryUnreadable,
-          file: this.filePath,
-          note: 'not written; the unreadable data.json has been left in place',
-        });
-        return;
-      }
+    if (this.primaryUnreadable && !this.tryRecover()) {
+      // Refuse rather than persist a degraded cache over the only good copy.
+      // Without this, the first ordinary write — a settings change,
+      // finishDay, the 30s heartbeat — rewrites data.json from a fallback
+      // load and the second overwrites the backup, leaving nothing
+      // recoverable. The data stays on disk exactly as the user left it.
+      this.logger.error({
+        action: 'dataStore:save:refused',
+        reason: this.primaryUnreadable,
+        file: this.filePath,
+        note: 'not written; the unreadable data.json has been left in place',
+      });
+      return;
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;
