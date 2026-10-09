@@ -86,7 +86,7 @@ describe('applyAutoPause', () => {
     const { timers } = port(timerAt(), true);
     const { win, sent } = fakeWindow();
     applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
-    expect(sent).toEqual([[Ipc.timerChanged, null]]);
+    expect(sent).toEqual([[Ipc.timerChanged, { kind: 'timer', timer: null }]]);
   });
 
   test('announces the paused timer to the renderer when it survives', async () => {
@@ -94,19 +94,53 @@ describe('applyAutoPause', () => {
     const { timers } = port(timerAt());
     const { win, sent } = fakeWindow();
     applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
-    expect(sent).toEqual([[Ipc.timerChanged, expect.objectContaining({ isPaused: true })]]);
+    expect(sent).toEqual([
+      [Ipc.timerChanged, { kind: 'timer', timer: expect.objectContaining({ isPaused: true }) }],
+    ]);
   });
 
   test('a refused auto-pause is announced as refused, not as a drop', async () => {
     // Reading `!next.activeTimer` alone would report a deliberate drop that
     // never happened, or — when the degraded fallback happens to carry a timer
-    // — announce a pause that will not survive a restart. The renderer clears
-    // its clock either way, so it has to be told the truth.
+    // — announce a pause that will not survive a restart. The payload is
+    // `refused` because the renderer's response to the two is *opposite*: a
+    // drop clears the TimerBar, a refusal must leave it running (main's cache
+    // still holds the session). Sending null for both did the wrong one of the
+    // two things while the wire claimed it had done the right one.
     const { Ipc } = await import('@tiny-schedule/shared');
     const { timers } = port(timerAt(), true, false);
     const { win, sent } = fakeWindow();
     applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
-    expect(sent).toEqual([[Ipc.timerChanged, null]]);
+    expect(sent).toEqual([[Ipc.timerChanged, { kind: 'refused', reason: 'store-unwritable' }]]);
+  });
+
+  /**
+   * The test that was missing: the two branches were asserted separately and
+   * both expected `null`, so it passed when both branches sent null — or when
+   * both stopped sending altogether. Comparing the payloads directly fails on
+   * every version of that regression, including a future one where somebody
+   * "simplifies" refused into drop again.
+   */
+  test('the refused payload and the drop payload are different on the wire', async () => {
+    const { Ipc } = await import('@tiny-schedule/shared');
+
+    const payloadFor = (dropped: boolean, persisted: boolean) => {
+      const { timers } = port(timerAt(), dropped, persisted);
+      const { win, sent } = fakeWindow();
+      applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]?.[0]).toBe(Ipc.timerChanged);
+      return sent[0]?.[1];
+    };
+
+    const drop = payloadFor(true, true);
+    const refused = payloadFor(true, false);
+    expect(drop).not.toEqual(refused);
+    // The refusal carries no timer at all: there is nothing to adopt, because
+    // nothing changed. A `timer: null` smuggled in here is how the drop and the
+    // refusal merge back into one.
+    expect(refused).not.toHaveProperty('timer');
+    expect(drop).toMatchObject({ kind: 'timer', timer: null });
   });
 
   test('a refused auto-pause still syncs through the port', () => {

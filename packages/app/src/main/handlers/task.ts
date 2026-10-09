@@ -1,4 +1,4 @@
-import { Ipc, type Task } from '@tiny-schedule/shared';
+import { DROPPED_TIMER, Ipc, REFUSED_TIMER, type Task } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
 import { masked, REFUSED, sendSafe, written } from './deps';
 
@@ -17,18 +17,27 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
 
     timerSync: ({ timer }: { timer: Parameters<HandlerDeps['tasks']['syncTimer']>[0] }) => {
       const { dropped, persisted } = tasks.syncTimer(timer);
+      // Mutually exclusive, and refusal first: `dropped` is read off the
+      // dataset a refused write hands back (a degraded fallback that may carry
+      // no timer), so a refusal can report `dropped: true` for a drop that
+      // never happened. Announcing it would clear a clock the main process is
+      // still counting — and announcing both, as two `timerChanged(null)`
+      // sends, is what the two branches did before the payload could tell
+      // them apart.
+      if (!persisted) {
+        // The renderer keeps ticking a session that is not on disk. Say so,
+        // rather than letting the next stop report a settlement that never
+        // happened and that vanishes on restart. `refused` carries no timer:
+        // nothing changed, so the clock must stay where it is.
+        logger.error({ action: 'timer:sync:refused', taskId: timer?.taskId ?? null });
+        sendSafe(getWindow(), Ipc.timerChanged, REFUSED_TIMER);
+        return;
+      }
       if (dropped) {
         // Announce the drop. Staying silent would leave the renderer's clock
         // ticking for a session the main process just discarded — and its next
         // stop would settle that time into the done task.
-        sendSafe(getWindow(), Ipc.timerChanged, null);
-      }
-      if (!persisted) {
-        // The renderer keeps ticking a session that is not on disk. Say so,
-        // rather than letting the next stop report a settlement that never
-        // happened and that vanishes on restart.
-        logger.error({ action: 'timer:sync:refused', taskId: timer?.taskId ?? null });
-        sendSafe(getWindow(), Ipc.timerChanged, null);
+        sendSafe(getWindow(), Ipc.timerChanged, DROPPED_TIMER);
       }
     },
 

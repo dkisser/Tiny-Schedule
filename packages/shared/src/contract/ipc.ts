@@ -297,9 +297,49 @@ export type SettingsUpdateReq = z.infer<typeof SettingsUpdateReqSchema>;
 export const TimerSyncReqSchema = z.object({ timer: ActiveTimerSchema.nullable() });
 export type TimerSyncReq = z.infer<typeof TimerSyncReqSchema>;
 
-/** Main -> renderer push after the main process changes the timer itself. */
-export const TimerChangedEventSchema = ActiveTimerSchema.nullable();
-export type TimerChangedEvent = z.infer<typeof TimerChangedEventSchema>;
+/**
+ * Main -> renderer push after the main process changes the timer itself — and
+ * after it *fails* to.
+ *
+ * `ActiveTimer | null` could not say the second thing. "The timer is gone" and
+ * "this write was refused" both arrived as `null`, so the renderer cleared a
+ * clock that main was still counting: PR #18's auto-pause refusal and a real
+ * drop were byte-identical on the wire, and a test asserting the difference
+ * passed anyway. The distinction lives in the protocol, not in a comment
+ * claiming it exists.
+ *
+ * The two branches are the same split ADR-0004 draws for control-flow channels
+ * — by *what happened*, not by a `persisted` boolean the reader has to
+ * remember to check:
+ * - `timer` carries what is now on record, including `null` for a deliberate
+ *   drop. The renderer's clock must follow it: main discarded the session.
+ * - `refused` carries **no timer**, because nothing changed. Main's cache still
+ *   holds the running session (a refused write never mutates it), so clearing
+ *   the TimerBar here is the bug, not the safe default. The renderer keeps the
+ *   clock and says the change was not saved.
+ *
+ * Not a duplicate of the store mode push (`Ipc.storeWritable`): that channel
+ * answers "can this app save right now" for every write, and the banner says
+ * so once, permanently. This one answers "what should I do with the timer bar
+ * because of *this* event" — which the mode channel has no opinion about, and
+ * which is why a refused auto-pause still leaves a running clock on screen.
+ */
+export const TimerChangedPayloadSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('timer'), timer: ActiveTimerSchema.nullable() }),
+  z.object({ kind: z.literal('refused'), reason: z.literal('store-unwritable') }),
+]);
+export type TimerChangedPayload = z.infer<typeof TimerChangedPayloadSchema>;
+
+/**
+ * The two `timerChanged` payloads every send site reuses.
+ *
+ * Named constants rather than three object literals per call site: a send site
+ * that spells its own `{ kind: 'timer', timer: null }` is a send site that can
+ * be found by grep and diffed against these, instead of one more copy to
+ * re-check whenever the union gains a branch.
+ */
+export const DROPPED_TIMER: TimerChangedPayload = { kind: 'timer', timer: null };
+export const REFUSED_TIMER: TimerChangedPayload = { kind: 'refused', reason: 'store-unwritable' };
 
 export const FinishDayReqSchema = z.object({ date: z.string() });
 export type FinishDayReq = z.infer<typeof FinishDayReqSchema>;

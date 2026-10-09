@@ -1,4 +1,11 @@
-import { type ActiveTimer, type AppData, autoPauseTimer, Ipc } from '@tiny-schedule/shared';
+import {
+  type ActiveTimer,
+  type AppData,
+  autoPauseTimer,
+  DROPPED_TIMER,
+  Ipc,
+  REFUSED_TIMER,
+} from '@tiny-schedule/shared';
 import { type BrowserWindow, powerMonitor } from 'electron';
 import type { Logger } from 'pino';
 
@@ -8,7 +15,9 @@ export interface TimerPort {
   /**
    * `persisted` matters here as much as `dropped`: a refused auto-pause is
    * neither a drop nor a success, and the watcher is the only place that can
-   * tell the renderer before the session silently vanishes on restart.
+   * tell the renderer before the session silently vanishes on restart. The two
+   * answers go out as different payloads (REFUSED_TIMER vs DROPPED_TIMER), so
+   * the renderer keeps counting a session a refusal did not touch.
    */
   sync(timer: ActiveTimer | null): { data: AppData; dropped: boolean; persisted: boolean };
 }
@@ -81,8 +90,12 @@ export function applyAutoPause(
     // The pause never reached disk. Reading `!next.activeTimer` here would be
     // wrong in both directions: it reports a deliberate drop that did not
     // happen, or — when the degraded fallback happens to carry a timer —
-    // announces a pause that will not survive a restart. Say what is true.
-    if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, null);
+    // announces a pause that will not survive a restart. `refused` says what
+    // is true, and — the reason the branch exists — it is a *different* wire
+    // value from the drop below. Sending `null` here made the two
+    // indistinguishable and had the renderer clear a clock main is still
+    // counting, because a refused write leaves the cache untouched.
+    if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, REFUSED_TIMER);
     logger.error({
       action: 'timer:autoPause:refused',
       taskId: paused.taskId,
@@ -94,12 +107,13 @@ export function applyAutoPause(
   if (!next.activeTimer) {
     // Tell the renderer the clock is gone. Without this its TimerBar keeps
     // counting a session the main process has discarded.
-    if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, null);
+    if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, DROPPED_TIMER);
     logger.info({ action: 'timer:drop:autoPause', taskId: paused.taskId, reason });
     return;
   }
   // check-ipc: ok — Ipc.timerChanged constant
-  if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, paused);
+  if (win && !win.isDestroyed())
+    win.webContents.send(Ipc.timerChanged, { kind: 'timer', timer: paused });
   logger.info({ action: 'timer:autoPause', reason, taskId: paused.taskId });
 }
 

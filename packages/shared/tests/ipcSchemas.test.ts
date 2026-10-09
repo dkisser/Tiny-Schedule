@@ -6,10 +6,13 @@ import {
   ChatSessionDeleteReqSchema,
   ChatStatusEventSchema,
   ChatStopReqSchema,
+  DROPPED_TIMER,
   IdeaUpgradeToProjectReqSchema,
   Ipc,
   ProjectCreateReqSchema,
   ProjectUpdateReqSchema,
+  REFUSED_TIMER,
+  TimerChangedPayloadSchema,
 } from '../src/contract/ipc';
 import { type AppData, AppDataSchema, emptyAppData } from '../src/domain/appData';
 import { IdeaSchema } from '../src/domain/idea';
@@ -126,6 +129,38 @@ describe('ActiveTimerSchema — nothing the interface declares may be stripped',
     const parsed = AppDataSchema.parse({ ...emptyAppData(), activeTimer: timer }) as AppData;
     expect(parsed.activeTimer?.focusAccumulatedMs).toBe(1_500_000);
     expect(settleTimer(parsed.activeTimer!, 1_500_000).ms).toBe(1_500_000);
+  });
+});
+
+describe('timerChanged payloads — a drop and a refusal are different values', () => {
+  test('the two branches parse, and parse to different things', () => {
+    // The whole point of issue #20: under `ActiveTimer | null` the refused
+    // auto-pause and the real drop were the same `null`, so the renderer could
+    // only ever clear its TimerBar — which is wrong for a refusal, where main's
+    // cache still holds the running session.
+    expect(TimerChangedPayloadSchema.parse(DROPPED_TIMER)).toEqual({ kind: 'timer', timer: null });
+    expect(TimerChangedPayloadSchema.parse(REFUSED_TIMER)).toEqual({
+      kind: 'refused',
+      reason: 'store-unwritable',
+    });
+    expect(DROPPED_TIMER).not.toEqual(REFUSED_TIMER);
+  });
+
+  test('the old wire format no longer parses', () => {
+    // A bare ActiveTimer and a bare null are the shapes send sites used to
+    // produce. If either parses again, a call site that was not migrated is
+    // silently back on the ambiguous format instead of failing.
+    expect(TimerChangedPayloadSchema.safeParse(null).success).toBe(false);
+    expect(TimerChangedPayloadSchema.safeParse({ kind: 'timer', taskId: 't1' }).success).toBe(
+      false,
+    );
+  });
+
+  test('a refusal carries no timer to adopt', () => {
+    // Nothing changed, so there is nothing to converge on — the same rule the
+    // WRITE_REFUSED branch of TimingStopResult follows. A `timer` key on the
+    // refused branch would give a reader something to clear the TimerBar with.
+    expect(Object.hasOwn(REFUSED_TIMER, 'timer')).toBe(false);
   });
 });
 

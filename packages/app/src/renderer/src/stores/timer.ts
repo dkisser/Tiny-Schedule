@@ -151,9 +151,30 @@ export const useTimerStore = create<TimerState>((set, get) => ({
       }
     }, 1_000);
     // Main-process auto-pauses (sleep/idle) are authoritative; apply them
-    // immediately so the heartbeat never resyncs a stale running timer.
-    const timerChanged = api().onTimerChanged((timer) => {
-      set({ timer, now: Date.now() });
+    // immediately so the heartbeat never resyncs a stale running timer. A
+    // refused write is not a change and must not be treated as one.
+    const timerChanged = api().onTimerChanged((payload) => {
+      if (payload.kind === 'refused') {
+        // Nothing happened, so the clock stays exactly where it is. Main's
+        // cache was never touched — it is holding the same running session it
+        // had before — so `set({ timer: null })` here is not "safe", it is
+        // the bug this branch exists to prevent: the TimerBar would stop for a
+        // session still on record, and the elapsed time would be lost.
+        //
+        // Toast only while the mode banner has not already taken over. The
+        // 30s heartbeat re-syncs the same timer, so an unwritable store
+        // refuses again every 30s for as long as the file is broken — ADR-0004
+        // killed the per-write toast for exactly this ("twenty identical
+        // popups"). The banner is the standing signal ("nothing is being
+        // saved"); a toast adds only the first time, before the user has seen
+        // it, and when the two are indistinguishable. The mode push is sent
+        // before this one, so the usual case is banner-only.
+        if (useDataStore.getState().storeWritable) {
+          toast.error('这次计时未能保存：数据文件当前不可写。计时器保持原样。');
+        }
+        return;
+      }
+      set({ timer: payload.timer, now: Date.now() });
     });
     void heartbeat;
     void clock; // intervals live for app lifetime
