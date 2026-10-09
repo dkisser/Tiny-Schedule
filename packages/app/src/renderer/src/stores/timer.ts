@@ -14,6 +14,7 @@ import {
   startPomodoroFocus,
   startTimer,
 } from '@tiny-schedule/shared';
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import { api } from '../api';
 import { useDataStore } from './data';
@@ -70,6 +71,12 @@ async function settleOnMain(
   const result = await api().timingStop({ taskId: expectedTaskId });
   useDataStore.setState({ data: result.data });
   if (result.ok) return { settledMs: result.settledMs, cleared: true };
+  // A refused write is not a stop. Without this branch the user stopped a
+  // 45-minute session, watched the TimerBar clear, and was told nothing —
+  // the work existed nowhere on disk and vanished silently on restart.
+  if (!result.persisted) {
+    toast.error('这次计时未能保存：数据文件当前不可写。计时没有结算，请稍后重试。');
+  }
   // TIMER_MISMATCH means a *different* session is running on the main side and
   // was deliberately left alone. Reporting "cleared" here would have the
   // caller wipe that session's accumulated time with no TimeEntry, no log and

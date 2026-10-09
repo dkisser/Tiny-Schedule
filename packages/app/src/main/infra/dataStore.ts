@@ -15,6 +15,7 @@ import {
   type Idea,
   IdeaSchema,
   INBOX_PROJECT_ID,
+  SYSTEM_TAG_IDS,
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 
@@ -49,6 +50,8 @@ export class DataStore {
   private refusalReported = false;
   /** Runs once each time a refusal clears and the store becomes writable. */
   private recoveryListeners: (() => void)[] = [];
+  /** Records the backup holds; invalidated on every rotation. null = not read yet. */
+  private cachedBackupRecords: number | null = null;
 
   constructor(
     private readonly dir: string,
@@ -125,22 +128,38 @@ export class DataStore {
   update(fn: (current: AppData) => AppData): WriteResult {
     let base = this.get();
     if (this.primaryUnreadable) {
-      const recovered = this.tryRecover();
-      if (!recovered) {
+      const reRead = this.tryRecover();
+      if (!reRead) {
         // get() here is the degraded cache; do not run the mutation against it.
         this.refuse();
         return { data: base, persisted: false };
       }
-      base = recovered;
+      // Deferred work (the startup migrations) runs here, between recovery and
+      // the pending mutation. It has to be exactly here in both directions:
+      // inside tryRecover() the listener's save was overwritten by the write
+      // that triggered the recovery, and after the save the listener's own
+      // write clobbered the user's. Neither order survives the round trip, so
+      // the migrations ran and were erased — on the first recovery, which is
+      // the only case they were deferred for.
+      this.notifyRecovered();
+      // Read the base *after* the listeners: they may have migrated the
+      // recovered dataset, and the pending mutation has to apply to what is
+      // now on record rather than to the pre-migration object.
+      base = this.cache ?? reRead;
     }
     const next = fn(base);
     // A mutation that changed nothing must not rewrite the file: the 30s
     // heartbeat hits this path constantly, and each write costs a full schema
-    // validation, a backup copy and a temp+rename. Skipping the no-op is the
-    // difference between one write per real change and ~120 writes an hour.
+    // validation, a backup copy and a temp+rename. Note that this only fires
+    // for a caller that returns the identical reference — the heartbeat's
+    // real saving comes from taskService.syncTimer's value comparison.
     if (next === base) return { data: base, persisted: true };
     const persisted = this.save(next);
     return { data: persisted ? next : (this.cache ?? next), persisted };
+  }
+
+  private notifyRecovered(): void {
+    for (const listener of this.recoveryListeners) listener();
   }
 
   /**
@@ -211,7 +230,6 @@ export class DataStore {
         backupState: existsSync(this.backupPath) ? 'present' : 'missing',
         ...(backupProblems.length > 0 ? { backupProblems } : {}),
       });
-      for (const listener of this.recoveryListeners) listener();
       return this.cache;
     }
     // Collect the reasons rather than discarding them: a re-read that succeeds
@@ -233,7 +251,6 @@ export class DataStore {
       file: this.filePath,
       ...(problems.length > 0 ? { quarantined: problems } : {}),
     });
-    for (const listener of this.recoveryListeners) listener();
     return recovered;
   }
 
@@ -296,6 +313,7 @@ export class DataStore {
     try {
       copyFileSync(this.filePath, tmp);
       renameSync(tmp, this.backupPath);
+      this.cachedBackupRecords = null;
     } catch (err) {
       // A backup that cannot be rotated is not a reason to drop the user's
       // write: data.json is still the newer copy and is written atomically.
@@ -317,31 +335,50 @@ export class DataStore {
    * Whether the outgoing data.json may become the backup.
    *
    * The rotation is what makes a corrupt primary survivable, so it is also the
-   * single step that can destroy the last good copy. The case where it must
-   * not run is a dataset with no user content: once the user deletes every
-   * task, an ordinary write rotates that emptiness over a backup that still
-   * holds their library, and both generations are gone. The previous guard
-   * tested `projects` for emptiness too, which made it unreachable —
-   * emptyAppData() always ships INBOX_PROJECT — so INBOX is excluded here.
+   * single step that can destroy the last good copy. The rule is a *generation*
+   * one: the backup is never replaced by a poorer copy of the library.
    *
-   * The guard never freezes the backup: it only suppresses the rotation while
-   * the dataset is empty, and the first write that carries content rotates
-   * normally.
+   * A plain "don't rotate an empty dataset" check is not that. It buys exactly
+   * one write — the user clears their tasks, the backup is spared, and then the
+   * first new task they create rotates the emptiness over that backup anyway,
+   * losing both generations exactly as before. Comparing against what the
+   * backup actually holds holds the line until the library is genuinely rebuilt
+   * to at least that size.
+   *
+   * Counting records is a proxy, not a proof: it cannot tell a user who
+   * deliberately deleted 40 of 50 tasks from one who lost them. Keeping the
+   * richer copy is the right side to err on — the cost is a stale backup, the
+   * alternative is an unrecoverable one.
    */
   private rotationIsSafe(next: AppData): boolean {
-    const hasContent =
-      Object.keys(next.tasks).length > 0 ||
-      Object.keys(next.ideas).length > 0 ||
-      Object.keys(next.followUps).length > 0 ||
-      Object.keys(next.projects).some((id) => id !== INBOX_PROJECT_ID);
-    if (hasContent) return true;
-    if (!existsSync(this.backupPath)) return true;
-    if (!this.readValidated(this.backupPath, () => {})) return true;
+    const outgoing = countRecords(next);
+    const backedUp = this.backupRecordCount();
+    // -1 means there is no readable backup, so there is nothing to protect.
+    if (backedUp < 0 || outgoing >= backedUp) return true;
     this.logger.warn({
       action: 'dataStore:backup:kept',
-      note: 'an empty dataset will not replace a readable backup',
+      note: 'the outgoing dataset holds fewer records than the backup it would replace',
+      outgoing,
+      backedUp,
     });
     return false;
+  }
+
+  /**
+   * How many user records the backup holds, or -1 when it is missing or
+   * unreadable.
+   *
+   * Cached, and invalidated whenever the backup is rotated. The alternative —
+   * re-reading and re-parsing a file that cannot have changed since the last
+   * write — put a second full schema parse on every save while the dataset was
+   * empty, which is the hot path this guard itself created.
+   */
+  private backupRecordCount(): number {
+    if (this.cachedBackupRecords === null) {
+      const backup = this.readValidated(this.backupPath, () => {});
+      this.cachedBackupRecords = backup ? countRecords(backup) : -1;
+    }
+    return this.cachedBackupRecords;
   }
 
   /**
@@ -415,4 +452,23 @@ function quarantineBadIdeas(
   }
   const result = AppDataSchema.safeParse({ ...(json as object), ideas: kept });
   return result.success ? (result.data as AppData) : null;
+}
+
+const SYSTEM_TAGS = new Set<string>(Object.values(SYSTEM_TAG_IDS));
+
+/**
+ * How many user records a dataset holds.
+ *
+ * System entities are excluded: emptyAppData() always ships INBOX_PROJECT and
+ * the two system tags, and counting them made an empty library look occupied —
+ * which is what made the original guard unreachable and got it deleted.
+ */
+function countRecords(data: AppData): number {
+  return (
+    Object.keys(data.tasks).length +
+    Object.keys(data.ideas).length +
+    Object.keys(data.followUps).length +
+    Object.keys(data.projects).filter((id) => id !== INBOX_PROJECT_ID).length +
+    Object.keys(data.tags).filter((id) => !SYSTEM_TAGS.has(id)).length
+  );
 }

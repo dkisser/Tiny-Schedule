@@ -602,3 +602,38 @@ export function dropStaleTiming(data: AppData): AppData {
   if (task && !task.isDone) return data;
   return { ...data, activeTimer: null };
 }
+
+/**
+ * Whether two timers record the same session state.
+ *
+ * Exists because the renderer and the main process can never hold the same
+ * object: what the renderer has arrived over IPC as a structured clone, and
+ * what the store holds is whatever zod allocated on the last parse. So a
+ * reference check between them is always false, and using one to skip
+ * redundant writes skips nothing.
+ *
+ * Every persisted field is compared, so a pause, resume, phase advance or
+ * pomodoro cycle still reads as a change. The renderer recomputes `now` every
+ * second, but that is derived from these fields rather than stored on the
+ * timer — an unchanged running timer compares equal, which is the point.
+ */
+export function sameTimer(a: ActiveTimer | null, b: ActiveTimer | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.taskId === b.taskId &&
+    a.startedAt === b.startedAt &&
+    a.accumulatedMs === b.accumulatedMs &&
+    a.isPaused === b.isPaused &&
+    a.pausedAt === b.pausedAt &&
+    a.sessionStartedAt === b.sessionStartedAt &&
+    a.autoPausedBy === b.autoPausedBy &&
+    a.mode === b.mode &&
+    a.phase === b.phase &&
+    a.phaseStartedAt === b.phaseStartedAt &&
+    a.phaseAccumulatedMs === b.phaseAccumulatedMs &&
+    a.phaseDurationMs === b.phaseDurationMs &&
+    a.cyclesCompleted === b.cyclesCompleted &&
+    a.focusAccumulatedMs === b.focusAccumulatedMs
+  );
+}

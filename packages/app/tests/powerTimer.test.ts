@@ -28,13 +28,17 @@ function timerAt(): ActiveTimer {
 }
 
 /** A port that records what it was handed and reports the timer survived. */
-function port(timer: ActiveTimer | null, dropped = false) {
+function port(timer: ActiveTimer | null, dropped = false, persisted = true) {
   const synced: (ActiveTimer | null)[] = [];
   const timers: TimerPort = {
     current: () => timer,
     sync: (t) => {
       synced.push(t);
-      return { data: { activeTimer: dropped ? null : t } as unknown as AppData, dropped };
+      return {
+        data: { activeTimer: dropped ? null : t } as unknown as AppData,
+        dropped,
+        persisted,
+      };
     },
   };
   return { timers, synced };
@@ -91,6 +95,24 @@ describe('applyAutoPause', () => {
     const { win, sent } = fakeWindow();
     applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
     expect(sent).toEqual([[Ipc.timerChanged, expect.objectContaining({ isPaused: true })]]);
+  });
+
+  test('a refused auto-pause is announced as refused, not as a drop', async () => {
+    // Reading `!next.activeTimer` alone would report a deliberate drop that
+    // never happened, or — when the degraded fallback happens to carry a timer
+    // — announce a pause that will not survive a restart. The renderer clears
+    // its clock either way, so it has to be told the truth.
+    const { Ipc } = await import('@tiny-schedule/shared');
+    const { timers } = port(timerAt(), true, false);
+    const { win, sent } = fakeWindow();
+    applyAutoPause(deps({ timers, getWindow: () => win }), 'sleep');
+    expect(sent).toEqual([[Ipc.timerChanged, null]]);
+  });
+
+  test('a refused auto-pause still syncs through the port', () => {
+    const { timers, synced } = port(timerAt(), false, false);
+    applyAutoPause(deps({ timers }), 'sleep');
+    expect(synced).toHaveLength(1);
   });
 
   test('never sends to a destroyed window', () => {

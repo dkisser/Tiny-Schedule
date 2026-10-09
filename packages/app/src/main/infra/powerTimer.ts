@@ -5,7 +5,12 @@ import type { Logger } from 'pino';
 /** Just enough of taskService to read and write a timer, and nothing more. */
 export interface TimerPort {
   current(): ActiveTimer | null;
-  sync(timer: ActiveTimer | null): { data: AppData; dropped: boolean };
+  /**
+   * `persisted` matters here as much as `dropped`: a refused auto-pause is
+   * neither a drop nor a success, and the watcher is the only place that can
+   * tell the renderer before the session silently vanishes on restart.
+   */
+  sync(timer: ActiveTimer | null): { data: AppData; dropped: boolean; persisted: boolean };
 }
 
 export interface PowerTimerDeps {
@@ -70,8 +75,22 @@ export function applyAutoPause(
   const timer = timers.current();
   if (!timer || timer.isPaused) return;
   const paused: ActiveTimer = autoPauseTimer(timer, now, reason, backdateMs);
-  const { data: next } = timers.sync(paused);
+  const { data: next, persisted } = timers.sync(paused);
   const win = getWindow();
+  if (!persisted) {
+    // The pause never reached disk. Reading `!next.activeTimer` here would be
+    // wrong in both directions: it reports a deliberate drop that did not
+    // happen, or — when the degraded fallback happens to carry a timer —
+    // announces a pause that will not survive a restart. Say what is true.
+    if (win && !win.isDestroyed()) win.webContents.send(Ipc.timerChanged, null);
+    logger.error({
+      action: 'timer:autoPause:refused',
+      taskId: paused.taskId,
+      reason,
+      note: 'the auto-pause was discarded; nothing was written to disk',
+    });
+    return;
+  }
   if (!next.activeTimer) {
     // Tell the renderer the clock is gone. Without this its TimerBar keeps
     // counting a session the main process has discarded.

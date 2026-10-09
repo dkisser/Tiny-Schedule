@@ -68,7 +68,7 @@ describe('taskService.stopTiming — main-side settlement', () => {
   test('rejects when nothing is being timed, handing back the dataset', () => {
     const { data, service } = setup({ t1: task() });
     const r = service.stopTiming(NOW);
-    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data });
+    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data, persisted: true });
   });
 
   test('drops a timer whose task is gone rather than inventing a task', () => {
@@ -297,14 +297,10 @@ describe('a refused write must not read as success', () => {
 });
 
 describe('taskService.syncTimer — the 30s heartbeat', () => {
-  test('an unchanged timer is not written again', () => {
-    // The renderer re-sends the identical timer object every 30 seconds. Each
-    // of those writes re-validated the whole dataset, copied the backup and
-    // did a tmp+rename — ~120 an hour for a dataset that had not changed, which
-    // at 20k tasks is minutes of pure redundant disk write.
-    const inFlight = timerAt(NOW, 1_000);
+  /** A store that counts writes, so "did this reach the disk" is observable. */
+  function countingService(timer: AppData['activeTimer']) {
     let writes = 0;
-    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: inFlight };
+    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: timer };
     const store = {
       get: () => data,
       update: (fn: (c: AppData) => AppData) => {
@@ -313,14 +309,62 @@ describe('taskService.syncTimer — the 30s heartbeat', () => {
         return { data: AppDataSchema.parse(data) as AppData, persisted: true };
       },
     } as unknown as DataStore;
-    const svc = createTaskService({ store, logger });
-    expect(svc.syncTimer(inFlight).dropped).toBe(false);
-    expect(writes).toBe(0);
+    return { service: createTaskService({ store, logger }), writes: () => writes, data };
+  }
+
+  test('an unchanged timer does not reach the disk', () => {
+    // The renderer re-sends the same timer every 30 seconds. Each of those
+    // writes re-validated the whole dataset, copied the backup and did a
+    // tmp+rename — ~120 an hour for a dataset that had not changed, which at
+    // 20k tasks is minutes of pure redundant disk write.
+    //
+    // The two timers here are distinct objects with equal contents, which is
+    // what actually crosses the process boundary: the renderer's copy is an
+    // IPC structured clone and the stored one is whatever zod allocated on the
+    // last parse. A reference comparison here would be false every time.
+    const { service, writes } = countingService(timerAt(NOW, 1_000));
+    expect(service.syncTimer({ ...timerAt(NOW, 1_000) }).dropped).toBe(false);
+    expect(writes()).toBe(0);
+  });
+
+  test('an unchanged timer on a completed task is still dropped', () => {
+    // The equality test must not short-circuit the invariant: the task was
+    // completed after the timer started, so the heartbeat must sweep it even
+    // though nothing about the timer itself changed. Testing equality first
+    // left a done task being timed indefinitely.
+    const { service, writes, data } = countingService(timerAt(NOW, 1_000));
+    data.tasks.t1 = { ...task({ isDone: true }) };
+    const r = service.syncTimer({ ...timerAt(NOW, 1_000) });
+    expect(r.dropped).toBe(true);
+    expect(data.activeTimer).toBeNull();
+    expect(writes()).toBe(1);
+  });
+
+  test('every field that records state counts as a change', () => {
+    // One field that did not compare would let a real change through as a
+    // no-op — the failure this check is guarding against, one field at a time.
+    const base = { ...timerAt(NOW, 1_000), mode: 'pomodoro' as const, phase: 'focus' as const };
+    const variants = [
+      { ...base, isPaused: true, pausedAt: NOW },
+      { ...base, accumulatedMs: 5_000 },
+      { ...base, startedAt: NOW - 2_000 },
+      { ...base, sessionStartedAt: NOW - 9_000 },
+      { ...base, phase: 'break' as const },
+      { ...base, phaseAccumulatedMs: 1_000 },
+      { ...base, cyclesCompleted: 2 },
+      { ...base, focusAccumulatedMs: 1_000 },
+      { ...base, phaseDurationMs: 25 * 60_000 },
+      { ...base, autoPausedBy: 'sleep' as const },
+    ];
+    for (const changed of variants) {
+      const { service, writes } = countingService(base);
+      service.syncTimer(changed);
+      expect(writes()).toBe(1);
+    }
   });
 
   test('a genuinely changed timer is still written', () => {
-    // The identity check must not turn into a cache that swallows real
-    // changes: a pause is a different object and has to reach disk.
+    // The comparison must not turn into a cache that swallows real changes.
     const { data, service } = setup({ t1: task() }, timerAt(NOW, 1_000));
     const paused = { ...timerAt(NOW, 1_000), isPaused: true, pausedAt: NOW };
     expect(service.syncTimer(paused).dropped).toBe(false);

@@ -135,10 +135,15 @@ app.whenReady().then(async () => {
   const runMigrations = (): void => {
     const s = store;
     if (!s || !s.isWritable) return;
-    const migrated = migrateRemoveTodayTag(s.get());
-    if (migrated !== s.get()) s.save(migrated);
-    const migrated2 = migrateActiveTimerPomodoroFocus(s.get());
-    if (migrated2 !== s.get()) s.save(migrated2);
+    // One read per migration, not two: the comparison is a reference check,
+    // and calling get() again to test it read as though the dataset could have
+    // changed underneath us between the two calls.
+    const base = s.get();
+    const migrated = migrateRemoveTodayTag(base);
+    if (migrated !== base) s.save(migrated);
+    const afterToday = s.get();
+    const migrated2 = migrateActiveTimerPomodoroFocus(afterToday);
+    if (migrated2 !== afterToday) s.save(migrated2);
   };
   if (store.isWritable) {
     runMigrations();

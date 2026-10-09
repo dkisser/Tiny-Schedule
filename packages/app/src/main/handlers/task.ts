@@ -40,10 +40,15 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
       if (!result.ok) {
         // Rejections still carry data: the main process may already have
         // dropped the timer, and the renderer needs to see that.
-        logger.info({ action: 'timing:stop', error: result.error });
+        logger.info({ action: 'timing:stop', error: result.error, persisted: result.persisted });
         return { ...result, data: masked(result.data) };
       }
-      return { ok: true as const, data: masked(result.data), settledMs: result.settledMs };
+      return {
+        ok: true as const,
+        data: masked(result.data),
+        settledMs: result.settledMs,
+        persisted: result.persisted,
+      };
     },
 
     finishDay: () => masked(tasks.finishDay()),

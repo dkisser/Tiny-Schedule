@@ -6,6 +6,7 @@ import {
   dropStaleTiming,
   localDate,
   rollUnfinishedDueDay,
+  sameTimer,
   settleTimer,
   type Task,
   type TimingStopResult,
@@ -52,7 +53,7 @@ export function createTaskService({ store, logger }: ServiceDeps) {
   const stopTiming = (now = Date.now(), expectedTaskId?: string): TimingStopResult => {
     const current = store.get();
     const timer = current.activeTimer;
-    if (!timer) return { ok: false, error: 'NO_ACTIVE_TIMER', data: current };
+    if (!timer) return { ok: false, error: 'NO_ACTIVE_TIMER', data: current, persisted: true };
     if (expectedTaskId !== undefined && timer.taskId !== expectedTaskId) {
       // Someone else's session is running. Settling it here would bill the
       // wrong task, so decline and hand back the truth of what's on record.
@@ -61,15 +62,13 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         taskId: timer.taskId,
         expectedTaskId,
       });
-      return { ok: false, error: 'TIMER_MISMATCH', data: current };
+      return { ok: false, error: 'TIMER_MISMATCH', data: current, persisted: true };
     }
     const task = current.tasks[timer.taskId];
     if (!task) {
       const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'not-found' });
-      return persisted
-        ? { ok: false, error: 'TASK_NOT_FOUND', data }
-        : { ok: false, error: 'WRITE_REFUSED', data };
+      return { ok: false, error: 'TASK_NOT_FOUND', data, persisted };
     }
     if (task.isDone) {
       const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
@@ -77,9 +76,14 @@ export function createTaskService({ store, logger }: ServiceDeps) {
       // Distinct from TASK_NOT_FOUND: the row exists, we deliberately
       // refused to bill it. Conflating the two told the renderer "nothing
       // to stop" for a stop that actually threw the session away.
-      return persisted
-        ? { ok: false, error: 'TASK_ALREADY_DONE', data }
-        : { ok: false, error: 'WRITE_REFUSED', data };
+      //
+      // `persisted` rides alongside rather than replacing that code: whether
+      // the store accepted the write is a fact about the *store*, orthogonal
+      // to why the timer was dropped. Substituting WRITE_REFUSED for these two
+      // would make a refusal on a done task indistinguishable from a refusal
+      // on a missing one — re-introducing the exact conflation this comment
+      // is about, for three codes instead of two.
+      return { ok: false, error: 'TASK_ALREADY_DONE', data, persisted };
     }
     const settlement = settleTimer(timer, now);
     const { data, persisted } = store.update((d) => {
@@ -108,10 +112,10 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         ms: settlement.ms,
         note: 'the settlement was discarded; nothing was written to disk',
       });
-      return { ok: false, error: 'WRITE_REFUSED', data };
+      return { ok: false, error: 'WRITE_REFUSED', data, persisted: false };
     }
     logger.info({ action: 'timer:settle:stop', taskId: timer.taskId, ms: settlement.ms });
-    return { ok: true, data, settledMs: settlement.ms };
+    return { ok: true, data, settledMs: settlement.ms, persisted };
   };
 
   return {
@@ -185,11 +189,22 @@ export function createTaskService({ store, logger }: ServiceDeps) {
       // Persisting it again costs a full schema validation, a backup copy and
       // a temp+rename per tick — ~120 identical writes an hour, which is the
       // dominant write load of a running app and wears the disk for nothing.
-      // Identity is the right test here: the renderer holds the object the
-      // main process last handed it, and only a real change (pause, resume,
-      // phase advance) produces a new one.
+      //
+      // By *value*, not by identity. The two sides can never share a reference:
+      // what the renderer holds arrived over IPC as a structured clone, and
+      // what the store holds is whatever zod allocated during the last parse.
+      // An identity check passed here only because the test double handed back
+      // the same in-process object — it was never true in production, which
+      // made this branch dead code and left the optimization unmade.
       const current = store.get();
-      if (current.activeTimer === timer) {
+      // The stale-timer sweep runs *before* the equality test, never after: an
+      // unchanged timer on a task that has since been completed still has to
+      // be dropped, and short-circuiting on equality first let that invariant
+      // slip through — the heartbeat would keep a done task being timed
+      // indefinitely, which is the one thing this port exists to prevent.
+      // dropStaleTiming returns the same reference when nothing was stale.
+      const storedIsStale = dropStaleTiming(current).activeTimer !== current.activeTimer;
+      if (!storedIsStale && sameTimer(current.activeTimer, timer)) {
         return { data: current, dropped: false, persisted: true };
       }
       const { data: next, persisted } = store.update((d) =>

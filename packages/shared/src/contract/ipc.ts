@@ -481,16 +481,13 @@ export type IdeaUpgradeResult =
  * 一次结算根本没动过的旧 timeSpent。
  */
 export type TimingStopResult =
-  | { ok: true; data: AppData; settledMs: number }
+  | { ok: true; data: AppData; settledMs: number; persisted: boolean }
   | {
       ok: false;
       /**
-       * WRITE_REFUSED means the settlement itself never reached the disk:
-       * data.json is unreadable, so the store dropped the write rather than
-       * overwrite the only good copy. Distinct from every other code here —
-       * those all describe what was true of the timer, this one describes the
-       * store — because the user-visible consequence is the same in all of
-       * them (the work is not recorded) and only this one survives a restart.
+       * What was true of the *timer*. WRITE_REFUSED is the exception: it
+       * describes the store, and it is the one code where a settlement that
+       * should have happened did not.
        */
       error:
         | 'NO_ACTIVE_TIMER'
@@ -499,6 +496,12 @@ export type TimingStopResult =
         | 'TASK_ALREADY_DONE'
         | 'WRITE_REFUSED';
       data: AppData;
+      /**
+       * Whether the store accepted the write. Orthogonal to `error`: a stop
+       * that dropped the timer because its task was done is still worth
+       * reporting accurately when the refusal means the drop never landed.
+       */
+      persisted: boolean;
     };
 
 export const TimingStopReqSchema = z.object({
