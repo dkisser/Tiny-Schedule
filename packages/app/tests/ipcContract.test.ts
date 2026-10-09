@@ -2,12 +2,14 @@ import { beforeAll, describe, expect, mock, test } from 'bun:test';
 import {
   type AppData,
   AppDataSchema,
+  DROPPED_TIMER,
   emptyAppData,
   Ipc,
   IpcChatEventChannels,
   IpcEventChannels,
   IpcInvokeContract,
   IpcUiEventChannels,
+  REFUSED_TIMER,
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import type { DataStore } from '../src/main/infra/dataStore';
@@ -24,6 +26,8 @@ const invoked = new Set<string>();
 /** Direct handle on the store the handlers were wired to, for seeding/asserting. */
 let storeRef: DataStore;
 const listened = new Set<string>();
+/** The registered ipcRenderer listeners, so a test can deliver a push for real. */
+const listeners = new Map<string, (event: unknown, payload: unknown) => void>();
 // Keep the handler so a test can dispatch a real request through it, exactly as
 // the renderer would once preload invoked the channel.
 const handlerFor = new Map<string, (event: unknown, raw: unknown) => unknown>();
@@ -42,8 +46,9 @@ mock.module('electron', () =>
         invoked.add(channel);
         return Promise.resolve();
       },
-      on: (channel: string) => {
+      on: (channel: string, listener: (event: unknown, payload: unknown) => void) => {
         listened.add(channel);
+        listeners.set(channel, listener);
       },
       removeListener: () => {},
     },
@@ -136,6 +141,27 @@ describe('IPC contract', () => {
       'onTimerChanged',
     ];
     expect(keys.sort()).toEqual(expected.sort());
+  });
+
+  test('preload hands the renderer both timerChanged branches unchanged', () => {
+    // The payload is a discriminated union across a wire this test can check
+    // end to end. Preload must not narrow it: re-wrapping or coercing here is
+    // how `null` came back for a refusal in the first place, and the two
+    // branches have to arrive at the renderer as the two values they are.
+    const seen: unknown[] = [];
+    (exposedApi as Record<string, (...args: unknown[]) => unknown>).onTimerChanged?.((p: unknown) =>
+      seen.push(p),
+    );
+    const deliver = listeners.get(Ipc.timerChanged);
+    if (!deliver) throw new Error('preload never subscribed to timerChanged');
+    deliver(null, DROPPED_TIMER);
+    deliver(null, REFUSED_TIMER);
+    deliver(null, { kind: 'timer', timer: { taskId: 't1', startedAt: 0, accumulatedMs: 0 } });
+    expect(seen).toEqual([
+      DROPPED_TIMER,
+      REFUSED_TIMER,
+      { kind: 'timer', timer: { taskId: 't1', startedAt: 0, accumulatedMs: 0 } },
+    ]);
   });
 });
 

@@ -17,7 +17,8 @@ export interface ElectronMock {
   };
   ipcRenderer: {
     invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
-    on: (channel: string) => void;
+    /** Takes the listener too, so a test can deliver a main->renderer push. */
+    on: (channel: string, listener: (event: unknown, payload: unknown) => void) => void;
     removeListener: () => void;
   };
   contextBridge: { exposeInMainWorld: (key: string, api: unknown) => void };

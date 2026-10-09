@@ -96,7 +96,10 @@ const api: RendererApi = {
     return () => ipcRenderer.removeListener(Ipc.storeWritable, listener as never);
   },
   onTimerChanged: (cb) => {
-    const listener = (_e: unknown, timer: Parameters<typeof cb>[0]) => cb(timer);
+    // Payload passed through untouched: the discriminated union in
+    // TimerChangedPayload is the wire format, and narrowing it here would only
+    // move the drop/refused decision back to a place with no comment on it.
+    const listener = (_e: unknown, payload: Parameters<typeof cb>[0]) => cb(payload);
     // check-ipc: ok — Ipc.timerChanged constant
     ipcRenderer.on(Ipc.timerChanged, listener as never);
     return () => ipcRenderer.removeListener(Ipc.timerChanged, listener as never);

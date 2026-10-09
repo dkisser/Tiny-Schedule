@@ -1,4 +1,3 @@
-import type { ActiveTimer } from '../domain/task';
 import type {
   AiStreamEvent,
   ChatEvent,
@@ -6,6 +5,7 @@ import type {
   IpcInvokeFn,
   IpcInvokeKey,
   StoreWritablePayload,
+  TimerChangedPayload,
 } from './ipc';
 
 // Derived from IpcInvokeContract so the renderer-facing signatures can never
@@ -17,7 +17,12 @@ export type RendererApi = {
   onChatEvent(cb: (ev: ChatEvent) => void): () => void;
   onNewTask(cb: () => void): () => void;
   onUpdateAvailable(cb: (result: CheckUpdateResult) => void): () => void;
-  onTimerChanged(cb: (timer: ActiveTimer | null) => void): () => void;
+  /**
+   * The main process changed the timer, or failed to. A discriminated union
+   * rather than `ActiveTimer | null`: a refusal must not read as a drop, or the
+   * renderer clears a clock main is still counting (see TimerChangedPayload).
+   */
+  onTimerChanged(cb: (payload: TimerChangedPayload) => void): () => void;
   /**
    * The store's read-only mode (ADR-0004). Fires immediately with the current
    * state on subscribe, so a renderer that mounts late does not start out

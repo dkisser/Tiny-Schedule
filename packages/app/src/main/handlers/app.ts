@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { type ImportRunResult, Ipc } from '@tiny-schedule/shared';
+import { DROPPED_TIMER, type ImportRunResult, Ipc } from '@tiny-schedule/shared';
 import { type BrowserWindow, dialog as electronDialog, Notification, shell } from 'electron';
 import type { DataStore } from '../infra/dataStore';
 import { exportProjectTaskList, exportWorklog } from '../infra/exporter';
@@ -58,7 +58,7 @@ export function appHandlers({
         // task can never come back from an import still being timed. Announcing
         // the drop is ours: it is a message to the renderer's clock.
         const { data: next, droppedTimer } = imports.mergeImported(imported);
-        if (droppedTimer) sendSafe(getWindow(), Ipc.timerChanged, null);
+        if (droppedTimer) sendSafe(getWindow(), Ipc.timerChanged, DROPPED_TIMER);
         logger.info({
           action: 'import:run',
           counts,
