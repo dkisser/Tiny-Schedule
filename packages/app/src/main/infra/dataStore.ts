@@ -175,6 +175,17 @@ export class DataStore {
   }
 
   /**
+   * Why data.json will not parse, or null while it does.
+   *
+   * Public because the banner needs it: "save failed, try again" asks the user
+   * to retry something that cannot succeed until they repair the file by hand,
+   * and the parse error is the only thing that tells them which file and why.
+   */
+  get unreadableReason(): string | null {
+    return this.primaryUnreadable;
+  }
+
+  /**
    * Observe the store's read-only mode (ADR-0004).
    *
    * The refusal is not a property of any one write — it is a *mode* the store

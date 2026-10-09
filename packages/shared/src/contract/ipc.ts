@@ -127,8 +127,9 @@ export const IDEA_CLEARABLE_FIELDS = ['validationGoal'] as const;
 // "契约里根本不存在这个操作"——主进程侧的守卫只对下面这组命令生效。
 // ---------------------------------------------------------------------------
 
-/** 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。 */
 /**
+ * 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。
+ *
  * A refusal is a normal return value, not an exception (ADR-0003).
  *
  * WRITE_REFUSED rides in the same branch as the domain rejections because the
@@ -503,14 +504,6 @@ export type IdeaUpgradeResult =
  */
 export type WriteOutcome = { ok: true; data: AppData } | { ok: false; error: 'WRITE_REFUSED' };
 
-/**
- * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
- * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
- *
- * 拒绝分支也带 data：主进程在拒绝前可能已经丢弃了 activeTimer（任务已完成的
- * 情况就是这样），渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着
- * 一次结算根本没动过的旧 timeSpent。
- */
 /**
  * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
  * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。

@@ -201,8 +201,20 @@ export const useDataStore = create<DataState>((set, get) => ({
   subscribeStoreMode: async () => {
     const apply = ({ writable, reason }: StoreWritablePayload) =>
       useDataStore.setState({ storeWritable: writable, storeUnreadableReason: reason });
-    apply(await api().storeWritable());
-    return api().onStoreWritable(apply);
+    // Subscribe *before* pulling. The other order has a window between the
+    // pull resolving and the listener existing, and a mode flip landing in it
+    // is lost for good: a store read-only since launch never changes again to
+    // announce itself a second time. The push that lands first is simply
+    // overwritten by the pull a moment later.
+    const off = api().onStoreWritable(apply);
+    try {
+      apply(await api().storeWritable());
+    } catch {
+      // The push channel is already live, so a failed pull costs nothing: the
+      // next transition will set the state. Swallowing it is what keeps the
+      // unsubscribe from being lost along with the rejection.
+    }
+    return off;
   },
   load: async () => {
     set({ loading: true });

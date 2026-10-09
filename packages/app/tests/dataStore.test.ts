@@ -694,4 +694,23 @@ describe('DataStore — the read-only mode is observable state, not a per-write 
     }
     expect(seen).toEqual([false, false]);
   });
+
+  test('the unreadable reason is readable without attempting a write', () => {
+    // The pull handler reports { writable:false, reason } and the banner
+    // renders it. Hardcoding reason:null there left the banner invisible on
+    // exactly the case it exists for — a store that latched at startup, before
+    // anything was pushed and before any write was attempted.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    expect(store.isWritable).toBe(false);
+    expect(store.unreadableReason).toContain('invalid json');
+  });
+
+  test('a healthy store reports no reason', () => {
+    const store = new DataStore(tmpDir(), logger);
+    store.load();
+    expect(store.unreadableReason).toBeNull();
+  });
 });

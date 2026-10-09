@@ -108,7 +108,7 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
     // startup was announced to a null window and dropped — and a renderer
     // reload hits the same gap, because a store that has been read-only since
     // launch will not change again.
-    storeWritable: () => ({ writable: store.isWritable, reason: null }),
+    storeWritable: () => ({ writable: store.isWritable, reason: store.unreadableReason }),
     ...taskHandlers(handlerDeps),
     ...ideaHandlers(handlerDeps),
     ...followUpHandlers(handlerDeps),

@@ -18,7 +18,12 @@ import { useDataStore } from '../stores/data';
 export function StoreUnreadableBanner() {
   const writable = useDataStore((s) => s.storeWritable);
   const reason = useDataStore((s) => s.storeUnreadableReason);
-  if (writable || !reason) return null;
+  // Gated on `writable` alone. An earlier version also required a reason,
+  // which meant the banner stayed invisible in the one case it exists for —
+  // a store that latched at startup, before any write was attempted and so
+  // before anything had pushed a reason. The parse error is worth showing but
+  // is not a precondition for telling the user nothing is being saved.
+  if (writable) return null;
 
   return (
     <div
@@ -32,7 +37,7 @@ export function StoreUnreadableBanner() {
           data.json
           当前无法读取，应用已停止写入以免覆盖你唯一的数据副本。请手动修复或恢复该文件，写入会在恢复后自动继续。
         </span>
-        <div className="mt-0.5 font-mono text-[12px] opacity-70">{reason}</div>
+        {reason && <div className="mt-0.5 font-mono text-[12px] opacity-70">{reason}</div>}
       </div>
     </div>
   );

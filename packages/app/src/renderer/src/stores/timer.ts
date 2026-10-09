@@ -66,9 +66,9 @@ async function sync(timer: ActiveTimer | null) {
  * 必须留着,调用方要拿它来决定还要不要补一次清空。两种情况都返回 0。
  */
 async function settleOnMain(
-  expectedTaskId?: string,
-): Promise<{ settledMs: number; cleared: boolean }> {
-  const result = await api().timingStop({ taskId: expectedTaskId });
+  expectedTimer: ActiveTimer | null,
+): Promise<{ settledMs: number; cleared: boolean; keepTimer?: ActiveTimer | null }> {
+  const result = await api().timingStop({ taskId: expectedTimer?.taskId });
   if (result.ok) {
     useDataStore.setState({ data: result.data });
     return { settledMs: result.settledMs, cleared: true };
@@ -79,7 +79,12 @@ async function settleOnMain(
   // clear, and were told nothing — the work existed nowhere on disk.
   if (result.error === 'WRITE_REFUSED') {
     toast.error('这次计时未能保存：数据文件当前不可写。计时没有结算，请稍后重试。');
-    return { settledMs: 0, cleared: false };
+    // keepTimer: main never dropped it — it could not write — so the caller's
+    // optimistic `timer: null` has to be rolled back or the two sides diverge.
+    // There is no dataset to converge on here (see the contract: this branch
+    // carries none, and the cache may be a degraded fallback), but the caller
+    // already holds the session itself.
+    return { settledMs: 0, cleared: false, keepTimer: expectedTimer ?? null };
   }
   // The domain rejections did write: main dropped the timer (task done or
   // gone), so adopt what it has on record.
@@ -104,8 +109,14 @@ async function settleOnMain(
  * the protection thirty seconds later.
  */
 async function settlePrevious(taskId: string): Promise<boolean> {
-  const { cleared } = await settleOnMain(taskId);
+  const { cleared, keepTimer } = await settleOnMain(useTimerStore.getState().timer);
   if (cleared) return true;
+  if (keepTimer) {
+    // A refused write, not a mismatch: main still holds *this* session, so
+    // there is nothing on its side to adopt.
+    useTimerStore.setState({ timer: keepTimer, now: Date.now() });
+    return false;
+  }
   const { activeTimer } = useDataStore.getState().data ?? {};
   useTimerStore.setState({ timer: activeTimer ?? null, now: Date.now() });
   return false;
@@ -235,7 +246,16 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     let cleared = true;
     let settled = false;
     try {
-      ({ cleared } = await settleOnMain(cur?.taskId));
+      const outcome = await settleOnMain(cur ?? null);
+      cleared = outcome.cleared;
+      if (outcome.keepTimer) {
+        // Main is still counting the session the UI just cleared. Rolling the
+        // optimistic clear back keeps both sides on the same session; letting
+        // them diverge means the next start() overwrites an abandoned timer
+        // with no TimeEntry and no log — which the expectedTaskId pin exists
+        // to prevent.
+        set({ timer: outcome.keepTimer, now: Date.now() });
+      }
       settled = true;
     } finally {
       if (cleared) {

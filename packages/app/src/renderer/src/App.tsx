@@ -139,10 +139,20 @@ export default function App() {
 
   // Pull the store's current mode, then follow the changes (ADR-0004).
   useEffect(() => {
-    const unsubscribe = useDataStore.getState().subscribeStoreMode();
-    // The promise resolves once the pull lands and the subscription is live.
+    let off: (() => void) | null = null;
+    let live = true;
+    void useDataStore
+      .getState()
+      .subscribeStoreMode()
+      .then((fn) => {
+        // Unmounted before the pull resolved: drop the subscription rather
+        // than registering one no component will ever remove.
+        if (!live) fn();
+        else off = fn;
+      });
     return () => {
-      void unsubscribe.then((off) => off());
+      live = false;
+      off?.();
     };
   }, []);
 

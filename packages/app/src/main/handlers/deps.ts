@@ -81,8 +81,13 @@ export function asCommand<
   // Drop only `persisted`; the rest (taskId, projectId, settledMs) is what the
   // caller needs to act on, and the renderer was told to expect it by contract.
   if (!result.persisted) return REFUSED;
+  // Drop only `persisted`; the rest (taskId, projectId, settledMs) is what the
+  // caller needs to act on, and the renderer was told to expect it by contract.
   const { persisted: _dropped, ...rest } = result;
-  return maskedResult(rest as { ok: true; data: AppData }) as Omit<R, 'persisted'>;
+  // written() does the masking, so this is not a second spelling of "mask and
+  // wrap": two of them on one file means a change to the masking rule has to
+  // land in both.
+  return { ...rest, data: written(rest.data).data } as Omit<R, 'persisted'>;
 }
 
 export function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {
