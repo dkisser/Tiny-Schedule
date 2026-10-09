@@ -74,11 +74,12 @@ jobs:
       - name: Enforce size budget (< 20 MB per dmg)
         run: |
           set -euo pipefail
-          DMGS=$(find packages/tauri-app/src-tauri/target/*/release/bundle/dmg -name '*.dmg' | sort)
-          if [ -z "$DMGS" ]; then
-            echo "::error::没有找到任何 dmg 产物"; exit 1
-          fi
-          for dmg in $DMGS; do
+          # dmg 文件名含空格(Tauri 用 productName_version_arch.dmg 命名)，
+          # 所以必须用 -print0 / read -d '' 成对处理；未加引号的 for 会按空格分词，
+          # 把 "Tiny Schedule_0.2.0_aarch64.dmg" 拆成两个词。
+          found=0
+          while IFS= read -r -d '' dmg; do
+            found=1
             # dmg 是压缩镜像，du 报的是稀疏后的实际占用；用 du -h 与真实字节双口径核对
             size_kb=$(du -k "$dmg" | cut -f1)
             echo "$(du -h "$dmg" | cut -f1)  $dmg"
@@ -86,7 +87,10 @@ jobs:
               echo "::error::$dmg 为 ${size_kb}KB，超过 20MB 门禁"
               exit 1
             fi
-          done
+          done < <(find packages/tauri-app/src-tauri/target/*/release/bundle/dmg -name '*.dmg' -print0 | sort -z)
+          if [ "$found" -eq 0 ]; then
+            echo "::error::没有找到任何 dmg 产物"; exit 1
+          fi
 
       - name: Create GitHub Release & upload artifacts
         uses: softprops/action-gh-release@v2
