@@ -51,6 +51,7 @@ mock.module('../src/renderer/src/api', () => ({
 }));
 
 const { useDataStore } = await import('../src/renderer/src/stores/data');
+const { api } = await import('../src/renderer/src/api');
 const { emptyAppData, INBOX_PROJECT_ID } = await import('@tiny-schedule/shared');
 
 function datasetWithATask(): AppData {
@@ -195,5 +196,41 @@ describe('control-flow channels report a refusal as a rejection (ADR-0004)', () 
     const result = await (await import('../src/renderer/src/api')).api().timingStop({});
     expect(result.ok).toBe(false);
     expect(result.ok === false && 'data' in result).toBe(true);
+  });
+});
+
+describe('deliberate acts report a refusal; keystrokes do not (#23)', () => {
+  test('reportRefusal speaks only when the write was refused', async () => {
+    // The asymmetry is the point. A toast per write is what buried the real
+    // signal during the debounced title edits; a toast for a checkbox the user
+    // deliberately ticked is the difference between "it sprang back" and
+    // "it never happened".
+    const { reportRefusal } = await import('../src/renderer/src/stores/data');
+    responses.set('taskUpsert', { ok: false, error: 'WRITE_REFUSED' });
+    expect(await reportRefusal(api().taskUpsert({} as never), '无法标记为已做完')).toBe(false);
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]).toContain('无法标记为已做完');
+
+    toasts.length = 0;
+    responses.set('taskUpsert', { ok: true, data: datasetWithATask(), settledMs: 0 });
+    expect(await reportRefusal(api().taskUpsert({} as never), '无法标记为已做完')).toBe(true);
+    expect(toasts).toHaveLength(0);
+  });
+
+  test('createTag reports whether the tag landed', async () => {
+    // Same UI as creating a project — type a name, press enter — so it must
+    // behave the same way. A bare AppData here made "create a group" quietly
+    // depend on which group it was.
+    responses.set('tagCreate', { ok: false, error: 'WRITE_REFUSED' });
+    expect(await useDataStore.getState().createTag('重要')).toBe(false);
+    responses.set('tagCreate', { ok: true, data: datasetWithATask() });
+    expect(await useDataStore.getState().createTag('重要')).toBe(true);
+  });
+
+  test('createProject reports no id when refused, so the draft can be kept', async () => {
+    responses.set('projectCreate', { ok: false, error: 'WRITE_REFUSED' });
+    expect(await useDataStore.getState().createProject('写作')).toBeNull();
+    responses.set('projectCreate', { ok: true, data: datasetWithATask(), projectId: 'p9' });
+    expect(await useDataStore.getState().createProject('写作')).toBe('p9');
   });
 });

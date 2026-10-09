@@ -673,7 +673,7 @@ export const IpcInvokeContract = {
     req: ProjectDeleteReqSchema,
     res: null as unknown as AppData,
   },
-  tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as AppData },
+  tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as WriteOutcome },
   tagUpdate: { ch: Ipc.tagUpdate, req: TagUpdateReqSchema, res: null as unknown as AppData },
   tagDelete: { ch: Ipc.tagDelete, req: TagDeleteReqSchema, res: null as unknown as AppData },
   settingsUpdate: {

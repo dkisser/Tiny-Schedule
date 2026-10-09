@@ -58,6 +58,26 @@ export type IdeaPatch = Omit<Idea, 'validationGoal' | 'timeline'> & {
  * back is still the last good one — adopting it is a no-op, and the banner is
  * already telling the user nothing is being saved.
  */
+/**
+ * Say that a user-initiated action did not take effect.
+ *
+ * Only for deliberate acts — pressing "新建任务", ticking a checkbox — where
+ * the interface otherwise springs back to a state the user did not ask for and
+ * nothing says why. Deliberately NOT used by the debounced field edits: those
+ * fire per keystroke, and a toast there buries the one real signal (which is
+ * why the banner exists at all). The banner states the cause; this states the
+ * consequence.
+ */
+export async function reportRefusal(
+  outcome: Promise<TaskUpsertOutcome>,
+  what: string,
+): Promise<boolean> {
+  const result = await outcome;
+  if (result.ok) return true;
+  toast.error(`${what}：数据文件当前不可写`);
+  return false;
+}
+
 function adopt(data: AppData): AppData {
   useDataStore.setState({ data });
   return data;
@@ -172,7 +192,7 @@ interface DataState {
     patch: { title?: string; primaryColor?: string | null; isArchived?: boolean },
   ) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
-  createTag: (title: string) => Promise<void>;
+  createTag: (title: string) => Promise<boolean>;
   updateTag: (id: string, title: string) => Promise<void>;
   deleteTag: (id: string) => Promise<void>;
   updateSettings: (
@@ -326,8 +346,13 @@ export const useDataStore = create<DataState>((set, get) => ({
   deleteProject: async (id) => {
     adopt(await api().projectDelete({ id }));
   },
+  // true once the tag is on disk. The sidebar keeps its draft when this is
+  // false, so a refused write does not eat the name the user just typed.
   createTag: async (title) => {
-    adopt(await api().tagCreate({ title }));
+    const outcome = await api().tagCreate({ title });
+    if (!outcome.ok) return false;
+    adopt(outcome.data);
+    return true;
   },
   updateTag: async (id, title) => {
     adopt(await api().tagUpdate({ id, title }));

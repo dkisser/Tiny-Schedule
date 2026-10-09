@@ -27,7 +27,16 @@ export function projectHandlers({ projects }: HandlerDeps) {
 
     projectDelete: (req: { id: string }) => masked(projects.remove(req.id)),
 
-    tagCreate: (req: { title: string; color?: string }) => masked(projects.createTag(req)),
+    // Control flow for the same reason create is: the sidebar clears the
+    // draft only once this lands, so a refused create must not consume the
+    // name the user just typed. Same UI, same rule — the tag path being a
+    // bare AppData while the project path was not would have made "create a
+    // group" quietly behave two different ways.
+    tagCreate: (req: { title: string; color?: string }) => {
+      const { data, persisted } = projects.createTagWithOutcome(req);
+      if (!persisted) return REFUSED;
+      return written(data);
+    },
 
     tagUpdate: (req: { id: string; title?: string; color?: string }) =>
       masked(projects.updateTag(req)),

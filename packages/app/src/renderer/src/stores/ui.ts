@@ -1,6 +1,6 @@
 import type { Task } from '@tiny-schedule/shared';
 import { create } from 'zustand';
-import { useDataStore } from './data';
+import { reportRefusal, useDataStore } from './data';
 import { useTimerStore } from './timer';
 
 export type View =
@@ -85,7 +85,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     // Un-completing leaves the task clean: its time is already settled and is
     // deliberately not restored.
     if (task.isDone) {
-      void useDataStore.getState().upsertTask({ ...task, isDone: false, doneAt: undefined });
+      void reportRefusal(
+        useDataStore.getState().upsertTask({ ...task, isDone: false, doneAt: undefined }),
+        '取消完成失败',
+      );
       return;
     }
     const timing = useTimerStore.getState().timer;
@@ -93,7 +96,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     // not settle someone else's time, and needs no confirmation.
     if (timing?.taskId !== task.id) {
       // doneAt is stamped by the main process, which knows the stored value.
-      void useDataStore.getState().upsertTask({ ...task, isDone: true });
+      void reportRefusal(
+        useDataStore.getState().upsertTask({ ...task, isDone: true }),
+        '无法标记为已做完',
+      );
       return;
     }
     // Freeze the clock at the moment the user chose to complete, so deliberation
