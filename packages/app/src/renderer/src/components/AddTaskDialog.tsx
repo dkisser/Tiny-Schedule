@@ -66,7 +66,7 @@ export function AddTaskDialog({
       const tag = data.tags[id];
       if (tag) tagSnapshots[id] = { title: tag.title, ...(tag.color ? { color: tag.color } : {}) };
     }
-    await upsertTask({
+    const outcome = await upsertTask({
       ...blankTask(trimmed, project),
       projectId: project.id,
       projectTitle: project.title,
@@ -76,6 +76,11 @@ export function AddTaskDialog({
       tagIds,
       tagSnapshots: Object.keys(tagSnapshots).length > 0 ? tagSnapshots : undefined,
     });
+    // Stay open on a refused write. Closing would take the title, the notes,
+    // the due date and the estimate with it — the user would have to retype
+    // everything, and see a dialog that says "saved" when nothing was.
+    // The banner explains why; this only has to not destroy their input.
+    if (!outcome.ok) return;
     onClose();
   };
 

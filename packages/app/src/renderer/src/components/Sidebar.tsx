@@ -22,6 +22,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useState } from 'react';
+import { toast } from 'sonner';
 import { dueFollowUps } from '../lib/followUps';
 import { ideaByProjectId, openIdeas } from '../lib/ideas';
 import { cn } from '../lib/utils';
@@ -110,11 +111,26 @@ export function Sidebar() {
   const submitCreate = async () => {
     const title = draft.trim();
     const group = creating;
-    setCreating(null);
-    setDraft('');
-    if (!group || !title) return;
-    if (group === 'projects') await createProject(title.slice(0, PROJECT_TITLE_MAX_LENGTH));
-    else await createTag(title);
+    if (!group || !title) {
+      setCreating(null);
+      setDraft('');
+      return;
+    }
+    // Clearing the draft only after the write succeeds. It used to be cleared
+    // up front, so a store that refused the write consumed the name the user
+    // had just typed and reported nothing — the text was gone and no project
+    // existed, with no way to tell that from a mis-click.
+    const landed =
+      group === 'projects'
+        ? (await createProject(title.slice(0, PROJECT_TITLE_MAX_LENGTH))) !== null
+        : await createTag(title);
+    if (landed) {
+      setCreating(null);
+      setDraft('');
+      return;
+    }
+    // Keep the draft so the press can be retried once the file is repaired.
+    toast.error(`${group === 'projects' ? '项目' : '标签'}未创建：数据文件当前不可写`);
   };
 
   const cancelCreate = () => {

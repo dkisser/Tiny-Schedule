@@ -91,12 +91,20 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     createTag(req: { title: string; color?: string }): AppData {
-      const { data: next } = store.update((d) => {
+      return this.createTagWithOutcome(req).data;
+    },
+
+    /** Same write, plus whether it landed — see tagCreate in the handler. */
+    createTagWithOutcome(req: { title: string; color?: string }): {
+      data: AppData;
+      persisted: boolean;
+    } {
+      const { data: next, persisted } = store.update((d) => {
         const id = `tag_${randomUUID()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
-      logger.info({ action: 'tag:create', title: req.title });
-      return next;
+      logger.info({ action: 'tag:create', title: req.title, persisted });
+      return { data: next, persisted };
     },
 
     updateTag(req: { id: string; title?: string; color?: string }): AppData {
