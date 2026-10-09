@@ -22,6 +22,13 @@ interface DataState {
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
   upsertIdea: (idea: Idea) => Promise<void>;
+  /** Run an idea intent command and adopt its dataset. See the implementation. */
+  runIdeaCommand: <R extends { ok: true; data: AppData }>(
+    run: () => Promise<R | { ok: false; error: string }>,
+  ) => Promise<R | { ok: false; error: string }>;
+  runFollowUpCommand: <R extends { ok: true; data: AppData }>(
+    run: () => Promise<R | { ok: false; error: string }>,
+  ) => Promise<R | { ok: false; error: string }>;
   deleteIdea: (id: string) => Promise<void>;
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   /**
@@ -75,7 +82,18 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   upsertFollowUp: async (followUp) => {
-    const data = await api().followUpUpsert(followUp);
+    // Also a field edit: isResolved/resolvedAt advance only through
+    // followUpResolve/followUpReopen, so passing a full snapshot through would
+    // let a stale one undo a resolve. nextFollowUpDay keeps null-vs-undefined
+    // meaning clear (null clears the date input) on the way in.
+    const data = await api().followUpUpsert({
+      id: followUp.id,
+      title: followUp.title,
+      notes: followUp.notes,
+      createdAt: followUp.createdAt,
+      entries: followUp.entries,
+      nextFollowUpDay: followUp.nextFollowUpDay ?? null,
+    });
     set({ data });
   },
   deleteFollowUp: async (id) => {
@@ -83,8 +101,42 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   upsertIdea: async (idea) => {
-    const data = await api().ideaUpsert(idea);
+    // `ideaUpsert` is a field *edit*, not a replace (ADR-0003): `status` and
+    // every transition field are absent from the request by design, so a
+    // snapshot written back here can never advance or undo the idea's state.
+    // Transitions go through the intent commands below instead.
+    const data = await api().ideaUpsert({
+      id: idea.id,
+      title: idea.title,
+      notes: idea.notes,
+      createdAt: idea.createdAt,
+      validationGoal: idea.validationGoal,
+    });
     set({ data });
+  },
+
+  /**
+   * Run an intent command, adopt the dataset it returns, and pass its verdict
+   * back to the caller.
+   *
+   * The caller has to branch on the verdict — a refused command leaves the UI
+   * where it was, which is the point (ADR-0004). Returning the whole result
+   * rather than just the data keeps that decision with the component that has
+   * the context to make it: a rejected convert should not navigate, a rejected
+   * entry should keep the text the user typed.
+   */
+  runIdeaCommand: async (run) => {
+    const result = await run();
+    if (!result.ok) return result as { ok: false; error: string };
+    set({ data: result.data });
+    return result;
+  },
+
+  runFollowUpCommand: async (run) => {
+    const result = await run();
+    if (!result.ok) return result as { ok: false; error: string };
+    set({ data: result.data });
+    return result;
   },
   deleteIdea: async (id) => {
     const data = await api().ideaDelete({ id });

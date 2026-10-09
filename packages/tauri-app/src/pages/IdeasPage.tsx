@@ -9,6 +9,7 @@ import {
   SquareArrowOutUpRight,
 } from 'lucide-react';
 import { useState } from 'react';
+import { api } from '../api';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
@@ -53,6 +54,7 @@ function useIdeaRow(idea: Idea) {
 // 收集箱行：整行点击选中；hover 只放轻操作（完成/废弃），转任务与升级在详情面板。
 function OpenIdeaRow({ idea }: { idea: Idea }) {
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const { rowProps } = useIdeaRow(idea);
 
   return (
@@ -71,7 +73,7 @@ function OpenIdeaRow({ idea }: { idea: Idea }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertIdea(completeIdea(idea));
+            void runIdeaCommand(() => api().ideaComplete({ id: idea.id }));
           }}
         >
           <Check />
@@ -82,7 +84,7 @@ function OpenIdeaRow({ idea }: { idea: Idea }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertIdea(discardIdea(idea));
+            void runIdeaCommand(() => api().ideaDiscard({ id: idea.id }));
           }}
         >
           <Ban />

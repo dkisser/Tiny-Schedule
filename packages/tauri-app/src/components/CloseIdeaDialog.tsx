@@ -1,5 +1,6 @@
 import type { IdeaVerdict } from '@tiny-schedule/shared';
 import { useEffect, useState } from 'react';
+import { api } from '../api';
 import { closeIdeaWithVerdict } from '../lib/ideas';
 import { cn } from '../lib/utils';
 import { useDataStore } from '../stores/data';
@@ -19,6 +20,7 @@ const RESULTS: { value: IdeaVerdict['result']; label: string }[] = [
 export function CloseIdeaDialog() {
   const data = useDataStore((s) => s.data);
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const ideaId = useUiStore((s) => s.closingIdeaId);
   const setClosingIdea = useUiStore((s) => s.setClosingIdea);
   const [result, setResult] = useState<IdeaVerdict['result']>('validated');
@@ -40,7 +42,9 @@ export function CloseIdeaDialog() {
   if (!idea) return null;
 
   const confirm = async () => {
-    await upsertIdea(closeIdeaWithVerdict(idea, result, text.trim() || undefined));
+    await runIdeaCommand(() =>
+      api().ideaCloseWithVerdict({ id: idea.id, result, text: text.trim() || undefined }),
+    );
     setClosingIdea(null);
   };
 

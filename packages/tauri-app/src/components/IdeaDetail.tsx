@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { api } from '../api';
 import {
   appendIdeaEntry,
   completeIdea,
@@ -48,6 +49,7 @@ const VERDICT_LABELS = {
 // 验证目标：一行可编辑文本，防抖提交（同标题编辑模式）。
 function ValidationGoalEditor({ idea }: { idea: Idea }) {
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const [goal, setGoal, flushGoal] = useDebouncedCommit(idea.validationGoal ?? '', (v) => {
     const trimmed = v.trim();
     if (trimmed !== (idea.validationGoal ?? '')) {
@@ -71,6 +73,7 @@ function ValidationGoalEditor({ idea }: { idea: Idea }) {
 // 演进日志：追加 + hover 编辑/删除（仅验证中可改）。
 function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const [entryDraft, setEntryDraft] = useState('');
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
@@ -78,7 +81,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
   const addEntry = () => {
     const text = entryDraft.trim();
     if (!text) return;
-    void upsertIdea(appendIdeaEntry(idea, text));
+    void runIdeaCommand(() => api().ideaAddEntry({ id: idea.id, text }));
     setEntryDraft('');
   };
 
@@ -89,7 +92,10 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
 
   const submitEdit = () => {
     const text = editingText.trim();
-    if (editingEntryId && text) void upsertIdea(updateIdeaEntry(idea, editingEntryId, text));
+    if (editingEntryId && text)
+      void runIdeaCommand(() =>
+        api().ideaUpdateEntry({ id: idea.id, entryId: editingEntryId, text }),
+      );
     setEditingEntryId(null);
     setEditingText('');
   };
@@ -173,7 +179,11 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
                         size="icon-xs"
                         aria-label="删除记录"
                         className="text-muted-foreground hover:text-destructive"
-                        onClick={() => void upsertIdea(deleteIdeaEntry(idea, entry.id))}
+                        onClick={() =>
+                          void runIdeaCommand(() =>
+                            api().ideaDeleteEntry({ id: idea.id, entryId: entry.id }),
+                          )
+                        }
                       >
                         <Trash2 />
                       </Button>
@@ -193,6 +203,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
   const data = useDataStore((s) => s.data);
   const upsertTask = useDataStore((s) => s.upsertTask);
   const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const selectIdea = useUiStore((s) => s.selectIdea);
   const setView = useUiStore((s) => s.setView);
   const selectTask = useUiStore((s) => s.selectTask);
@@ -216,12 +227,13 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
   const openTaskCount = idea.projectId && data ? ideaProjectOpenTaskCount(data, idea.projectId) : 0;
   const pendingVerdict = data ? ideaPendingVerdict(idea, data) : false;
 
+  // One command, not a task write plus an idea write: converting used to be
+  // two `store.update` calls, so an interruption between them left a task
+  // created from an idea still marked open. `ideaConvertToTask` moves both in
+  // a single transition and returns the task id, so there is nothing to
+  // reconcile afterwards either.
   const convert = async () => {
-    const inbox = data?.projects[INBOX_PROJECT_ID];
-    if (!inbox) return;
-    const { task, converted } = ideaToTask(idea, inbox);
-    await upsertTask(task);
-    await upsertIdea(converted);
+    await runIdeaCommand(() => api().ideaConvertToTask({ id: idea.id }));
   };
 
   const openTask = () => {
@@ -367,7 +379,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => void upsertIdea(completeIdea(idea))}
+                onClick={() => void runIdeaCommand(() => api().ideaComplete({ id: idea.id }))}
               >
                 <Check />
                 完成
@@ -375,7 +387,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
               <Button
                 variant="ghost"
                 className="flex-1"
-                onClick={() => void upsertIdea(discardIdea(idea))}
+                onClick={() => void runIdeaCommand(() => api().ideaDiscard({ id: idea.id }))}
               >
                 <Ban />
                 废弃
@@ -399,7 +411,7 @@ export function IdeaDetail({ idea }: { idea: Idea }) {
           <Button
             variant="outline"
             className="flex-1"
-            onClick={() => void upsertIdea(reopenIdea(idea))}
+            onClick={() => void runIdeaCommand(() => api().ideaReopen({ id: idea.id }))}
           >
             <RotateCcw />
             重新打开

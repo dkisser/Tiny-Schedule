@@ -1,6 +1,6 @@
 import { PROJECT_TITLE_MAX_LENGTH } from '@tiny-schedule/shared';
 import { useEffect, useState } from 'react';
-import { upgradeIdeaToProject } from '../lib/ideas';
+import { api } from '../api';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { Button } from './ui/button';
@@ -11,8 +11,7 @@ import { Textarea } from './ui/textarea';
 // 升级为项目：创建专属项目（一对一）并把想法带入验证中。不做 icon/color 选择。
 export function UpgradeIdeaDialog() {
   const data = useDataStore((s) => s.data);
-  const createProject = useDataStore((s) => s.createProject);
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const ideaId = useUiStore((s) => s.upgradeIdeaId);
   const setUpgradeIdea = useUiStore((s) => s.setUpgradeIdea);
   const [title, setTitle] = useState('');
@@ -38,12 +37,20 @@ export function UpgradeIdeaDialog() {
     const trimmed = title.trim();
     const trimmedGoal = goal.trim();
     if (!trimmed) return;
-    // `null` means the write was refused, so no project exists and the dialog
-    // stays open with the user's text intact — returning an id here would point
-    // the idea at a project the store discarded.
-    const projectId = await createProject(trimmed);
-    if (!projectId) return;
-    await upsertIdea(upgradeIdeaToProject(idea, projectId, trimmedGoal || undefined));
+    // One command, not createProject followed by an idea write. Those were two
+    // separate `store.update` calls, so a refusal or an interruption between
+    // them left an empty project with no idea pointing at it — nothing the user
+    // asked for, and nothing in the UI that would let them find or clean it up.
+    // `ideaUpgradeToProject` creates the project and moves the idea in a single
+    // transition and returns the new project's id.
+    const result = await runIdeaCommand(() =>
+      api().ideaUpgradeToProject({
+        id: idea.id,
+        title: trimmed,
+        ...(trimmedGoal ? { validationGoal: trimmedGoal } : {}),
+      }),
+    );
+    if (!result.ok) return;
     setUpgradeIdea(null);
   };
 

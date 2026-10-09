@@ -1,6 +1,7 @@
 import { addDays, type FollowUp, localDate } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
+import { api } from '../api';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Input } from '../components/ui/input';
@@ -22,6 +23,7 @@ function formatDay(day: string): string {
 
 function FollowUpRow({ followUp }: { followUp: FollowUp }) {
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const runFollowUpCommand = useDataStore((s) => s.runFollowUpCommand);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const selected = useUiStore((s) => s.selectedFollowUpId === followUp.id);
   const due = isFollowUpDue(followUp);
@@ -90,7 +92,7 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
           size="xs"
           onClick={(e) => {
             e.stopPropagation();
-            void upsertFollowUp({ ...followUp, isResolved: true, resolvedAt: Date.now() });
+            void runFollowUpCommand(() => api().followUpResolve({ id: followUp.id }));
           }}
         >
           <CheckCircle2 />
@@ -104,6 +106,7 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
 export function FollowUpsPage() {
   const data = useDataStore((s) => s.data);
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const runFollowUpCommand = useDataStore((s) => s.runFollowUpCommand);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
   const [draft, setDraft] = useState('');
@@ -177,7 +180,7 @@ export function FollowUpsPage() {
                     className="shrink-0 opacity-0 group-hover:opacity-100"
                     onClick={(e) => {
                       e.stopPropagation();
-                      void upsertFollowUp({ ...f, isResolved: false, resolvedAt: undefined });
+                      void runFollowUpCommand(() => api().followUpReopen({ id: f.id }));
                     }}
                   >
                     <RotateCcw />

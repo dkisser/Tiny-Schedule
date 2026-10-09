@@ -2,6 +2,7 @@ import type { FollowUp } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
 import { CheckCircle2, ChevronLeft, Pencil, RotateCcw, Trash2 } from 'lucide-react';
 import { useRef, useState } from 'react';
+import { api } from '../api';
 import { newFollowUpId, waitingDays } from '../lib/followUps';
 import { useDebouncedCommit } from '../lib/useDebouncedCommit';
 import { useDataStore } from '../stores/data';
@@ -20,6 +21,7 @@ function formatEntryAt(at: number): string {
 
 export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
   const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const runFollowUpCommand = useDataStore((s) => s.runFollowUpCommand);
   const deleteFollowUp = useDataStore((s) => s.deleteFollowUp);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const [editingNotes, setEditingNotes] = useState(false);
@@ -169,11 +171,9 @@ export function FollowUpDetail({ followUp }: { followUp: FollowUp }) {
           variant="outline"
           className="flex-1"
           onClick={() =>
-            save(
-              followUp.isResolved
-                ? { isResolved: false, resolvedAt: undefined }
-                : { isResolved: true, resolvedAt: Date.now() },
-            )
+            void (followUp.isResolved
+              ? runFollowUpCommand(() => api().followUpReopen({ id: followUp.id }))
+              : runFollowUpCommand(() => api().followUpResolve({ id: followUp.id })))
           }
         >
           {followUp.isResolved ? (
