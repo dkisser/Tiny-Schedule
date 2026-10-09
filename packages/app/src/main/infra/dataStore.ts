@@ -36,6 +36,23 @@ export interface WriteResult {
   persisted: boolean;
 }
 
+/**
+ * How many backup generations to keep beside data.json.
+ *
+ * The cost is disk, and it is the whole cost: every generation is a full copy
+ * of the document, so 2 means three copies on disk where there used to be two.
+ * That is what buys the property that no content comparison can — a backup is
+ * kept for being *older*, not for holding more records, so the emptied-library
+ * case that defeated the count guard needs no special case at all.
+ *
+ * Two rather than one because one generation is the situation that already
+ * went wrong: a backup that a single unlucky write can overwrite is not a
+ * backup. Two is enough that the copy being displaced is always one the user
+ * has already seen survive. Halve the footprint by setting this to 1; nothing
+ * else in the store has to change.
+ */
+const BACKUP_GENERATIONS = 2;
+
 export class DataStore {
   private cache: AppData | null = null;
   /**
@@ -52,7 +69,7 @@ export class DataStore {
   private recoveryListeners: (() => void)[] = [];
   /** Told whenever the store enters or leaves the read-only mode. */
   private modeListeners: ((writable: boolean, reason: string | null) => void)[] = [];
-  /** Records the backup holds; invalidated on every rotation. null = not read yet. */
+  /** Records generation 1 holds; invalidated on every rotation. null = not read yet. */
   private cachedBackupRecords: number | null = null;
 
   constructor(
@@ -66,18 +83,31 @@ export class DataStore {
     return join(this.dir, 'data.json');
   }
 
-  private get backupPath(): string {
+  /**
+   * The pre-generations backup name.
+   *
+   * Kept as a path and not as a policy: it is only ever read once, folded into
+   * generation 1, and never written again. See adoptLegacyBackup().
+   */
+  private get legacyBackupPath(): string {
     return join(this.dir, 'data.backup.json');
   }
 
+  /** Generation 1 is the newest backup; N the oldest one still kept. */
+  private backupPath(generation: number): string {
+    return join(this.dir, `data.backup.${generation}.json`);
+  }
+
   load(): AppData {
-    // Each fallback is announced. Landing on emptyAppData() after two failed
-    // parses means the user is looking at an empty app and a data.json that
-    // still looks fine on disk; without a record of why, that is
-    // indistinguishable from a fresh install.
+    // Before anything reads a backup. Adopting it first is what lets every
+    // later fallback simply look at the generations.
+    this.adoptLegacyBackup();
+    // Each fallback is announced. Landing on emptyAppData() after the primary
+    // and every generation have failed to parse means the user is looking at an
+    // empty app and a data.json that still looks fine on disk; without a record
+    // of why, that is indistinguishable from a fresh install.
     const problems: string[] = [];
-    const read = (path: string) => this.readValidated(path, (r) => problems.push(r));
-    const primary = read(this.filePath);
+    const primary = this.readValidated(this.filePath, (r) => problems.push(r));
     // Latch only when the primary genuinely failed to yield a dataset. A file
     // that recovered via quarantine also pushes a problem — and latching on
     // that made every save refuse, leaving the app permanently read-only,
@@ -86,7 +116,7 @@ export class DataStore {
     if (primary) {
       this.cache = primary;
     } else {
-      const backup = read(this.backupPath);
+      const backup = this.readNewestBackup((r) => problems.push(r));
       if (backup) {
         this.cache = backup;
         this.logger.warn({
@@ -254,7 +284,7 @@ export class DataStore {
       // Collect why, so adopting `empty` is never an unexplained outcome: the
       // one place the fallback chain used to end without naming a cause.
       const backupProblems: string[] = [];
-      const backup = this.readValidated(this.backupPath, (r) => backupProblems.push(r));
+      const backup = this.readNewestBackup((r) => backupProblems.push(r));
       this.cache = backup ?? emptyAppData();
       this.primaryUnreadable = null;
       this.refusalReported = false;
@@ -268,7 +298,7 @@ export class DataStore {
         // "the backup was there and unreadable" — two very different incidents
         // for whoever has to restore this by hand, and the previousReason above
         // describes the *deleted* file, so it says nothing about the backup.
-        backupState: existsSync(this.backupPath) ? 'present' : 'missing',
+        backupState: this.hasAnyBackup() ? 'present' : 'missing',
         ...(backupProblems.length > 0 ? { backupProblems } : {}),
       });
       for (const listener of this.modeListeners) listener(true, null);
@@ -313,7 +343,7 @@ export class DataStore {
   }
 
   /**
-   * Persist `data`, rotating the outgoing file to the backup first.
+   * Persist `data`, rotating the generations down first.
    *
    * Returns false when the write was refused. The refusal is also logged (once
    * per incident), but a caller that has to report a user-visible result cannot
@@ -342,22 +372,27 @@ export class DataStore {
   }
 
   /**
-   * Demote data.json to the backup, atomically.
+   * Demote every generation one slot and make data.json generation 1.
    *
    * The primary write is tmp+rename, so a crash mid-write cannot truncate it.
-   * copyFileSync straight into the backup had no such protection: a crash (or
+   * copyFileSync straight into a backup had no such protection: a crash (or
    * a full disk) during the copy left a half-written backup, and the next
    * start then had two damaged files instead of one recoverable one. Copy to a
-   * temp name and rename, so the backup is always either the old file or the
-   * new one — never a partial one.
+   * temp name and rename, so each generation is always either the file it
+   * replaced or the new one — never a partial one.
+   *
+   * The shift is renames only, which are atomic in their own right: a
+   * generation is never rewritten in place, so an interrupted rotation leaves
+   * the generations that did move intact and simply stops.
    */
   private rotateBackup(): void {
-    const tmp = `${this.backupPath}.tmp`;
+    const tmp = `${this.backupPath(1)}.tmp`;
     try {
+      this.demoteGenerations();
       copyFileSync(this.filePath, tmp);
-      renameSync(tmp, this.backupPath);
-      // The backup now holds exactly what this.cache held a moment ago, so the
-      // count is known without re-reading it. Nulling it instead meant the
+      renameSync(tmp, this.backupPath(1));
+      // Generation 1 now holds exactly what this.cache held a moment ago, so
+      // the count is known without re-reading it. Nulling it instead meant the
       // cache filled and was cleared on every save that rotates — which is
       // the common path — so it only ever helped when rotation was suppressed,
       // the exact case it was not written for.
@@ -372,7 +407,8 @@ export class DataStore {
       }
       this.logger.warn({
         action: 'dataStore:backup:rotateFailed',
-        file: this.backupPath,
+        file: this.backupPath(1),
+        generations: BACKUP_GENERATIONS,
         reason: err instanceof Error ? err.message : String(err),
         note: 'continuing with the primary write',
       });
@@ -380,11 +416,94 @@ export class DataStore {
   }
 
   /**
+   * Move each generation down one slot, dropping the oldest.
+   *
+   * Oldest first, on purpose. Dropping generation N before shifting means an
+   * interrupted shift can only ever lose the generation that was about to be
+   * lost anyway; going the other way would leave two files holding the same
+   * copy and, if the crash landed between the shift and the new write, a
+   * chain whose head is a duplicate of its tail.
+   */
+  private demoteGenerations(): void {
+    const oldest = this.backupPath(BACKUP_GENERATIONS);
+    if (existsSync(oldest)) unlinkSync(oldest);
+    for (let generation = BACKUP_GENERATIONS - 1; generation >= 1; generation -= 1) {
+      const from = this.backupPath(generation);
+      if (existsSync(from)) renameSync(from, this.backupPath(generation + 1));
+    }
+  }
+
+  /**
+   * Fold a pre-generations `data.backup.json` into generation 1.
+   *
+   * Lazy, on load, rather than in a one-shot migration: that file is the
+   * user's data, and a migration that only runs on the next release's first
+   * launch is one that can be skipped by an update rollback, or never reached
+   * at all if the user quits first. Every code path that can read or write a
+   * backup goes through load(), so doing it here means there is no path that
+   * can leave the old name behind.
+   *
+   * Whatever generation 1 holds is demoted rather than overwritten. That case
+   * is only reachable by running an older build in between (it writes the old
+   * name again), and even then it costs nothing: both files are kept, the
+   * older one moves down a slot it would have held anyway.
+   */
+  private adoptLegacyBackup(): void {
+    if (!existsSync(this.legacyBackupPath)) return;
+    try {
+      this.demoteGenerations();
+      renameSync(this.legacyBackupPath, this.backupPath(1));
+      // Generation 1 now holds different bytes than the count cached against
+      // the old one, and load() can run more than once on a live store.
+      this.cachedBackupRecords = null;
+      this.logger.info({
+        action: 'dataStore:backup:legacyAdopted',
+        file: this.legacyBackupPath,
+        generation: 1,
+      });
+    } catch (err) {
+      // Leave the file where it is. A failed adoption that deleted the user's
+      // backup to report the failure would be the failure.
+      this.logger.warn({
+        action: 'dataStore:backup:legacyAdoptFailed',
+        file: this.legacyBackupPath,
+        reason: err instanceof Error ? err.message : String(err),
+        note: 'left in place',
+      });
+    }
+  }
+
+  /** Whether any generation exists, readable or not. */
+  private hasAnyBackup(): boolean {
+    for (let generation = 1; generation <= BACKUP_GENERATIONS; generation += 1) {
+      if (existsSync(this.backupPath(generation))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The newest generation that parses, or null.
+   *
+   * Newest first, because generations are ordered by write time — an older
+   * one is a poorer recovery point regardless of what either of them holds.
+   * Reading them in the other order would let a stale file beat the current
+   * one, which is the same class of mistake as demoting a poorer copy.
+   */
+  private readNewestBackup(onUnreadable: (reason: string) => void): AppData | null {
+    for (let generation = 1; generation <= BACKUP_GENERATIONS; generation += 1) {
+      const data = this.readValidated(this.backupPath(generation), onUnreadable);
+      if (data) return data;
+    }
+    return null;
+  }
+
+  /**
    * Whether the outgoing data.json may become the backup.
    *
-   * The rotation is what makes a corrupt primary survivable, so it is also the
-   * single step that can destroy the last good copy. The rule is a *generation*
-   * one: the backup is never replaced by a poorer copy of the library.
+   * The generations are the guarantee; this is the cheaper second layer under
+   * them. A backup is never replaced by a poorer copy of the library, which is
+   * a rule about *content*, and content is the one thing the generations
+   * cannot see — they know a copy is older, not that it holds more.
    *
    * A plain "don't rotate an empty dataset" check is not that. It buys exactly
    * one write — the user clears their tasks, the backup is spared, and then the
@@ -394,9 +513,11 @@ export class DataStore {
    * to at least that size.
    *
    * Counting records is a proxy, not a proof: it cannot tell a user who
-   * deliberately deleted 40 of 50 tasks from one who lost them. Keeping the
-   * richer copy is the right side to err on — the cost is a stale backup, the
-   * alternative is an unrecoverable one.
+   * deliberately deleted 40 of 50 tasks from one who lost them, and it cannot
+   * see a whole record type replaced by another of the same size — which is
+   * why generation 2 exists rather than this check standing alone. Keeping
+   * the richer copy is the right side to err on — the cost is a stale backup,
+   * the alternative is an unrecoverable one.
    */
   private rotationIsSafe(): boolean {
     // The dataset *on disk* — this.cache — not the one about to replace it.
@@ -412,6 +533,7 @@ export class DataStore {
     this.logger.warn({
       action: 'dataStore:backup:kept',
       note: 'the outgoing dataset holds fewer records than the backup it would replace',
+      file: this.backupPath(1),
       outgoing,
       backedUp,
     });
@@ -419,17 +541,17 @@ export class DataStore {
   }
 
   /**
-   * How many user records the backup holds, or -1 when it is missing or
+   * How many user records generation 1 holds, or -1 when it is missing or
    * unreadable.
    *
-   * Cached, and invalidated whenever the backup is rotated. The alternative —
-   * re-reading and re-parsing a file that cannot have changed since the last
-   * write — put a second full schema parse on every save while the dataset was
-   * empty, which is the hot path this guard itself created.
+   * Cached, and refreshed whenever the generations are rotated. The
+   * alternative — re-reading and re-parsing a file that cannot have changed
+   * since the last write — put a second full schema parse on every save while
+   * the dataset was empty, which is the hot path this guard itself created.
    */
   private backupRecordCount(): number {
     if (this.cachedBackupRecords === null) {
-      const backup = this.readValidated(this.backupPath, () => {});
+      const backup = this.readValidated(this.backupPath(1), () => {});
       this.cachedBackupRecords = backup ? countRecords(backup) : -1;
     }
     return this.cachedBackupRecords;
@@ -523,6 +645,24 @@ function countRecords(data: AppData): number {
     Object.keys(data.ideas).length +
     Object.keys(data.followUps).length +
     Object.keys(data.projects).filter((id) => id !== INBOX_PROJECT_ID).length +
-    Object.keys(data.tags).filter((id) => !SYSTEM_TAGS.has(id)).length
+    Object.keys(data.tags).filter((id) => !SYSTEM_TAGS.has(id)).length +
+    // Chat sessions are the one record type that is not a keyed map, so
+    // skipping them made the count blind to a whole library's worth of user
+    // data: a user with 200 tasks and 3 chats and a user whose 3 chats had
+    // just been wiped scored the same, and the guard waved the loss through.
+    countChatSessions(data)
   );
+}
+
+/**
+ * Sessions in `misc.chatSessions`, or 0 when there are none.
+ *
+ * Counted defensively because `misc` is `Record<string, unknown>` — a raw
+ * section this package does not model, and one an importer can write as
+ * anything at all. A guard that threw on a shape it did not recognise would be
+ * a guard that takes the primary write down with it.
+ */
+function countChatSessions(data: AppData): number {
+  const sessions = data.misc.chatSessions;
+  return Array.isArray(sessions) ? sessions.length : 0;
 }

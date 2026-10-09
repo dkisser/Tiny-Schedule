@@ -1,8 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
+import { type AppData, AppDataSchema, emptyAppData } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import { DataStore } from '../src/main/infra/dataStore';
 
@@ -11,6 +18,19 @@ const logger = { info: () => {}, warn: () => {}, error: () => {} } as unknown as
 
 function tmpDir() {
   return mkdtempSync(join(tmpdir(), 'tsdata-'));
+}
+
+/** Every backup file rotation left on disk, by name. */
+function backupFiles(dir: string): string[] {
+  return readdirSync(dir)
+    .filter((f) => f.startsWith('data.backup'))
+    .sort();
+}
+
+/** What one generation holds, or null when that generation is not there. */
+function generation(dir: string, n: number): AppData | null {
+  const path = join(dir, `data.backup.${n}.json`);
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as AppData) : null;
 }
 
 describe('DataStore', () => {
@@ -37,13 +57,13 @@ describe('DataStore', () => {
     expect(JSON.parse(raw).version).toBe(1);
   });
 
-  test('save keeps previous file as data.backup.json', () => {
+  test('save keeps the previous file as generation 1', () => {
     const dir = tmpDir();
     const s1 = new DataStore(dir, logger);
     s1.load();
     s1.update((cur) => ({ ...cur, settings: { ...cur.settings, userName: 'first' } }));
     s1.update((cur) => ({ ...cur, settings: { ...cur.settings, userName: 'second' } }));
-    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8'));
     expect(backup.settings.userName).toBe('first');
     expect(new DataStore(dir, logger).load().settings.userName).toBe('second');
   });
@@ -89,6 +109,10 @@ function emptyTask() {
     notes: '',
     created: 0,
   };
+}
+
+function emptyIdea() {
+  return { id: '', title: 'x', notes: '', createdAt: 0, status: 'open' as const };
 }
 
 describe('DataStore — a bad record must not cost the whole library', () => {
@@ -179,7 +203,7 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'a' } }));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'b' } }));
     expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(corrupt);
-    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+    expect(backupFiles(dir)).toEqual([]);
   });
 
   test('a refused store still tells the operator exactly once', () => {
@@ -228,7 +252,7 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     expect(Object.keys(after.ideas)).toEqual(['i1']);
     expect(after.settings.userName).toBe('w2');
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t1']);
   });
 
@@ -258,7 +282,7 @@ describe('DataStore — a bad record must not cost the whole library', () => {
       store.update((d) => ({ ...d, settings: { ...d.settings, userName: `x${i}` } }));
     }
     expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(corrupt);
-    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+    expect(backupFiles(dir)).toEqual([]);
   });
 
   test('a direct save() cannot persist a value derived from the fallback', () => {
@@ -290,7 +314,7 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'again' } }));
     // Both files still hold exactly what the user left there.
     expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe('{ not json');
-    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+    expect(backupFiles(dir)).toEqual([]);
   });
 
   test('a readable data.json still saves normally', () => {
@@ -339,13 +363,13 @@ describe('DataStore — a write must be able to report that it did not happen', 
     store.update((d) => ({ ...d, tasks: { ...d.tasks, t1: { ...emptyTask(), id: 't1' } } }));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
     const before = readFileSync(join(dir, 'data.json'), 'utf8');
-    const backupBefore = readFileSync(join(dir, 'data.backup.json'), 'utf8');
+    const backupBefore = readFileSync(join(dir, 'data.backup.1.json'), 'utf8');
     // Returning the same reference is how "nothing to write" is expressed.
     const result = store.update((d) => d);
     expect(result.persisted).toBe(true);
     expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(before);
     // The backup is the tell: a rotation would have replaced it.
-    expect(readFileSync(join(dir, 'data.backup.json'), 'utf8')).toBe(backupBefore);
+    expect(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).toBe(backupBefore);
   });
 });
 
@@ -363,24 +387,24 @@ describe('DataStore — backup rotation', () => {
   };
 
   test('a poorer dataset does not replace a richer backup', () => {
-    // The guard has to be a generation rule, not a one-write reprieve. The
-    // first attempt at this only checked "is the outgoing dataset empty", which
-    // bought exactly one write: the user cleared their tasks, the backup was
-    // spared, and then the first new task rotated the emptiness over that
-    // backup anyway — losing both generations, which is the outcome the guard
+    // The count guard has to be a generation rule, not a one-write reprieve.
+    // The first attempt at it only checked "is the outgoing dataset empty",
+    // which bought exactly one write: the user cleared their tasks, the backup
+    // was spared, and then the first new task rotated the emptiness over that
+    // backup anyway — losing both copies, which is the outcome the guard
     // claims to prevent.
     const dir = tmpDir();
     const store = withTasks(dir);
     store.update((d) => ({ ...d, tasks: {} }));
     expect(new DataStore(dir, logger).load().tasks).toEqual({});
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t1', 't2']);
 
     // Rebuilding to fewer records than the backup holds must not demote it.
     store.update((d) => ({ ...d, tasks: { ...d.tasks, t3: { ...emptyTask(), id: 't3' } } }));
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t1', 't2']);
     expect(Object.keys(new DataStore(dir, logger).load().tasks)).toEqual(['t3']);
   });
@@ -400,13 +424,13 @@ describe('DataStore — backup rotation', () => {
     }));
     // Still blocked: what is on disk is the empty dataset.
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t1', 't2']);
 
     // One more write, with the on-disk dataset now holding two records.
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'again' } }));
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t3', 't4']);
   });
 
@@ -418,12 +442,12 @@ describe('DataStore — backup rotation', () => {
     store.load();
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
-    unlinkSync(join(dir, 'data.backup.json'));
+    unlinkSync(join(dir, 'data.backup.1.json'));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'third' } }));
-    expect(existsSync(join(dir, 'data.backup.json'))).toBe(true);
-    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
-      'second',
-    );
+    expect(existsSync(join(dir, 'data.backup.1.json'))).toBe(true);
+    expect(
+      JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).settings.userName,
+    ).toBe('second');
   });
 
   test('a rotation refreshes what the guard believes about the backup', () => {
@@ -446,7 +470,7 @@ describe('DataStore — backup rotation', () => {
     // block a one-record write that a stale "0" would have allowed.
     store.update((d) => ({ ...d, tasks: { t9: { ...emptyTask(), id: 't9' } } }));
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toEqual(['t3', 't4']);
   });
 
@@ -469,19 +493,19 @@ describe('DataStore — backup rotation', () => {
     store.update((d) => ({ ...d, tasks: many('t', 10) }));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toHaveLength(10);
 
     // Shrink to 2: blocked, backup keeps 10.
     store.update((d) => ({ ...d, tasks: many('s', 2) }));
     expect(
-      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).tasks),
     ).toHaveLength(10);
 
     // Import 200. The incoming dataset dwarfs the backup and passes the check —
     // but the file being rotated is the 2-task one, which is far poorer.
     store.update((d) => ({ ...d, tasks: many('i', 200) }));
-    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8'));
     expect(Object.keys(backup.tasks)).toHaveLength(10);
     expect(new DataStore(dir, logger).load().tasks.i0).toBeDefined();
   });
@@ -502,21 +526,145 @@ describe('DataStore — backup rotation', () => {
     expect(cache).toBe(2);
   });
 
-  test('the backup is rotated through a temp file, never in place', () => {
-    // copyFileSync straight into data.backup.json had the asymmetry PR #7's
-    // review flagged: the primary write is tmp+rename, so a crash cannot
-    // truncate it, while a crash during the copy left a half-written backup —
-    // turning one damaged file into two.
+  test('no generation is ever rotated through a temp file left behind', () => {
+    // copyFileSync straight into a backup had the asymmetry PR #7's review
+    // flagged: the primary write is tmp+rename, so a crash cannot truncate it,
+    // while a crash during the copy left a half-written backup — turning one
+    // damaged file into two. Every generation has to keep that property, not
+    // just the newest one, so this walks the whole chain rather than the first
+    // rotation.
     const dir = tmpDir();
     const store = new DataStore(dir, logger);
     store.load();
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
-    expect(existsSync(join(dir, 'data.backup.json.tmp'))).toBe(false);
-    expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
-    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
-      'first',
-    );
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'third' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fourth' } }));
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    expect(generation(dir, 1)?.settings.userName).toBe('third');
+    expect(
+      JSON.parse(readFileSync(join(dir, 'data.backup.1.json'), 'utf8')).settings.userName,
+    ).toBe('third');
+  });
+});
+
+describe('DataStore — backups are kept as generations, not as one content-checked copy', () => {
+  test('generations rotate in write order and the one past the last is dropped', () => {
+    // Retention is by write order, not by what each copy holds. Four writes
+    // therefore leave exactly the two preceding ones and discard the third —
+    // no question asked of the contents, and nothing that has to be re-decided
+    // on the next save.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    for (const userName of ['w1', 'w2', 'w3', 'w4']) {
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName } }));
+    }
+    expect(backupFiles(dir)).toEqual(['data.backup.1.json', 'data.backup.2.json']);
+    expect(generation(dir, 1)?.settings.userName).toBe('w3');
+    expect(generation(dir, 2)?.settings.userName).toBe('w2');
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('w4');
+  });
+
+  test('an emptied library is still recoverable after any number of later writes', () => {
+    // The case the content guard alone cannot hold. Clearing the library does
+    // not stay a reprieve: the user then creates other records, the count
+    // catches up, and the emptiness is rotated in like any other write. Under
+    // the single-backup scheme that was the last copy of the tasks. Here
+    // generation 2 still holds them, which is the entire point of keeping two.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({
+      ...d,
+      tasks: { t1: { ...emptyTask(), id: 't1' }, t2: { ...emptyTask(), id: 't2' } },
+    }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
+
+    // The user clears the library and keeps working.
+    store.update((d) => ({ ...d, tasks: {} }));
+    store.update((d) => ({
+      ...d,
+      ideas: { i1: { ...emptyIdea(), id: 'i1' }, i2: { ...emptyIdea(), id: 'i2' } },
+    }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'after' } }));
+
+    // Generation 1 has rotated on, exactly as it would have before.
+    expect(generation(dir, 1)?.tasks).toEqual({});
+    // The tasks are not gone. They are one generation back.
+    expect(Object.keys(generation(dir, 2)?.tasks ?? {})).toEqual(['t1', 't2']);
+  });
+
+  test('an existing data.backup.json becomes generation 1 without being lost', () => {
+    // The migration is lazy because the file is the user's data: it is folded
+    // in on load, before anything can read or overwrite a backup, so there is
+    // no launch sequence in which it is skipped or destroyed.
+    const dir = tmpDir();
+    const legacy = {
+      ...emptyAppData(),
+      settings: { ...emptyAppData().settings, userName: 'legacy' },
+    };
+    writeFileSync(join(dir, 'data.backup.json'), JSON.stringify(legacy), 'utf8');
+
+    new DataStore(dir, logger).load();
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+    expect(generation(dir, 1)?.settings.userName).toBe('legacy');
+
+    // And it is the copy a later load falls back to, which is the point of
+    // keeping it: a corrupt primary still lands on the user's data.
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('legacy');
+  });
+
+  test('adoption demotes the generation it would have replaced', () => {
+    // Only a run of an older build in between can produce this: it writes the
+    // old name again while the generations are already there. Overwriting
+    // generation 1 would drop whichever copy was newer, so the loser moves down
+    // a slot instead — the same slot it would have held after any other write.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'generation' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'current' } }));
+    const legacy = {
+      ...emptyAppData(),
+      settings: { ...emptyAppData().settings, userName: 'legacy' },
+    };
+    writeFileSync(join(dir, 'data.backup.json'), JSON.stringify(legacy), 'utf8');
+
+    new DataStore(dir, logger).load();
+    expect(generation(dir, 1)?.settings.userName).toBe('legacy');
+    expect(generation(dir, 2)?.settings.userName).toBe('generation');
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(false);
+  });
+
+  test('the count sees chat sessions, so losing only those does not demote the backup', () => {
+    // countRecords skipped misc.chatSessions because it is not a keyed record
+    // map — so it contributed 0 on both sides of the guard. A user whose chat
+    // history was wiped then scored exactly like one who still had it, and the
+    // rotation the guard let through destroyed the only other copy.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    const sessions = [{ id: 'c1' }, { id: 'c2' }];
+    store.update((d) => ({
+      ...d,
+      tasks: { t1: { ...emptyTask(), id: 't1' }, t2: { ...emptyTask(), id: 't2' } },
+      misc: { ...d.misc, chatSessions: sessions },
+    }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
+    expect(generation(dir, 1)?.misc.chatSessions).toHaveLength(2);
+
+    // Two tasks either way, and the sessions are the only thing that changes.
+    // This write puts the loss on disk; the next one is the one that would
+    // rotate it over the backup — the guard measures what is *on disk*, so a
+    // single write cannot show the difference.
+    store.update((d) => ({ ...d, misc: {} }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'after' } }));
+    expect(new DataStore(dir, logger).load().misc.chatSessions).toBeUndefined();
+    expect(generation(dir, 1)?.misc.chatSessions).toHaveLength(2);
+    // And one generation further back, the loss was never the only copy.
+    expect(generation(dir, 2)?.misc.chatSessions).toHaveLength(2);
   });
 });
 
