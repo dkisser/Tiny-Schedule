@@ -55,12 +55,19 @@ async function sync(timer: ActiveTimer | null) {
   await api().timerSync({ timer });
 }
 
-async function settleInto(cur: ActiveTimer, now: number): Promise<void> {
-  const settlement = settleTimer(cur, now);
-  const task = useDataStore.getState().data?.tasks[cur.taskId];
-  if (task && settlement.ms > 0) {
-    await useDataStore.getState().upsertTask(applySettlement(task, settlement));
-  }
+/**
+ * Settle `cur` on its way out to being replaced by `next`.
+ *
+ * Returns false when the host refused the write, in which case the caller must
+ * abandon the swap and leave the old timer running: it is still the truth on
+ * disk, and its elapsed time has not been recorded anywhere else.
+ */
+async function settleOutgoing(cur: ActiveTimer | null): Promise<boolean> {
+  if (!cur) return true;
+  const stopped = await api().timingStop({ taskId: cur.taskId });
+  if (!stopped.ok && stopped.error === 'WRITE_REFUSED') return false;
+  useDataStore.setState({ data: stopped.data });
+  return true;
 }
 
 export const useTimerStore = create<TimerState>((set, get) => ({
@@ -129,10 +136,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (cur && cur.taskId === taskId && !cur.isPaused) return;
     const now = Date.now();
     const next = startTimer(taskId, now);
-    // Swap synchronously first so rapid clicks can't race, then settle the
-    // previous timer so its elapsed time isn't lost.
+    // Settle the outgoing timer through the host, so billing and clearing land
+    // in one transition and never leave "task settled, timer still points at
+    // it" for recovery to misread. A refusal means nothing was written, so the
+    // swap is abandoned rather than half-applied: continuing would start the
+    // new timer while the old one's elapsed time was never recorded.
+    if (!(await settleOutgoing(cur))) return;
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
     await sync(next);
   },
 
@@ -141,8 +151,8 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     if (cur && cur.taskId === taskId && !cur.isPaused) return;
     const now = Date.now();
     const next = startPomodoroFocus(taskId, now);
+    if (!(await settleOutgoing(cur))) return;
     set({ timer: next, now, phasePendingAdvance: null });
-    if (cur) await settleInto(cur, now);
     await sync(next);
   },
 
@@ -174,12 +184,37 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     void sync(t);
   },
 
+  /**
+   * Stop the clock, in one host-side transition.
+   *
+   * This used to settle the session in the renderer and clear the timer in a
+   * second write — the settle-then-clear pair ADR-0002 rejected for a concrete
+   * reason. An interruption between the two writes left "the task is settled
+   * and `activeTimer` still points at it" on disk, which recovery cannot tell
+   * from an already-billed write; guessing wrong billed the session twice (a
+   * 90s stop that reopened as 180s with two identical entries). The host also
+   * has to be the one computing the settlement, so the recorded amount is what
+   * it actually wrote rather than what the renderer predicted.
+   *
+   * The three outcomes stay distinct. A refused write means nothing happened,
+   * so the clock keeps running — clearing it here would bill an interval the
+   * user stopped hours later. A domain rejection means the host *did* drop the
+   * timer and persisted that, so we adopt its dataset and stop.
+   */
   stop: async () => {
     const cur = get().timer;
-    set({ timer: null, phasePendingAdvance: null });
-    if (!cur) return;
-    await settleInto(cur, Date.now());
-    await sync(null);
+    if (!cur) {
+      set({ timer: null, phasePendingAdvance: null });
+      return;
+    }
+    const result = await api().timingStop({ taskId: cur.taskId });
+    if (!result.ok && result.error === 'WRITE_REFUSED') return;
+
+    set({ timer: null, phasePendingAdvance: null, now: Date.now() });
+    // Every branch that reaches here carries the dataset the host now holds —
+    // including a rejection that dropped the timer — so adopt it rather than
+    // clearing on our own.
+    useDataStore.setState({ data: result.data });
   },
 
   tick: () => set({ now: Date.now() }),

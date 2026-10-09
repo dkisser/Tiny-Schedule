@@ -96,7 +96,16 @@ export function createFollowUpService({ store, logger }: FollowUpServiceDeps) {
       let merged = (
         stored
           ? { ...stored, ...changes, id: patch.id }
-          : { ...changes, id: patch.id, isResolved: false, entries: [] }
+          : // The `entries: []` default has to lose to `changes.entries`, or
+            // it overwrites the entries the caller just sent: creating a
+            // follow-up that arrives with a timeline stored an empty one. The
+            // fallback is only for a caller that sent none.
+            {
+              ...changes,
+              id: patch.id,
+              isResolved: false,
+              entries: changes.entries ?? [],
+            }
       ) as FollowUp;
       for (const key of cleared) {
         const rest: Record<string, unknown> = { ...merged };

@@ -1,12 +1,8 @@
 import {
   type AppData,
   addDays,
-  blankFollowUp,
-  blankIdea,
   dropStaleTiming,
-  type FollowUp,
   type FollowUpEdit,
-  type Idea,
   type IdeaAddEntryReq,
   type IdeaCloseWithVerdictReq,
   type IdeaConvertToTaskReq,
@@ -212,31 +208,18 @@ export function createDataApi(store: DataStore): DataApi {
     /**
      * A field *edit*, not a replace — see {@link FollowUpEditSchema}.
      *
-     * The request carries no `isResolved`/`resolvedAt`: those advance only
-     * through followUpResolve/followUpReopen, so writing back the renderer's
-     * snapshot cannot silently undo a 办结 the user already performed. And
-     * `nextFollowUpDay` distinguishes `null` (clear the date input) from
-     * `undefined` (don't touch) — collapsing the two turns the merge back into
-     * an overwrite, which is the same bug from the other direction.
+     * Delegated to the service rather than merged here. An inline merge got
+     * this wrong in two ways at once: it seeded a brand-new record from
+     * `blankFollowUp(edit.title)`, whose freshly minted id was then filed
+     * under `edit.id`, so the stored record's `id` disagreed with the key it
+     * lived at — and every later command addresses the record by that id, so
+     * resolving a just-created follow-up reported NOT_FOUND. The service also
+     * keeps the EDITABLE_FIELDS allowlist as the enforcement point rather
+     * than relying on the wire schema to strip the state fields.
      */
     followUpUpsert: async (raw) => {
       const edit = parse('followUpUpsert', raw) as FollowUpEdit;
-      const result = await store.update((d) => {
-        const prev = d.followUps[edit.id] ?? blankFollowUp(edit.title);
-        const next: FollowUp = {
-          ...prev,
-          title: edit.title,
-          notes: edit.notes,
-          createdAt: edit.createdAt,
-          entries: edit.entries ?? prev.entries,
-          nextFollowUpDay:
-            edit.nextFollowUpDay === null
-              ? undefined
-              : (edit.nextFollowUpDay ?? prev.nextFollowUpDay),
-        };
-        return { ...d, followUps: { ...d.followUps, [edit.id]: next } };
-      });
-      return masked(result.data);
+      return masked(await followUps.edit(edit));
     },
 
     followUpDelete: async (raw) => {
@@ -252,26 +235,16 @@ export function createDataApi(store: DataStore): DataApi {
     /**
      * A field *edit*, not a replace — see {@link IdeaEditSchema}.
      *
-     * Every transition field (`status`, `convertedAt`, `verdict`, `incubatedAt`,
-     * `resolvedAt`, and `timeline`) is absent from the request on purpose, so a
-     * debounced commit landing after the user advanced the idea cannot roll it
-     * back. Those move only through the intent commands.
+     * Delegated to the service, for the same reason as followUpUpsert: the
+     * inline merge seeded new records from `blankIdea(edit.title)`, whose fresh
+     * id was filed under `edit.id`, so completing or discarding an idea the
+     * user had just created reported IDEA_NOT_FOUND. Every transition field is
+     * absent from the request by design, so a debounced commit cannot roll the
+     * idea back; those move only through the intent commands.
      */
     ideaUpsert: async (raw) => {
       const edit = parse('ideaUpsert', raw) as IdeaEdit;
-      const result = await store.update((d) => {
-        const prev = d.ideas[edit.id] ?? blankIdea(edit.title);
-        const next: Idea = {
-          ...prev,
-          title: edit.title,
-          notes: edit.notes,
-          createdAt: edit.createdAt,
-          validationGoal:
-            edit.validationGoal === null ? undefined : (edit.validationGoal ?? prev.validationGoal),
-        };
-        return { ...d, ideas: { ...d.ideas, [edit.id]: next } };
-      });
-      return masked(result.data);
+      return masked(await ideas.edit(edit));
     },
 
     ideaDelete: async (raw) => {

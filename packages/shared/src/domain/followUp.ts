@@ -19,7 +19,7 @@ export interface FollowUp {
   resolvedAt?: number; // epoch ms
 }
 
-const FollowUpEntrySchema = z.object({
+export const FollowUpEntrySchema = z.object({
   id: z.string().min(1),
   at: z.number(),
   text: z.string(),

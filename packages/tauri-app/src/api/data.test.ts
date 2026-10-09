@@ -364,3 +364,77 @@ describe('data api slice', () => {
     expect((await api.ideaDelete({ id: 'i1' })).ideas.i1).toBeUndefined();
   });
 });
+
+/**
+ * Regression tests for defects the wiring seams hid.
+ *
+ * Each one failed against the code as merged: the first two produced records
+ * whose `id` disagreed with the key they were stored under, so every command
+ * addressed afterwards missed them; the third let a field edit wipe the
+ * timeline. All three were invisible to the type checker and to the tests that
+ * existed, because those tests read back through the same wrong key.
+ */
+describe('stored record ids agree with their map keys', () => {
+  test('a new follow-up is stored under the id it reports', async () => {
+    const { api } = await setup();
+    const data = await api.followUpUpsert({
+      id: 'f_client',
+      title: '等 ICP 审核',
+      notes: '',
+      createdAt: 1,
+      entries: [],
+    } as never);
+    const record = data.followUps.f_client;
+    expect(record).toBeDefined();
+    // The renderer addresses follow-ups by `record.id`. If that differs from
+    // the key, every later command reports NOT_FOUND for a follow-up the user
+    // just created.
+    expect(record?.id).toBe('f_client');
+
+    // And prove the follow-up is actually reachable by that id.
+    const resolved = await landed(api.followUpResolve({ id: record?.id as string }));
+    expect(resolved.data.followUps.f_client?.isResolved).toBe(true);
+  });
+
+  test('a new idea is stored under the id it reports', async () => {
+    const { api } = await setup();
+    const data = await api.ideaUpsert({
+      id: 'i_client',
+      title: '一个想法',
+      notes: '',
+      createdAt: 1,
+    } as never);
+    expect(data.ideas.i_client?.id).toBe('i_client');
+
+    const done = await landed(api.ideaComplete({ id: data.ideas.i_client?.id as string }));
+    expect(done.data.ideas.i_client?.status).toBe('done');
+  });
+});
+
+describe('a field edit leaves the fields it did not mention', () => {
+  test('renaming a follow-up keeps its timeline', async () => {
+    // `entries` inherits `.default([])` from FollowUpSchema, so before the
+    // schema was corrected an omitted key parsed to `[]` — meaning a rename
+    // silently destroyed the follow-up's entire history. The contract says an
+    // omitted key means "don't touch".
+    const { api } = await setup();
+    const seeded = await api.followUpUpsert({
+      id: 'f1',
+      title: '等审核',
+      notes: '',
+      createdAt: 1,
+      entries: [{ id: 'e1', at: 5, text: '已提交' }],
+    } as never);
+    expect(seeded.followUps.f1?.entries).toHaveLength(1);
+
+    const renamed = await api.followUpUpsert({
+      id: 'f1',
+      title: '改名了',
+      notes: '',
+      createdAt: 1,
+    } as never);
+    expect(renamed.followUps.f1?.title).toBe('改名了');
+    expect(renamed.followUps.f1?.entries).toHaveLength(1);
+    expect(renamed.followUps.f1?.entries[0]?.text).toBe('已提交');
+  });
+});

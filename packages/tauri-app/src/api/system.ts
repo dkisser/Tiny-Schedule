@@ -105,10 +105,16 @@ export function createSystemApi(
       if (!task.dueDay) return { ok: false, code: 'no-dueDay', message: '任务没有截止日期' };
       const project = snapshot.projects[task.projectId];
       try {
+        // Nested under `request`, because `calendar_add_task` takes a named
+        // struct parameter and Tauri v2 binds command arguments by name: a
+        // flat payload has no `request` key, so the invoke rejects and the
+        // button silently did nothing. `sse_request` sends the same shape.
         return await invokeCommand<CalendarAddTaskOutput>('calendar_add_task', {
-          title: formatCalendarTitle(task.title, project?.title),
-          dueDay: task.dueDay,
-          notes: task.notes,
+          request: {
+            title: formatCalendarTitle(task.title, project?.title),
+            dueDay: task.dueDay,
+            notes: task.notes,
+          },
         });
       } catch (err) {
         // A rejected invoke means the helper binary could not be run or spoke

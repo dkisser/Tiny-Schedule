@@ -194,7 +194,15 @@ describe('calendarAddTask', () => {
     expect(invokes).toEqual([
       {
         cmd: 'calendar_add_task',
-        args: { title: '[工作] 写周报', dueDay: '2026-08-04', notes: 'n' },
+        // Nested, and not incidentally: `calendar_add_task` declares
+        // `request: CalendarRequest`, and Tauri v2 binds command arguments by
+        // name. A flat payload has no `request` key, so the invoke rejects and
+        // the caller reports `unknown` — the button appears to do nothing. The
+        // old assertion here encoded that flat shape, so the test passed
+        // against a call that could never succeed.
+        args: {
+          request: { title: '[工作] 写周报', dueDay: '2026-08-04', notes: 'n' },
+        },
       },
     ]);
   });
@@ -204,7 +212,7 @@ describe('calendarAddTask', () => {
     await seedTask(store, { id: 't1', title: '写周报', dueDay: '2026-08-04' });
     const api = createSystemApi(store, testDeps);
     await api.calendarAddTask({ taskId: 't1' });
-    expect((invokes[0]?.args as { title: string }).title).toBe('写周报');
+    expect((invokes[0]?.args as { request: { title: string } }).request.title).toBe('写周报');
   });
 
   test('a task with no dueDay is refused before Rust is called', async () => {

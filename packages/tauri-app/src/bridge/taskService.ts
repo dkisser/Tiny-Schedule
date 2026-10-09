@@ -58,21 +58,42 @@ export function createTaskService({ store, logger = consoleLogger }: TaskService
     }
     const task = current.tasks[timer.taskId];
     if (!task) {
-      const { data } = await store.update((d) => ({ ...d, activeTimer: null }));
+      const dropped = await store.update((d) => ({ ...d, activeTimer: null }));
+      // `data` on these two rejections means "the drop reached disk, converge
+      // on this". That promise is void when the write was refused: the
+      // returned dataset is the degraded fallback, whose activeTimer still
+      // points at the session, and handing it to the renderer as the new truth
+      // made it stop a clock the host never stopped — the exact inversion
+      // ADR-0004 exists to prevent. So the refusal is checked first here too,
+      // and carries no data because nothing changed.
+      if (!dropped.persisted) {
+        logger.error({
+          action: 'timer:drop:refused',
+          taskId: timer.taskId,
+          reason: 'not-found',
+          note: 'the drop was discarded; the host is still holding the timer',
+        });
+        return { ok: false, error: 'WRITE_REFUSED' };
+      }
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'not-found' });
-      return { ok: false, error: 'TASK_NOT_FOUND', data };
+      return { ok: false, error: 'TASK_NOT_FOUND', data: dropped.data };
     }
     if (task.isDone) {
-      const { data } = await store.update((d) => ({ ...d, activeTimer: null }));
+      const dropped = await store.update((d) => ({ ...d, activeTimer: null }));
+      if (!dropped.persisted) {
+        logger.error({
+          action: 'timer:drop:refused',
+          taskId: timer.taskId,
+          reason: 'task-done',
+          note: 'the drop was discarded; the host is still holding the timer',
+        });
+        return { ok: false, error: 'WRITE_REFUSED' };
+      }
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'task-done' });
       // Distinct from TASK_NOT_FOUND: the row exists, we deliberately
       // refused to bill it. Conflating the two told the renderer "nothing
       // to stop" for a stop that actually threw the session away.
-      //
-      // A refused write takes the WRITE_REFUSED branch instead, on its own:
-      // these two carry `data` because the drop was actually written, and a
-      // refusal carries none because nothing happened.
-      return { ok: false, error: 'TASK_ALREADY_DONE', data };
+      return { ok: false, error: 'TASK_ALREADY_DONE', data: dropped.data };
     }
     // `settledMs` comes out of the same pure transition that produced the
     // data, captured in the closure rather than recomputed — a second
