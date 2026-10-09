@@ -1,13 +1,13 @@
 # Tiny-Schedule
 
-> A local-first task manager + AI-powered desktop app built on Electron. One-click import from Super Productivity backups.
+> A local-first task manager + AI-powered desktop app built on Tauri. One-click import from Super Productivity backups.
 
 [简体中文](./README.zh-CN.md) · [English](#)
 
 [![GitHub release](https://img.shields.io/github/v/release/dkisser/Tiny-Schedule?include_prereleases&sort=semver)](https://github.com/dkisser/Tiny-Schedule/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-blueviolet)](https://github.com/dkisser/Tiny-Schedule/releases)
-[![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.2-000000?logo=bun&logoColor=white)](https://bun.sh/)
@@ -35,9 +35,9 @@
 
 ## Why Tiny-Schedule?
 
-A local-first Electron desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
+A local-first desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
 
-- 📦 **Local-first**: All task data lives in a local JSON file on your machine. No cloud required (except your explicitly configured AI provider).
+- 📦 **Local-first**: All task data lives in a local SQLite database. No cloud required (except your explicitly configured AI provider).
 - ⌨️ **Keyboard-driven**: Inspired by Super Productivity and Things.
 - 🤖 **AI insights**: Multiple OpenAI-compatible providers (OpenAI, DeepSeek, Azure, self-hosted, Ollama). One-click daily/weekly reports.
 - 🔁 **Portable**: Full backup-JSON import from Super Productivity with auto-backup. Never get locked in.
@@ -109,14 +109,14 @@ A local-first Electron desktop app for people who want **complete ownership of t
 
 | Layer | Tech |
 |---|---|
-| Desktop shell | [Electron 43](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/) |
+| Desktop shell | [Tauri 2](https://tauri.app/) — Rust shell + system WKWebView |
 | Renderer | React 19 + TypeScript 5.7 |
 | Styling | Tailwind CSS 4 + Radix UI + lucide-react |
 | State | Zustand 5 |
-| Data | Local JSON file (via IPC) |
+| Data | Local JSON store (encrypted at rest) |
 | AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) (multi-provider, OpenAI-compatible) |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
-| Packaging | electron-builder (DMG, macOS arm64 + x64) |
+| Packaging | Tauri bundler (DMG, macOS arm64 + x64, < 20 MB) |
 | Toolchain | Bun ≥ 1.2 · Biome 2 · TypeScript Project References |
 | Testing | Bun Test |
 
@@ -139,7 +139,7 @@ A local-first Electron desktop app for people who want **complete ownership of t
 
 ## Importing from Super Productivity
 
-Tiny-Schedule imports Super Productivity backup JSON by **merging** it into your current library:
+Tiny-Schedule supports **full-database import** of Super Productivity backup JSON:
 
 1. In Super Productivity, export a backup JSON (Settings → Backup).
 2. In Tiny-Schedule, open Settings → Import and pick that JSON.
@@ -165,11 +165,12 @@ The built-in chat view streams output chunk-by-chunk, ChatGPT-style.
 
 ## Development
 
-Requires **Node.js ≥ 20** and **Bun ≥ 1.2**.
+Requires **Bun ≥ 1.2** and a **Rust toolchain** (`rustup`, plus Xcode Command
+Line Tools on macOS for the Swift calendar helper).
 
 ```bash
 bun install
-bun run dev        # launch Electron dev environment
+bun run dev        # launch the Tauri dev environment (vite + cargo)
 bun test           # run all tests
 bun run lint       # Biome check
 bun run typecheck  # TypeScript project references
@@ -180,11 +181,11 @@ This is a Bun-workspaces monorepo:
 ```
 Tiny-Schedule/
 ├── packages/
-│   ├── app/      # Electron main + renderer
-│   └── shared/   # Shared domain model, rules & IPC contract (Zod)
-├── scripts/      # Repo-level scripts (e.g. IPC literal checks)
-├── docs/         # UI conventions, design notes
-└── .github/      # GitHub Actions (release.yml only)
+│   ├── tauri-app/  # Tauri shell: React renderer + thin Rust host
+│   └── shared/     # Shared domain model, rules & IPC contract (Zod)
+├── scripts/        # Repo-level scripts
+├── docs/           # UI conventions, design notes, migration records
+└── .github/        # GitHub Actions
 ```
 
 ---
@@ -194,16 +195,18 @@ Tiny-Schedule/
 ### Local builds
 
 ```bash
-bun run build      # produces packages/app/out
-bun run release:dir   # unpack .app into packages/app/release/
-bun run release      # build .dmg into packages/app/release/ (no publish)
+bun run build         # builds the renderer bundle (vite)
+bun run release:dir   # unpack .app for the arm64 target
+bun run release       # build both .dmg files (arm64 + x64)
 ```
 
-> `release` defaults to `--publish never` for local verification; the publish step only runs in CI with `--publish always`.
+> Outputs land in `packages/tauri-app/src-tauri/target/<arch>/bundle/dmg/`. The
+> release workflow enforces a **< 20 MB per dmg** budget and fails the build if it
+> is exceeded.
 
 ### Publishing to GitHub Releases
 
-Packaged by [electron-builder](https://www.electron.build/) and uploaded by GitHub Actions when you push a `v*` tag.
+Packaged by the [Tauri bundler](https://tauri.app/) and uploaded by GitHub Actions when you push a `v*` tag.
 
 **Trigger with a tag**:
 
@@ -212,7 +215,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`release.yml` runs on `macos-latest`: lint → typecheck → test → electron-vite build → electron-builder → produces `Tiny Schedule-<version>-arm64.dmg` and `Tiny Schedule-<version>-x64.dmg` → creates a GitHub Release and uploads the artifacts.
+`release.yml` runs on `macos-latest`: lint → typecheck → test → build event-helper (Swift) → `tauri build` for both architectures → enforces the size budget → creates a GitHub Release and uploads the artifacts.
 
 **First-time install (unsigned)**:
 
@@ -231,7 +234,7 @@ No Apple Developer ID signing or notarization, so Gatekeeper will block first la
 
 ## Roadmap
 
-- [ ] Windows / Linux packaging (electron-builder config slot already reserved)
+- [ ] Windows / Linux packaging (Tauri is cross-platform by design; only macOS is wired up today)
 - [ ] Optional sync layer (self-hosted WebDAV / S3)
 - [ ] Plugin system (custom prompts / custom exporters)
 - [ ] i18n framework
@@ -260,7 +263,7 @@ Suggested flow: fork → new branch → PR (commit messages follow [Conventional
 ## Acknowledgments
 
 - [Super Productivity](https://github.com/johannesjo/super-productivity) — data model and UX inspiration
-- [Electron](https://www.electronjs.org/) · [electron-vite](https://electron-vite.org/) · [electron-builder](https://www.electron.build/)
+- [Tauri](https://tauri.app/)
 - [Radix UI](https://www.radix-ui.com/) · [Tailwind CSS](https://tailwindcss.com/) · [lucide-react](https://lucide.dev/)
 - [Zustand](https://github.com/pmndrs/zustand)
 - [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)
