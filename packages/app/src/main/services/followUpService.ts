@@ -6,6 +6,7 @@ import {
   type FollowUpEdit,
   reopenFollowUp,
   resolveFollowUp,
+  type WriteOutcome,
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
 
@@ -18,13 +19,13 @@ const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUp
  */
 
 export function createFollowUpService({ store, logger }: ServiceDeps) {
-  const persist = (followUp: FollowUp): AppData => {
-    const { data: next } = store.update((d) => ({
+  const persist = (followUp: FollowUp): WriteOutcome => {
+    const { data: next, persisted } = store.update((d) => ({
       ...d,
       followUps: { ...d.followUps, [followUp.id]: followUp },
     }));
     logger.info({ action: 'followUp:upsert', followUpId: followUp.id, title: followUp.title });
-    return next;
+    return { data: next, persisted };
   };
 
   /**
@@ -38,8 +39,8 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
    * list row beside an open notes editor and then closing it reverted the
    * 办结 with no error and no log. Ideas got this merge for the same reason.
    */
-  const merge = (patch: FollowUpEdit): AppData => {
-    const { data: next } = store.update((d) => {
+  const merge = (patch: FollowUpEdit): WriteOutcome => {
+    const { data: next, persisted } = store.update((d) => {
       const stored = d.followUps[patch.id];
       // An allowlist, not "filter out undefined": the state fields are not on
       // the edit contract, and a caller that supplies them anyway (a spread
@@ -75,23 +76,23 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
       return { ...d, followUps: { ...d.followUps, [patch.id]: merged } };
     });
     logger.info({ action: 'followUp:edit', followUpId: patch.id, title: patch.title });
-    return next;
+    return { data: next, persisted };
   };
 
   return {
     /** 字段编辑（标题/备注/条目）；状态推进只能走 resolve/reopen。 */
-    edit(patch: FollowUpEdit): AppData {
+    edit(patch: FollowUpEdit): WriteOutcome {
       return merge(patch);
     },
 
-    remove(id: string): AppData {
-      const { data: next } = store.update((d) => {
+    remove(id: string): WriteOutcome {
+      const { data: next, persisted } = store.update((d) => {
         const followUps = { ...d.followUps };
         delete followUps[id];
         return { ...d, followUps };
       });
       logger.info({ action: 'followUp:delete', followUpId: id });
-      return next;
+      return { data: next, persisted };
     },
 
     /**
@@ -107,7 +108,7 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, data: persist(resolveFollowUp(current, now)) };
+      return { ok: true, ...persist(resolveFollowUp(current, now)) };
     },
 
     /** 恢复跟进：清空了结时刻，回到等待中。 */
@@ -117,7 +118,7 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, data: persist(reopenFollowUp(current)) };
+      return { ok: true, ...persist(reopenFollowUp(current)) };
     },
   };
 }

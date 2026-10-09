@@ -1,16 +1,16 @@
 import { Ipc, type Task } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
-import { masked, sendSafe } from './deps';
+import { masked, sendSafe, written } from './deps';
 
 /** 任务与计时的 handler：只转调 taskService，不判断领域规则。 */
 export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
   return {
     taskUpsert: (task: Task) => {
       const { data, settledMs, persisted } = tasks.upsert(task);
-      return { data: masked(data), settledMs, persisted };
+      return { ...written({ data, persisted }), settledMs };
     },
 
-    taskDelete: ({ id }: { id: string }) => masked(tasks.remove(id)),
+    taskDelete: ({ id }: { id: string }) => written(tasks.remove(id)),
 
     timerSync: ({ timer }: { timer: Parameters<HandlerDeps['tasks']['syncTimer']>[0] }) => {
       const { dropped, persisted } = tasks.syncTimer(timer);
@@ -51,6 +51,6 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
       };
     },
 
-    finishDay: () => masked(tasks.finishDay()),
+    finishDay: () => written(tasks.finishDay()),
   };
 }

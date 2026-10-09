@@ -134,7 +134,7 @@ export type IdeaCommandRejection = { ok: false; error: string };
  * 数据集采纳，null 会让 App 停在"加载中"且无从区分"这条跟进没了"和"还没加载"。
  */
 export type FollowUpCommandResult =
-  | { ok: true; data: AppData }
+  | ({ ok: true } & WriteOutcome)
   | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
 
 export const IdeaIdReqSchema = z.object({ id: z.string().min(1) });
@@ -454,14 +454,16 @@ export type ChatEvent =
  * 想法命令的返回值。领域拒绝（如对已闭环的想法执行 reopen）走 ok:false 分支，
  * 系统错误继续 throw —— 与 importRun/aiTestProvider 的既有惯例一致。
  */
-export type IdeaCommandResult = { ok: true; data: AppData } | IdeaCommandRejection;
+export type IdeaCommandResult = ({ ok: true } & WriteOutcome) | IdeaCommandRejection;
 
 /** 转为任务额外带回生成的任务：渲染进程据此高亮/跳转，无需再猜 id。 */
-export type IdeaConvertResult = { ok: true; data: AppData; taskId: string } | IdeaCommandRejection;
+export type IdeaConvertResult =
+  | ({ ok: true; taskId: string } & WriteOutcome)
+  | IdeaCommandRejection;
 
 /** 升级为项目额外带回新建的项目：原子转换的另一半，调用方需要它的 id。 */
 export type IdeaUpgradeResult =
-  | { ok: true; data: AppData; projectId: string }
+  | ({ ok: true; projectId: string } & WriteOutcome)
   | IdeaCommandRejection;
 
 /**
@@ -472,6 +474,23 @@ export type IdeaUpgradeResult =
  *   会让调用方以为无事发生，从而错过那次没被结算的时长。
  * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
  */
+/**
+ * 写通道的统一返回（ADR-0004）。
+ *
+ * 之前每个写通道各自决定要不要带落库标记，只有 timingStop 带了，于是"写入被
+ * 拒绝"这件事在系统里有四种说法。漏一次判断的后果是用户看着保存成功、重启后
+ * 数据消失，而这类缺陷的成因是缺少抽象而不是缺少小心。
+ *
+ * `persisted: false` 时 **不要采纳 data**：那是主进程自己都读不出来的降级数据
+ * 集（可能是空库），把它显示成正常数据比不显示更糟。读通道（dataLoad）不受此
+ * 约束——那时用户没有更好的选择。
+ */
+export interface WriteOutcome {
+  data: AppData;
+  /** 是否真的落盘。false 时 data 是降级回落值。 */
+  persisted: boolean;
+}
+
 /**
  * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
  * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
@@ -530,16 +549,20 @@ export const IpcInvokeContract = {
     // renderer reports a save that a refused store silently discarded.
     res: null as unknown as { data: AppData; settledMs: number; persisted: boolean },
   },
-  taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
+  taskDelete: {
+    ch: Ipc.taskDelete,
+    req: TaskDeleteReqSchema,
+    res: null as unknown as WriteOutcome,
+  },
   followUpUpsert: {
     ch: Ipc.followUpUpsert,
     req: FollowUpEditSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
   followUpDelete: {
     ch: Ipc.followUpDelete,
     req: FollowUpDeleteReqSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
   followUpResolve: {
     ch: Ipc.followUpResolve,
@@ -556,12 +579,12 @@ export const IpcInvokeContract = {
   ideaUpsert: {
     ch: Ipc.ideaUpsert,
     req: IdeaEditSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
   ideaDelete: {
     ch: Ipc.ideaDelete,
     req: IdeaDeleteReqSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
   ideaComplete: {
     ch: Ipc.ideaComplete,
@@ -615,21 +638,21 @@ export const IpcInvokeContract = {
     // The id comes back with the dataset: the renderer used to recover it by
     // diffing the whole project list, which picks the wrong project if two
     // creations interleave.
-    res: null as unknown as { data: AppData; projectId: string },
+    res: null as unknown as WriteOutcome & { projectId: string },
   },
   projectUpdate: {
     ch: Ipc.projectUpdate,
     req: ProjectUpdateReqSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
   projectDelete: {
     ch: Ipc.projectDelete,
     req: ProjectDeleteReqSchema,
-    res: null as unknown as AppData,
+    res: null as unknown as WriteOutcome,
   },
-  tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as AppData },
-  tagUpdate: { ch: Ipc.tagUpdate, req: TagUpdateReqSchema, res: null as unknown as AppData },
-  tagDelete: { ch: Ipc.tagDelete, req: TagDeleteReqSchema, res: null as unknown as AppData },
+  tagCreate: { ch: Ipc.tagCreate, req: TagCreateReqSchema, res: null as unknown as WriteOutcome },
+  tagUpdate: { ch: Ipc.tagUpdate, req: TagUpdateReqSchema, res: null as unknown as WriteOutcome },
+  tagDelete: { ch: Ipc.tagDelete, req: TagDeleteReqSchema, res: null as unknown as WriteOutcome },
   settingsUpdate: {
     ch: Ipc.settingsUpdate,
     req: SettingsUpdateReqSchema,
@@ -638,7 +661,7 @@ export const IpcInvokeContract = {
     // applied until the app restarts.
     res: null as unknown as { data: AppData; persisted: boolean },
   },
-  finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
+  finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as WriteOutcome },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
   timingStop: {
     ch: Ipc.timingStop,

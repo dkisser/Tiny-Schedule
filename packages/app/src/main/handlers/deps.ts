@@ -1,4 +1,4 @@
-import { type AppData, maskDataForRenderer } from '@tiny-schedule/shared';
+import { type AppData, maskDataForRenderer, type WriteOutcome } from '@tiny-schedule/shared';
 import type { BrowserWindow } from 'electron';
 import type { Logger } from 'pino';
 import type { FollowUpService } from '../services/followUpService';
@@ -44,6 +44,17 @@ export function maskedResult<T extends { ok: true; data: AppData } | { ok: false
   result: T,
 ): T {
   return result.ok ? ({ ...result, data: masked(result.data) } as T) : result;
+}
+
+/**
+ * 写通道的统一出口（ADR-0004）。
+ *
+ * 每个 handler 各自判断 persisted 不会收敛：漏一次就是用户看着保存成功、重启后
+ * 数据消失，而漏掉是默认结果。包在这里，漏不掉——handler 只管把 service 返回的
+ * 数据集交给它。
+ */
+export function written(outcome: WriteOutcome): WriteOutcome {
+  return { ...outcome, data: masked(outcome.data) };
 }
 
 export function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {

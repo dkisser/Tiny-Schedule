@@ -1,6 +1,6 @@
 import type { FollowUpCommandResult, FollowUpEdit } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
-import { masked, maskedResult } from './deps';
+import { maskedResult, written } from './deps';
 
 /**
  * 跟进的 handler：upsert 只带编辑器字段（不含 isResolved/resolvedAt），状态推进
@@ -9,8 +9,8 @@ import { masked, maskedResult } from './deps';
  */
 export function followUpHandlers({ followUps }: HandlerDeps) {
   return {
-    followUpUpsert: (patch: FollowUpEdit) => masked(followUps.edit(patch)),
-    followUpDelete: ({ id }: { id: string }) => masked(followUps.remove(id)),
+    followUpUpsert: (patch: FollowUpEdit) => written(followUps.edit(patch)),
+    followUpDelete: ({ id }: { id: string }) => written(followUps.remove(id)),
     // A rejection is a { ok, error } envelope, never a bare null: the renderer
     // adopts this value as its entire dataset, so a null here blanked the app
     // with no code to distinguish "gone" from "loaded nothing yet".

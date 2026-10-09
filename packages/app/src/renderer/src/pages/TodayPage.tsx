@@ -1,6 +1,7 @@
 import { addDays, localDate } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Hourglass } from 'lucide-react';
 import { useState } from 'react';
+import { toast } from 'sonner';
 import { api } from '../api';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';
@@ -47,8 +48,14 @@ export function TodayPage() {
       return;
     }
     // 设置里已开启「Finish Day 自动触发 AI 分析」：直接结束，不再弹窗询问
-    const next = await api().finishDay({ date: new Date().toISOString() });
-    useDataStore.setState({ data: next });
+    // The same two rules as every other write (ADR-0004): a refused write must
+    // not blank the view with the degraded dataset, and must say so.
+    const outcome = await api().finishDay({ date: new Date().toISOString() });
+    if (outcome.persisted) {
+      useDataStore.setState({ data: outcome.data });
+    } else {
+      toast.error('结束今日未能保存：数据文件当前不可写。');
+    }
     const def = aiProviders.find((p) => p.isDefault) ?? aiProviders[0];
     if (def) {
       useUiStore.setState({

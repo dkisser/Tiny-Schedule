@@ -21,6 +21,7 @@ import {
   updateIdeaEntry,
   upgradeIdeaToProject,
   upsertTaskWithTiming,
+  type WriteOutcome,
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
 
@@ -54,12 +55,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
   const apply = (id: string, transition: (idea: Idea) => Idea): IdeaCommandResult => {
     const found = load(id);
     if ('error' in found) return { ok: false, error: found.error };
-    const { data: next } = store.update((d) => ({
+    const { data: next, persisted } = store.update((d) => ({
       ...d,
       ideas: { ...d.ideas, [id]: transition(found.idea) },
     }));
     logger.info({ action: 'idea:transition', ideaId: id });
-    return { ok: true, data: next };
+    return { ok: true, data: next, persisted };
   };
 
   /**
@@ -115,7 +116,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * 上，而不是覆盖：覆盖会把 status 与转移结果抹掉，等于绕过刚立起来的守卫。
      * 新建（记录箱里记一笔）仍走这条路径，落库时 status 恒为 open。
      */
-    edit(patch: IdeaEdit): AppData {
+    edit(patch: IdeaEdit): WriteOutcome {
       // A partial edit is a *merge*, so only the keys the caller actually set
       // may be applied. `{ ...stored, ...patch }` would let an explicitly
       // present-but-undefined optional key (which is what zod hands back for
@@ -140,7 +141,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         }
         changes[key] = value;
       }
-      const { data: next } = store.update((d) => {
+      const { data: next, persisted } = store.update((d) => {
         const stored = d.ideas[patch.id];
         let merged: Idea = stored
           ? { ...stored, ...changes, id: patch.id }
@@ -155,17 +156,17 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         return { ...d, ideas: { ...d.ideas, [merged.id]: merged } };
       });
       logger.info({ action: 'idea:upsert', ideaId: patch.id, title: patch.title });
-      return next;
+      return { data: next, persisted };
     },
 
-    remove(id: string): AppData {
-      const { data: next } = store.update((d) => {
+    remove(id: string): WriteOutcome {
+      const { data: next, persisted } = store.update((d) => {
         const ideas = { ...d.ideas };
         delete ideas[id];
         return { ...d, ideas };
       });
       logger.info({ action: 'idea:delete', ideaId: id });
-      return next;
+      return { data: next, persisted };
     },
 
     /** 记录即完成。open 是唯一可分流的状态，incubating/closed/converted 均拒绝。 */
@@ -206,7 +207,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const { task, converted } = ideaToTask(found.idea, inbox);
       const named = title ? { ...task, title } : task;
       const now = Date.now();
-      const { data: next } = store.update((d) => {
+      const { data: next, persisted } = store.update((d) => {
         // Route the task write through the shared invariant helper rather than
         // splicing d.tasks: upsertTaskWithTiming ends every task write with
         // dropStaleTiming, which is what guarantees "no write leaves a done
@@ -217,7 +218,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         return { ...r.data, ideas: { ...r.data.ideas, [id]: converted } };
       });
       logger.info({ action: 'idea:convertToTask', ideaId: id, taskId: named.id });
-      return { ok: true, data: next, taskId: named.id };
+      return { ok: true, data: next, persisted, taskId: named.id };
     },
 
     /**
@@ -239,13 +240,13 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const project = newProject(input);
       const projectId = project.id;
       const upgraded = upgradeIdeaToProject(found.idea, projectId, input.validationGoal);
-      const { data: next } = store.update((d) => ({
+      const { data: next, persisted } = store.update((d) => ({
         ...d,
         projects: { ...d.projects, [projectId]: project },
         ideas: { ...d.ideas, [id]: upgraded },
       }));
       logger.info({ action: 'idea:upgradeToProject', ideaId: id, projectId });
-      return { ok: true, data: next, projectId };
+      return { ok: true, data: next, persisted, projectId };
     },
 
     /**
