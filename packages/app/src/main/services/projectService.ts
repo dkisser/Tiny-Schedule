@@ -4,7 +4,6 @@ import {
   INBOX_PROJECT_ID,
   newProject,
   PROJECT_TITLE_MAX_LENGTH,
-  type WriteOutcome,
 } from '@tiny-schedule/shared';
 import { listMeta, type MetaResult } from './projectQueries';
 import type { ServiceDeps } from './taskService';
@@ -43,7 +42,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
       return { data: next, projectId, persisted };
     },
 
-    update(req: ProjectUpdateInput): WriteOutcome {
+    update(req: ProjectUpdateInput): AppData {
       const { data: next, persisted } = store.update((d) => {
         const prev = d.projects[req.id];
         // Inbox is a system project: never accept updates through the IPC.
@@ -66,20 +65,15 @@ export function createProjectService({ store, logger }: ServiceDeps) {
         id: req.id,
         keys: Object.keys(req).filter((k) => k !== 'id'),
       });
-      return { data: next, persisted };
+      return next;
     },
 
     /**
      * Delete a project. Tasks keep their projectTitle snapshot; only the
      * grouping moves to Inbox. Inbox itself is never deletable.
      */
-    remove(id: string): WriteOutcome {
-      // Nothing to write: the returned dataset is already the stored one, so
-      // reporting a refusal here would be a lie in the other direction.
-      if (id === INBOX_PROJECT_ID) {
-        const current = store.get();
-        return { data: current, persisted: true };
-      }
+    remove(id: string): AppData {
+      if (id === INBOX_PROJECT_ID) return store.get();
       const { data: next, persisted } = store.update((d) => {
         if (!d.projects[id]) return d;
         const projects = { ...d.projects };
@@ -91,19 +85,19 @@ export function createProjectService({ store, logger }: ServiceDeps) {
         return { ...d, projects, tasks };
       });
       logger.info({ action: 'project:delete', id });
-      return { data: next, persisted };
+      return next;
     },
 
-    createTag(req: { title: string; color?: string }): WriteOutcome {
+    createTag(req: { title: string; color?: string }): AppData {
       const { data: next, persisted } = store.update((d) => {
         const id = `tag_${randomUUID()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
       logger.info({ action: 'tag:create', title: req.title });
-      return { data: next, persisted };
+      return next;
     },
 
-    updateTag(req: { id: string; title?: string; color?: string }): WriteOutcome {
+    updateTag(req: { id: string; title?: string; color?: string }): AppData {
       const { data: next, persisted } = store.update((d) => {
         const prev = d.tags[req.id];
         if (!prev) return d;
@@ -115,10 +109,10 @@ export function createProjectService({ store, logger }: ServiceDeps) {
         return { ...d, tags: { ...d.tags, [req.id]: updated } };
       });
       logger.info({ action: 'tag:update', id: req.id, title: req.title });
-      return { data: next, persisted };
+      return next;
     },
 
-    removeTag(id: string): WriteOutcome {
+    removeTag(id: string): AppData {
       const { data: next, persisted } = store.update((d) => {
         if (!d.tags[id]) return d;
         const tags = { ...d.tags };
@@ -127,15 +121,15 @@ export function createProjectService({ store, logger }: ServiceDeps) {
         return { ...d, tags };
       });
       logger.info({ action: 'tag:delete', id });
-      return { data: next, persisted };
+      return next;
     },
 
     /** Manual ordering lives in misc.taskOrder; keyed per view. */
     setOrder(viewKey: string, ids: string[]): AppData {
-      const { data: next, persisted } = store.update((d) => {
+      const next = store.update((d) => {
         const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;
         return { ...d, misc: { ...d.misc, taskOrder: { ...taskOrder, [viewKey]: ids } } };
-      });
+      }).data;
       logger.info({ action: 'order:set', viewKey, count: ids.length });
       return next;
     },

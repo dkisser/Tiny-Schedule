@@ -9,9 +9,8 @@ import { masked } from './deps';
  */
 export function settingsHandlers({ settings }: { settings: SettingsService }) {
   return {
-    settingsUpdate: (patch: Partial<SettingsUpdatePatch>) => {
-      const { data, persisted } = settings.update(patch);
-      return { data: masked(data), persisted };
-    },
+    // Bare AppData: the renderer only refreshes state from this, and "is the app
+    // still saving" is pushed as a store mode instead (ADR-0004).
+    settingsUpdate: (patch: Partial<SettingsUpdatePatch>) => masked(settings.update(patch)),
   };
 }

@@ -16,6 +16,11 @@ import { api } from '../api';
  * Outcome of an idea intent command: a domain rejection is a normal answer,
  * not an exception, so it travels back to the UI as data (ADR-0003).
  */
+/** taskUpsert is control flow: the completion dialog needs both the ms and the verdict. */
+export type TaskUpsertOutcome =
+  | { ok: true; data: AppData; settledMs: number }
+  | { ok: false; error: string };
+
 export interface IdeaCommandOutcome {
   ok: boolean;
   /** Present only on rejection: the stable code the main process decided on. */
@@ -37,6 +42,25 @@ export interface FollowUpCommandOutcome {
 export type IdeaPatch = Omit<Idea, 'validationGoal' | 'timeline'> & {
   validationGoal?: string | null;
 };
+
+/**
+ * Adopt a write channel's dataset (ADR-0004).
+ *
+ * Deliberately has no refusal logic left to do. "Is the app still saving?" is
+ * a *mode* the store is in — data.json will not parse until the user fixes it —
+ * and it arrives as a pushed event, not as a return value. An earlier version
+ * carried `persisted` on every channel and toasted here; that made each new
+ * channel another place to forget, and the toast stacked up under the ten-odd
+ * debounced edits nobody checks the result of.
+ *
+ * On a refused write the store's cache did not change, so the dataset coming
+ * back is still the last good one — adopting it is a no-op, and the banner is
+ * already telling the user nothing is being saved.
+ */
+function adopt(data: AppData): AppData {
+  useDataStore.setState({ data });
+  return data;
+}
 
 /**
  * Run an intent command (idea or follow-up) and adopt its dataset. The main process is the
@@ -62,11 +86,13 @@ async function adoptCommand<T extends ({ ok: true } & WriteOutcome) | { ok: fals
       error: err instanceof Error ? err.message : 'COMMAND_FAILED',
     } as IdeaCommandOutcome & Partial<T>;
   }
+  // A refused write arrives here as WRITE_REFUSED, the same envelope as a
+  // domain rejection (ADR-0004) — the caller's response is identical, so the
+  // dialog stays open and `if (!result.ok)` handles it. Forwarding ok:false
+  // rather than a success toast is what keeps UpgradeIdeaDialog from closing
+  // as though the upgrade had happened.
   if (!result.ok) return { ok: false, error: result.error } as IdeaCommandOutcome & Partial<T>;
-  // Same two rules as adopt(): a refused write must not blank the app with the
-  // degraded dataset, and must be reported once.
-  const data = adopt({ data: result.data, persisted: result.persisted });
-  result = { ...result, data } as T;
+  result = { ...result, data: adopt(result.data) } as T;
   // Forwarded rather than dropped: the contract adds taskId/projectId to some
   // commands precisely so the renderer does not have to guess them back out
   // of the returned dataset. Widening the parameter erased them, and nothing
@@ -88,8 +114,18 @@ export interface ProviderDraft {
 interface DataState {
   data: AppData | null;
   loading: boolean;
+  /**
+   * The store's read-only mode (ADR-0004). Pushed, not returned per write:
+   * "data.json will not parse" is a condition the app is *in*, not a property
+   * of any one save, and the ten-odd debounced edits that nobody checks the
+   * return of all need exactly this one signal.
+   */
+  storeWritable: boolean;
+  /** The parse/IO failure, shown in the banner so the user can act on it. */
+  storeUnreadableReason: string | null;
   load: () => Promise<void>;
-  upsertTask: (task: Task) => Promise<{ data: AppData; settledMs: number; persisted: boolean }>;
+  subscribeStoreMode: () => () => void;
+  upsertTask: (task: Task) => Promise<TaskUpsertOutcome>;
   deleteTask: (id: string) => Promise<void>;
   /** 字段编辑（标题/备注/条目/下次跟进日）；状态只能走 resolve/reopen 命令。 */
   upsertFollowUp: (followUp: FollowUpEdit) => Promise<void>;
@@ -128,7 +164,8 @@ interface DataState {
   setTaskOrder: (viewKey: string, ids: string[]) => void;
   // Returns the new project's id — the service mints it, so the renderer no
   // longer recovers it by diffing the project list.
-  createProject: (title: string) => Promise<string>;
+  /** null when the store refused the write — the project was not created. */
+  createProject: (title: string) => Promise<string | null>;
   updateProject: (
     id: string,
     patch: { title?: string; primaryColor?: string | null; isArchived?: boolean },
@@ -142,31 +179,21 @@ interface DataState {
   ) => Promise<void>;
 }
 
-/**
- * 写通道结果的唯一采纳点（ADR-0004）。
- *
- * 两条规则都在这里，且只有这里：
- *
- * 1. **降级数据集不采纳。** persisted 为 false 时，data 是主进程自己都读不出来
- *    的回落值（可能是空库）。把它 set 进 store 会让整个任务库从界面上消失，
- *    而提示语说的是"保存失败"——用户不会把两者联系起来。
- * 2. **提示只有一处。** 之前每条写路径各自判断 persisted、各自写 toast，漏一次
- *    就是用户看着保存成功、重启后数据消失，而漏掉是默认结果。
- *
- * 返回值仍是采纳后的数据集，供调用方需要时使用（读的是 store 里的既有值）。
- */
-function adopt(outcome: WriteOutcome): AppData {
-  if (!outcome.persisted) {
-    toast.error('保存失败：数据文件当前不可写，这次修改没有落盘。');
-    return useDataStore.getState().data ?? outcome.data;
-  }
-  useDataStore.setState({ data: outcome.data });
-  return outcome.data;
-}
-
 export const useDataStore = create<DataState>((set, get) => ({
   data: null,
   loading: false,
+  storeWritable: true,
+  storeUnreadableReason: null,
+  /**
+   * Subscribe once, at module scope. onStoreWritable fires immediately with
+   * the current state, so a latch that happened before this line ran is still
+   * seen — subscribing inside a component would leave the app showing a normal
+   * UI until something happened to trigger a re-render.
+   */
+  subscribeStoreMode: () =>
+    api().onStoreWritable(({ writable, reason }) => {
+      useDataStore.setState({ storeWritable: writable, storeUnreadableReason: reason });
+    }),
   load: async () => {
     set({ loading: true });
     const data = await api().dataLoad();
@@ -176,11 +203,11 @@ export const useDataStore = create<DataState>((set, get) => ({
     // The main process enforces "completing a task ends its timing" on write and
     // reports what it actually recorded, so this response is the authority on
     // both the dataset and the timer.
+    // Control flow: the completion dialog branches on whether this landed, so
+    // a refusal must reach it rather than arriving as a clean zero.
     const outcome = await api().taskUpsert(task);
-    // Completing a task reports what main actually recorded; a refused write
-    // must reach the dialog as a failure rather than a clean zero.
-    const data = adopt(outcome);
-    return { data, settledMs: outcome.settledMs, persisted: outcome.persisted };
+    if (!outcome.ok) return outcome;
+    return { ok: true, data: adopt(outcome.data), settledMs: outcome.settledMs };
   },
   deleteTask: async (id) => {
     adopt(await api().taskDelete({ id }));
@@ -261,8 +288,14 @@ export const useDataStore = create<DataState>((set, get) => ({
     // by diffing the whole project list, which returns the wrong project if
     // two creations interleave — and the caller that comment cited has since
     // moved to the atomic ideaUpgradeToProject, leaving the diff dead.
+    // Control flow: the returned id is navigated to, so a refused create must
+    // not hand back the id of a project that was never written.
+    // null rather than an id for a project that was never written. No local
+    // banner fiddling: main already pushed the mode, and duplicating that
+    // signal here is how two banners end up disagreeing.
     const outcome = await api().projectCreate({ title });
-    adopt(outcome);
+    if (!outcome.ok) return null;
+    adopt(outcome.data);
     return outcome.projectId;
   },
   updateProject: async (id, patch) => {

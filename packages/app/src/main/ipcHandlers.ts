@@ -3,6 +3,7 @@ import {
   IpcInvokeContract,
   type IpcInvokeHandlers,
   type IpcInvokeKey,
+  type StoreWritablePayload,
 } from '@tiny-schedule/shared';
 import { type BrowserWindow, ipcMain } from 'electron';
 import type { Logger } from 'pino';
@@ -76,6 +77,14 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
     projects,
     decryptKey,
     sink: chatSink,
+  });
+
+  // Push the store's read-only mode to the renderer (ADR-0004). Subscribing
+  // here rather than from a service keeps the mechanism next to the window it
+  // talks to; the store fires immediately with the current state, so a latch
+  // that happened before the window existed is still reported.
+  store.onModeChanged((writable, reason) => {
+    sendSafe(getWindow(), Ipc.storeWritable, { writable, reason } satisfies StoreWritablePayload);
   });
 
   const handlerDeps: HandlerDeps = {

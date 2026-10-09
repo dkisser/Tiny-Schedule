@@ -9,6 +9,7 @@ import { FollowUpDetail } from './components/FollowUpDetail';
 import { IdeaDetail } from './components/IdeaDetail';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
+import { StoreUnreadableBanner } from './components/StoreUnreadableBanner';
 import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
@@ -136,6 +137,10 @@ export default function App() {
   // Startup update check pushes from main once the renderer is subscribed.
   useEffect(() => api().onUpdateAvailable((r) => useUpdateStore.getState().notify(r)), []);
 
+  // The store's read-only mode, same shape: main pushes it, and it fires once on
+  // subscribe so a store that latched before this mounted still reports.
+  useEffect(() => useDataStore.getState().subscribeStoreMode(), []);
+
   if (!data) return <div className="p-4">加载中…</div>;
 
   const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
@@ -165,6 +170,7 @@ export default function App() {
 
   return (
     <>
+      <StoreUnreadableBanner />
       <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
         <div className="flex h-full">
           <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>

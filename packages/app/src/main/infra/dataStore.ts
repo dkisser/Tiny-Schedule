@@ -50,6 +50,8 @@ export class DataStore {
   private refusalReported = false;
   /** Runs once each time a refusal clears and the store becomes writable. */
   private recoveryListeners: (() => void)[] = [];
+  /** Told whenever the store enters or leaves the read-only mode. */
+  private modeListeners: ((writable: boolean, reason: string | null) => void)[] = [];
   /** Records the backup holds; invalidated on every rotation. null = not read yet. */
   private cachedBackupRecords: number | null = null;
 
@@ -173,6 +175,24 @@ export class DataStore {
   }
 
   /**
+   * Observe the store's read-only mode (ADR-0004).
+   *
+   * The refusal is not a property of any one write — it is a *mode* the store
+   * is in for as long as data.json will not parse. That is why it should not
+   * ride along with every channel's return value: doing so made each new
+   * channel one more place to forget, and forgetting is invisible (it
+   * type-checks, passes tests, and shows the user a save that never happened).
+   *
+   * The listener fires on every transition, not once at subscription: the
+   * renderer needs the current state, and a store that has already latched by
+   * the time it subscribes would otherwise look writable.
+   */
+  onModeChanged(listener: (writable: boolean, reason: string | null) => void): void {
+    listener(this.isWritable, this.primaryUnreadable);
+    this.modeListeners.push(listener);
+  }
+
+  /**
    * Report that a write was dropped. Once per incident: a refused store
    * refuses every heartbeat for the rest of the process, and an operator
    * needs the one line, not thousands.
@@ -184,6 +204,11 @@ export class DataStore {
   private refuse(): void {
     if (this.refusalReported) return;
     this.refusalReported = true;
+    // Latched with the log, on purpose. The renderer shows this as a banner
+    // rather than a toast precisely so it cannot stack: firing per write is
+    // what buried the one real signal under ten identical ones during the
+    // debounced title edits.
+    for (const listener of this.modeListeners) listener(false, this.primaryUnreadable);
     this.logger.error({
       action: 'dataStore:save:refused',
       reason: this.primaryUnreadable,
@@ -230,6 +255,7 @@ export class DataStore {
         backupState: existsSync(this.backupPath) ? 'present' : 'missing',
         ...(backupProblems.length > 0 ? { backupProblems } : {}),
       });
+      for (const listener of this.modeListeners) listener(true, null);
       return this.cache;
     }
     // Collect the reasons rather than discarding them: a re-read that succeeds
@@ -251,6 +277,7 @@ export class DataStore {
       file: this.filePath,
       ...(problems.length > 0 ? { quarantined: problems } : {}),
     });
+    for (const listener of this.modeListeners) listener(true, null);
     return recovered;
   }
 

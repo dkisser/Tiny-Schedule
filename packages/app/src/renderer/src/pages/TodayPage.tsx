@@ -48,14 +48,8 @@ export function TodayPage() {
       return;
     }
     // 设置里已开启「Finish Day 自动触发 AI 分析」：直接结束，不再弹窗询问
-    // The same two rules as every other write (ADR-0004): a refused write must
-    // not blank the view with the degraded dataset, and must say so.
-    const outcome = await api().finishDay({ date: new Date().toISOString() });
-    if (outcome.persisted) {
-      useDataStore.setState({ data: outcome.data });
-    } else {
-      toast.error('结束今日未能保存：数据文件当前不可写。');
-    }
+    const next = await api().finishDay({ date: new Date().toISOString() });
+    useDataStore.setState({ data: next });
     const def = aiProviders.find((p) => p.isDefault) ?? aiProviders[0];
     if (def) {
       useUiStore.setState({

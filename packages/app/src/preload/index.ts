@@ -88,6 +88,12 @@ const api: RendererApi = {
     ipcRenderer.on(Ipc.uiUpdateAvailable, listener);
     return () => ipcRenderer.removeListener(Ipc.uiUpdateAvailable, listener);
   },
+  onStoreWritable: (cb) => {
+    const listener = (_e: unknown, payload: Parameters<typeof cb>[0]) => cb(payload);
+    // check-ipc: ok — Ipc.storeWritable constant
+    ipcRenderer.on(Ipc.storeWritable, listener as never);
+    return () => ipcRenderer.removeListener(Ipc.storeWritable, listener as never);
+  },
   onTimerChanged: (cb) => {
     const listener = (_e: unknown, timer: Parameters<typeof cb>[0]) => cb(timer);
     // check-ipc: ok — Ipc.timerChanged constant

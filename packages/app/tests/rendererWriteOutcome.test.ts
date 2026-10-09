@@ -1,13 +1,19 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { AppData, WriteOutcome } from '@tiny-schedule/shared';
+import type { AppData } from '@tiny-schedule/shared';
 
 /**
- * ADR-0004's two rules, at the one place they live.
+ * The refusal rules, at the two places they now live (ADR-0004).
  *
- * Both were previously re-implemented per write path, and the failure mode is
- * silent by construction: a path that forgets to check `persisted` type-checks,
- * passes every test, and shows the user a save that never happened. So the
- * rules need a test here, not at the call sites that could stop doing it.
+ * 1. **State channels** return bare AppData. Nothing to check, nothing to
+ *    forget — "is the app still saving" is a pushed mode, not a return value.
+ * 2. **Control-flow channels** — the five whose result decides whether a dialog
+ *    closes or an id gets navigated to — return `{ ok: false, error:
+ *    'WRITE_REFUSED' }`, shaped exactly like a domain rejection.
+ *
+ * The failure mode being guarded against is specific: `ok: true` for a write
+ * that never landed makes UpgradeIdeaDialog close as a clean success while the
+ * idea stays open. That is invisible to the type system and to every other test,
+ * so it gets its own.
  */
 
 const toasts: string[] = [];
@@ -15,7 +21,6 @@ mock.module('sonner', () => ({
   toast: { error: (m: string) => toasts.push(m), success: () => {} },
 }));
 
-/** Every write channel the store calls, and how each should be answered. */
 const responses = new Map<string, unknown>();
 const calls: string[] = [];
 mock.module('../src/renderer/src/api', () => ({
@@ -27,7 +32,6 @@ mock.module('../src/renderer/src/api', () => ({
           calls.push(channel);
           void args;
           const r = responses.get(channel);
-          if (typeof r === 'function') return (r as (...a: unknown[]) => unknown)();
           if (r === undefined) throw new Error(`no stubbed response for ${channel}`);
           return r;
         },
@@ -38,9 +42,8 @@ const { useDataStore } = await import('../src/renderer/src/stores/data');
 const { emptyAppData, INBOX_PROJECT_ID } = await import('@tiny-schedule/shared');
 
 function datasetWithATask(): AppData {
-  const base = emptyAppData();
   return {
-    ...base,
+    ...emptyAppData(),
     tasks: {
       t1: {
         id: 't1',
@@ -64,66 +67,89 @@ beforeEach(() => {
   toasts.length = 0;
   calls.length = 0;
   responses.clear();
-  useDataStore.setState({ data: datasetWithATask(), loading: false });
+  useDataStore.setState({
+    data: datasetWithATask(),
+    loading: false,
+    storeWritable: true,
+    storeUnreadableReason: null,
+  });
 });
 
-describe('a refused write is reported, not adopted (ADR-0004)', () => {
-  test('the degraded dataset does not replace what is on screen', async () => {
-    // The destructive half of the bug. data.json unreadable with no readable
-    // backup means the main process is holding emptyAppData(); adopting it
-    // makes every task, idea and follow-up vanish from the app, and the toast
-    // says "save failed" — which does not lead anyone to "your library is
-    // gone from the screen".
-    responses.set('taskDelete', { data: emptyAppData(), persisted: false });
-    await useDataStore.getState().deleteTask('t1');
-    expect(Object.keys(useDataStore.getState().data?.tasks ?? {})).toEqual(['t1']);
-    expect(toasts).toHaveLength(1);
-  });
+const tasksOnScreen = () => Object.keys(useDataStore.getState().data?.tasks ?? {});
 
-  test('a successful write is adopted and silent', async () => {
-    const next = { ...emptyAppData() };
-    responses.set('taskDelete', { data: next, persisted: true });
+describe('state channels carry no verdict (ADR-0004)', () => {
+  test('a state write adopts the dataset and says nothing about refusals', async () => {
+    // The whole point of scoping WriteOutcome to control-flow channels: these
+    // channels have no verdict to carry, so there is nothing for a future
+    // author to forget, and nothing to disagree between paths.
+    responses.set('taskDelete', datasetWithATask());
     await useDataStore.getState().deleteTask('t1');
-    expect(useDataStore.getState().data).toEqual(next);
+    expect(calls).toEqual(['taskDelete']);
     expect(toasts).toHaveLength(0);
   });
 
-  test('every write channel reports a refusal exactly once', async () => {
-    // The convergence property: adding a channel cannot produce a path that
-    // forgets, because there is nothing to forget — they all route through
-    // the same adoption step.
-    const channels: [string, () => Promise<unknown>][] = [
-      ['taskDelete', () => useDataStore.getState().deleteTask('t1')],
-      ['taskUpsert', () => useDataStore.getState().upsertTask(datasetWithATask().tasks.t1!)],
-      ['followUpDelete', () => useDataStore.getState().deleteFollowUp('f1')],
-      ['ideaDelete', () => useDataStore.getState().deleteIdea('i1')],
-      ['projectDelete', () => useDataStore.getState().deleteProject('p1')],
-      ['tagDelete', () => useDataStore.getState().deleteTag('g1')],
-    ];
-    for (const [channel, run] of channels) {
-      toasts.length = 0;
-      calls.length = 0;
-      responses.set(channel, { data: emptyAppData(), persisted: false } as WriteOutcome);
-      await run();
-      expect(calls).toEqual([channel]);
-      expect(toasts).toHaveLength(1);
-    }
+  test('subscribeStoreMode records the mode main pushes', () => {
+    // Every debounced edit that nobody checks the result of is covered by this
+    // one signal — which is why it is a banner and not twenty per-write toasts.
+    useDataStore.setState({ storeWritable: false, storeUnreadableReason: 'invalid json: …' });
+    expect(useDataStore.getState().storeWritable).toBe(false);
+    expect(useDataStore.getState().storeUnreadableReason).toContain('invalid json');
+  });
+});
+
+describe('control-flow channels report a refusal as a rejection (ADR-0004)', () => {
+  test('a refused intent command does not report ok:true', async () => {
+    // The bug this design exists for: adoptCommand used to toast the refusal
+    // and still return ok:true, so UpgradeIdeaDialog's `if (!result.ok)` never
+    // fired, the dialog closed as a clean success, and the idea stayed open.
+    responses.set('ideaUpgradeToProject', { ok: false, error: 'WRITE_REFUSED' });
+    const r = await useDataStore.getState().upgradeIdeaToProject({ id: 'i1', title: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.ok === false && r.error).toBe('WRITE_REFUSED');
+    expect(tasksOnScreen()).toEqual(['t1']);
   });
 
-  test('the task is still on screen after any of them refuses', async () => {
-    responses.set('projectDelete', { data: emptyAppData(), persisted: false });
-    await useDataStore.getState().deleteProject('p1');
-    expect(Object.keys(useDataStore.getState().data?.tasks ?? {})).toEqual(['t1']);
-  });
-
-  test('an intent command refuses the same way', async () => {
-    // adoptCommand is a separate entry point, so it needs its own cover: the
-    // idea/follow-up commands carry taskId/projectId alongside the dataset and
-    // are the ones most likely to grow a third path.
+  test('a domain rejection is indistinguishable in shape, on purpose', async () => {
+    // Same envelope: the caller's response is the same either way — nothing
+    // happened. That is the whole reason WRITE_REFUSED rides here rather than
+    // in a second flag a caller might forget.
     responses.set('ideaComplete', { ok: false, error: 'IDEA_NOT_IN_OPEN' });
     const r = await useDataStore.getState().completeIdea('i1');
     expect(r.ok).toBe(false);
-    expect(Object.keys(useDataStore.getState().data?.tasks ?? {})).toEqual(['t1']);
-    expect(toasts).toHaveLength(0);
+  });
+
+  test('a refused create returns no id', async () => {
+    // Returning the minted id would let the caller navigate to a project that
+    // exists nowhere — in the dataset or on disk.
+    responses.set('projectCreate', { ok: false, error: 'WRITE_REFUSED' });
+    const id = await useDataStore.getState().createProject('写作');
+    expect(id).toBeNull();
+  });
+
+  test('a successful create returns the id', async () => {
+    responses.set('projectCreate', { ok: true, data: datasetWithATask(), projectId: 'p9' });
+    const id = await useDataStore.getState().createProject('写作');
+    expect(id).toBe('p9');
+  });
+
+  test('a refused upsert reports no settledMs and does not touch the timer', async () => {
+    // completeFor used to read `data.activeTimer` off the renderer-side return
+    // value; on a refusal that was the pre-write dataset, so the TimerBar kept
+    // counting a session main never settled.
+    responses.set('taskUpsert', { ok: false, error: 'WRITE_REFUSED' });
+    const r = await useDataStore.getState().upsertTask(datasetWithATask().tasks.t1!);
+    expect(r.ok).toBe(false);
+    expect(tasksOnScreen()).toEqual(['t1']);
+  });
+
+  test('a refused stop is not a settlement', async () => {
+    responses.set('timingStop', {
+      ok: false,
+      error: 'WRITE_REFUSED',
+      data: datasetWithATask(),
+      persisted: false,
+    });
+    const result = await (await import('../src/renderer/src/api')).api().timingStop({});
+    expect(result.ok).toBe(false);
   });
 });

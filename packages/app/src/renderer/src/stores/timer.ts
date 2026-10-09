@@ -176,9 +176,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // process is what decides how much that was — so report its number rather
     // than predicting one here. doneAt is left to the main process too, so a
     // task that was already done keeps the day it was done on.
-    const { data, settledMs } = await useDataStore.getState().upsertTask({ ...task, isDone: true });
-    set({ timer: data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
-    return settledMs;
+    const outcome = await useDataStore.getState().upsertTask({ ...task, isDone: true });
+    // A refused write must not touch the TimerBar: `data` here would be the
+    // renderer's own pre-write dataset, so adopting its activeTimer leaves the
+    // clock counting a session the main process never settled.
+    if (!outcome.ok) return 0;
+    set({ timer: outcome.data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
+    return outcome.settledMs;
   },
 
   pause: () => {

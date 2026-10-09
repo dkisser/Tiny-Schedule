@@ -6,9 +6,17 @@ import {
   type FollowUpEdit,
   reopenFollowUp,
   resolveFollowUp,
-  type WriteOutcome,
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
+
+/**
+ * Commands additionally report whether the store accepted the write, so the
+ * handler can turn a refusal into the same shape as FOLLOW_UP_NOT_FOUND
+ * (ADR-0004) — the caller's response is identical either way: nothing happened.
+ */
+type FollowUpCommandWrite =
+  | { ok: true; data: AppData; persisted: boolean }
+  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
 
 /** The only fields a field edit may write. State advances by command only. */
 const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUpDay'] as const;
@@ -19,7 +27,7 @@ const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUp
  */
 
 export function createFollowUpService({ store, logger }: ServiceDeps) {
-  const persist = (followUp: FollowUp): WriteOutcome => {
+  const persist = (followUp: FollowUp): { data: AppData; persisted: boolean } => {
     const { data: next, persisted } = store.update((d) => ({
       ...d,
       followUps: { ...d.followUps, [followUp.id]: followUp },
@@ -39,8 +47,8 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
    * list row beside an open notes editor and then closing it reverted the
    * 办结 with no error and no log. Ideas got this merge for the same reason.
    */
-  const merge = (patch: FollowUpEdit): WriteOutcome => {
-    const { data: next, persisted } = store.update((d) => {
+  const merge = (patch: FollowUpEdit): AppData => {
+    const { data: next } = store.update((d) => {
       const stored = d.followUps[patch.id];
       // An allowlist, not "filter out undefined": the state fields are not on
       // the edit contract, and a caller that supplies them anyway (a spread
@@ -76,23 +84,23 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
       return { ...d, followUps: { ...d.followUps, [patch.id]: merged } };
     });
     logger.info({ action: 'followUp:edit', followUpId: patch.id, title: patch.title });
-    return { data: next, persisted };
+    return next;
   };
 
   return {
     /** 字段编辑（标题/备注/条目）；状态推进只能走 resolve/reopen。 */
-    edit(patch: FollowUpEdit): WriteOutcome {
+    edit(patch: FollowUpEdit): AppData {
       return merge(patch);
     },
 
-    remove(id: string): WriteOutcome {
-      const { data: next, persisted } = store.update((d) => {
+    remove(id: string): AppData {
+      const { data: next } = store.update((d) => {
         const followUps = { ...d.followUps };
         delete followUps[id];
         return { ...d, followUps };
       });
       logger.info({ action: 'followUp:delete', followUpId: id });
-      return { data: next, persisted };
+      return next;
     },
 
     /**
@@ -102,23 +110,25 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
      * would otherwise have no way to tell "this follow-up is gone" from "the
      * dataset failed to load".
      */
-    resolve(id: string, now = Date.now()): FollowUpCommandResult {
+    resolve(id: string, now = Date.now()): FollowUpCommandWrite {
       const current = store.get().followUps[id];
       if (!current) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, ...persist(resolveFollowUp(current, now)) };
+      const { data, persisted } = persist(resolveFollowUp(current, now));
+      return { ok: true, data, persisted };
     },
 
     /** 恢复跟进：清空了结时刻，回到等待中。 */
-    reopen(id: string): FollowUpCommandResult {
+    reopen(id: string): FollowUpCommandWrite {
       const current = store.get().followUps[id];
       if (!current) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, ...persist(reopenFollowUp(current)) };
+      const { data, persisted } = persist(reopenFollowUp(current));
+      return { ok: true, data, persisted };
     },
   };
 }

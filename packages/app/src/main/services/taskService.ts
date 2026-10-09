@@ -11,7 +11,6 @@ import {
   type Task,
   type TimingStopResult,
   upsertTaskWithTiming,
-  type WriteOutcome,
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import type { DataStore } from '../infra/dataStore';
@@ -139,8 +138,8 @@ export function createTaskService({ store, logger }: ServiceDeps) {
       return { data: next, settledMs, persisted };
     },
 
-    remove(id: string): WriteOutcome {
-      const { data: next, persisted } = store.update((d) => {
+    remove(id: string): AppData {
+      const { data: next } = store.update((d) => {
         const tasks = { ...d.tasks };
         delete tasks[id];
         // detach from parent's subTaskIds
@@ -162,7 +161,7 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         return cleaned;
       });
       logger.info({ action: 'task:delete', taskId: id });
-      return { data: next, persisted };
+      return next;
     },
 
     /** The timer currently on record, or null. Read-only. */
@@ -237,16 +236,16 @@ export function createTaskService({ store, logger }: ServiceDeps) {
      * Finish the local "today": unfinished tasks due today roll to tomorrow so
      * they stay visible in the dueDay-driven Today view.
      */
-    finishDay(now = Date.now()): WriteOutcome {
+    finishDay(now = Date.now()): AppData {
       const today = localDate(now);
       const tomorrow = addDays(today, 1);
-      const { data: next, persisted } = store.update((d) => ({
+      const { data: next } = store.update((d) => ({
         ...d,
         tasks: rollUnfinishedDueDay(d.tasks, today, tomorrow),
         misc: { ...d.misc, lastFinishDay: today },
       }));
       logger.info({ action: 'day:finish', date: today });
-      return { data: next, persisted };
+      return next;
     },
 
     /**

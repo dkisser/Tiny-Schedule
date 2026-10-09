@@ -1,12 +1,21 @@
 import type { HandlerDeps } from './deps';
-import { masked, written } from './deps';
+import { masked, REFUSED, written } from './deps';
 
-/** 项目/标签/排序的 handler：只转调 projectService。 */
+/**
+ * 项目/标签/排序的 handler：只转调 projectService。
+ *
+ * 除 create 外全部返回裸 AppData —— 它们的结果只用来刷新界面，"这个应用现在
+ * 还在保存吗"由 store 模式推送（ADR-0004），不需要逐次携带。create 多返回一个
+ * id，调用方要用它，所以它必须能说清这次写入到底有没有发生。
+ */
 export function projectHandlers({ projects }: HandlerDeps) {
   return {
     projectCreate: (req: { title: string; icon?: string; primaryColor?: string }) => {
       const { data, projectId, persisted } = projects.create(req);
-      return { ...written({ data, persisted }), projectId };
+      // A refused create must not hand back the id of a project that was never
+      // written: the caller navigates to whatever this returns.
+      if (!persisted) return REFUSED;
+      return { ...written(data), projectId };
     },
 
     projectUpdate: (req: {
@@ -14,16 +23,16 @@ export function projectHandlers({ projects }: HandlerDeps) {
       title?: string;
       primaryColor?: string | null;
       isArchived?: boolean;
-    }) => written(projects.update(req)),
+    }) => masked(projects.update(req)),
 
-    projectDelete: (req: { id: string }) => written(projects.remove(req.id)),
+    projectDelete: (req: { id: string }) => masked(projects.remove(req.id)),
 
-    tagCreate: (req: { title: string; color?: string }) => written(projects.createTag(req)),
+    tagCreate: (req: { title: string; color?: string }) => masked(projects.createTag(req)),
 
     tagUpdate: (req: { id: string; title?: string; color?: string }) =>
-      written(projects.updateTag(req)),
+      masked(projects.updateTag(req)),
 
-    tagDelete: (req: { id: string }) => written(projects.removeTag(req.id)),
+    tagDelete: (req: { id: string }) => masked(projects.removeTag(req.id)),
 
     orderSet: ({ viewKey, ids }: { viewKey: string; ids: string[] }) => {
       projects.setOrder(viewKey, ids);

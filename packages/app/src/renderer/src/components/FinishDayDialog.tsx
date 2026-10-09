@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
 import { api } from '../api';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
@@ -28,14 +27,8 @@ export function FinishDayDialog({ open, onClose }: { open: boolean; onClose: () 
   const hasProvider = data.settings.aiProviders.length > 0;
 
   const confirm = async () => {
-    // The same two rules as every other write (ADR-0004): a refused write must
-    // not blank the view with the degraded dataset, and must say so.
-    const outcome = await api().finishDay({ date: new Date().toISOString() });
-    if (outcome.persisted) {
-      useDataStore.setState({ data: outcome.data });
-    } else {
-      toast.error('结束今日未能保存：数据文件当前不可写。');
-    }
+    const next = await api().finishDay({ date: new Date().toISOString() });
+    useDataStore.setState({ data: next });
     if (autoAnalyze !== data.settings.autoAiAnalyzeOnFinishDay) {
       await updateSettings({ autoAiAnalyzeOnFinishDay: autoAnalyze });
     }

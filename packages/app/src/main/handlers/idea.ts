@@ -1,6 +1,6 @@
 import type { IdeaCommandResult, IdeaEdit } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
-import { maskedResult, written } from './deps';
+import { asCommand, masked } from './deps';
 
 /**
  * 想法的 handler：写契约是意图命令集，所以这里的方法名就是领域语言。
@@ -13,18 +13,18 @@ import { maskedResult, written } from './deps';
 export function ideaHandlers({ ideas }: HandlerDeps) {
   return {
     /** 字段编辑：请求只带非状态字段，合并由 service 完成。 */
-    ideaUpsert: (patch: IdeaEdit) => written(ideas.edit(patch)),
+    ideaUpsert: (patch: IdeaEdit) => masked(ideas.edit(patch)),
 
-    ideaDelete: ({ id }: { id: string }) => written(ideas.remove(id)),
+    ideaDelete: ({ id }: { id: string }) => masked(ideas.remove(id)),
 
-    ideaComplete: ({ id }: { id: string }) => maskedResult(ideas.complete(id)),
+    ideaComplete: ({ id }: { id: string }) => asCommand(ideas.complete(id)),
 
-    ideaDiscard: ({ id }: { id: string }) => maskedResult(ideas.discard(id)),
+    ideaDiscard: ({ id }: { id: string }) => asCommand(ideas.discard(id)),
 
-    ideaReopen: ({ id }: { id: string }) => maskedResult(ideas.reopen(id)),
+    ideaReopen: ({ id }: { id: string }) => asCommand(ideas.reopen(id)),
 
     ideaConvertToTask: ({ id, title }: { id: string; title?: string }) =>
-      maskedResult(ideas.convertToTask(id, title)),
+      asCommand(ideas.convertToTask(id, title)),
 
     /**
      * 升级为项目：建项目与转状态在 service 内一次 store.update 完成，
@@ -36,17 +36,17 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
       icon?: string;
       primaryColor?: string;
       validationGoal?: string;
-    }) => maskedResult(ideas.upgradeToProject(req.id, req)),
+    }) => asCommand(ideas.upgradeToProject(req.id, req)),
 
     /** 追加/删除演进日志：也是命令,改的是主进程存的那条列表。 */
     ideaAddEntry: ({ id, text }: { id: string; text: string }) =>
-      maskedResult(ideas.addEntry(id, text)),
+      asCommand(ideas.addEntry(id, text)),
 
     ideaDeleteEntry: ({ id, entryId }: { id: string; entryId: string }) =>
-      maskedResult(ideas.deleteEntry(id, entryId)),
+      asCommand(ideas.deleteEntry(id, entryId)),
 
     ideaUpdateEntry: ({ id, entryId, text }: { id: string; entryId: string; text: string }) =>
-      maskedResult(ideas.updateEntry(id, entryId, text)),
+      asCommand(ideas.updateEntry(id, entryId, text)),
 
     ideaCloseWithVerdict: ({
       id,
@@ -56,6 +56,6 @@ export function ideaHandlers({ ideas }: HandlerDeps) {
       id: string;
       result: 'validated' | 'invalidated' | 'partial';
       text?: string;
-    }): IdeaCommandResult => maskedResult(ideas.closeWithVerdict(id, result, text)),
+    }): IdeaCommandResult => asCommand(ideas.closeWithVerdict(id, result, text)),
   };
 }
