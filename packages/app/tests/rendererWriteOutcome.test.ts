@@ -173,14 +173,27 @@ describe('control-flow channels report a refusal as a rejection (ADR-0004)', () 
     expect(tasksOnScreen()).toEqual(['t1']);
   });
 
-  test('a refused stop is not a settlement', async () => {
+  test('a refused stop is not a settlement and carries no dataset', async () => {
+    // The real shape: WRITE_REFUSED has no `data` at all. The previous version
+    // of this test stubbed a fourth shape — ok:false + data + persisted — that
+    // the channel never produced, so it passed while asserting nothing real.
+    responses.set('timingStop', { ok: false, error: 'WRITE_REFUSED' });
+    const result = await (await import('../src/renderer/src/api')).api().timingStop({});
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && 'data' in result).toBe(false);
+  });
+
+  test('a domain rejection does carry the dataset main wrote', async () => {
+    // The other half of the split: main dropped the timer and persisted that,
+    // so the renderer has to converge on it or keep showing a timeSpent that
+    // the settlement never touched.
     responses.set('timingStop', {
       ok: false,
-      error: 'WRITE_REFUSED',
+      error: 'TASK_ALREADY_DONE',
       data: datasetWithATask(),
-      persisted: false,
     });
     const result = await (await import('../src/renderer/src/api')).api().timingStop({});
     expect(result.ok).toBe(false);
+    expect(result.ok === false && 'data' in result).toBe(true);
   });
 });

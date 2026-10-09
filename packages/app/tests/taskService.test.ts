@@ -68,7 +68,7 @@ describe('taskService.stopTiming — main-side settlement', () => {
   test('rejects when nothing is being timed, handing back the dataset', () => {
     const { data, service } = setup({ t1: task() });
     const r = service.stopTiming(NOW);
-    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data, persisted: true });
+    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data });
   });
 
   test('drops a timer whose task is gone rather than inventing a task', () => {
@@ -269,7 +269,7 @@ function refusingSetup(
 }
 
 describe('a refused write must not read as success', () => {
-  test('stopTiming reports WRITE_REFUSED instead of a settlement', () => {
+  test('stopTiming reports WRITE_REFUSED with no dataset', () => {
     // The user-facing consequence here is that reported time disappears on
     // restart. stopTiming used to return ok:true with the settlement in the
     // returned (unpersisted) dataset, so the renderer reported the hours as
@@ -278,6 +278,10 @@ describe('a refused write must not read as success', () => {
     const result = service.stopTiming(NOW);
     expect(result.ok).toBe(false);
     expect(result.ok === false && result.error).toBe('WRITE_REFUSED');
+    // No data on this branch: nothing happened, so there is nothing to adopt.
+    // Carrying one is what let a caller converge its TimerBar on a session the
+    // main process had never settled.
+    expect(result.ok === false && 'data' in result).toBe(false);
   });
 
   test('settleForQuit records nothing when the store refuses', () => {

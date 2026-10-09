@@ -511,29 +511,30 @@ export type WriteOutcome = { ok: true; data: AppData } | { ok: false; error: 'WR
  * 情况就是这样），渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着
  * 一次结算根本没动过的旧 timeSpent。
  */
+/**
+ * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
+ * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
+ *
+ * 三个分支，而不是"ok + 一个 persisted 布尔"：后者要求调用方判两件独立的事，
+ * 而 ADR-0004 承诺的正是「不存在 ok 为真却没落库的组合」。分支的划分是按
+ * **有没有东西发生变化**：
+ *
+ * - `ok: true` —— 结算落库了，带回实际记录的 ms。
+ * - 领域拒绝 **带 data** —— 主进程确实丢弃了计时（任务已完成或已删除），写入
+ *   成功。渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着一次结算根本
+ *   没动过的旧 timeSpent。
+ * - `WRITE_REFUSED` —— **不带 data**：什么都没发生，所以没有数据集可采纳，只有
+ *   一个"这次没存上"的事实。与上面两个分支分开，正是为了不让人误以为
+ *   data 里的计时器状态代表真实落库结果。
+ */
 export type TimingStopResult =
-  | { ok: true; data: AppData; settledMs: number; persisted: boolean }
+  | ({ settledMs: number } & WriteOutcome)
   | {
       ok: false;
-      /**
-       * What was true of the *timer*. WRITE_REFUSED is the exception: it
-       * describes the store, and it is the one code where a settlement that
-       * should have happened did not.
-       */
-      error:
-        | 'NO_ACTIVE_TIMER'
-        | 'TIMER_MISMATCH'
-        | 'TASK_NOT_FOUND'
-        | 'TASK_ALREADY_DONE'
-        | 'WRITE_REFUSED';
+      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
       data: AppData;
-      /**
-       * Whether the store accepted the write. Orthogonal to `error`: a stop
-       * that dropped the timer because its task was done is still worth
-       * reporting accurately when the refusal means the drop never landed.
-       */
-      persisted: boolean;
-    };
+    }
+  | { ok: false; error: 'WRITE_REFUSED' };
 
 export const TimingStopReqSchema = z.object({
   /**

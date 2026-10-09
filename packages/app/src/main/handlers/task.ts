@@ -40,18 +40,13 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
      */
     timingStop: (req: { taskId?: string }) => {
       const result = tasks.stopTiming(Date.now(), req.taskId);
-      if (!result.ok) {
-        // Rejections still carry data: the main process may already have
-        // dropped the timer, and the renderer needs to see that.
-        logger.info({ action: 'timing:stop', error: result.error, persisted: result.persisted });
-        return { ...result, data: masked(result.data) };
-      }
-      return {
-        ok: true as const,
-        data: masked(result.data),
-        settledMs: result.settledMs,
-        persisted: result.persisted,
-      };
+      if (result.ok) return { ...written(result.data), settledMs: result.settledMs };
+      logger.info({ action: 'timing:stop', error: result.error });
+      // Only the domain rejections carry a dataset — the main process dropped
+      // the timer and wrote that down, so the renderer must converge on it.
+      // WRITE_REFUSED carries none because nothing happened.
+      if (result.error === 'WRITE_REFUSED') return result;
+      return { ...result, data: masked(result.data) };
     },
 
     finishDay: () => masked(tasks.finishDay()),

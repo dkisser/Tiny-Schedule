@@ -53,7 +53,7 @@ export function createTaskService({ store, logger }: ServiceDeps) {
   const stopTiming = (now = Date.now(), expectedTaskId?: string): TimingStopResult => {
     const current = store.get();
     const timer = current.activeTimer;
-    if (!timer) return { ok: false, error: 'NO_ACTIVE_TIMER', data: current, persisted: true };
+    if (!timer) return { ok: false, error: 'NO_ACTIVE_TIMER', data: current };
     if (expectedTaskId !== undefined && timer.taskId !== expectedTaskId) {
       // Someone else's session is running. Settling it here would bill the
       // wrong task, so decline and hand back the truth of what's on record.
@@ -62,28 +62,25 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         taskId: timer.taskId,
         expectedTaskId,
       });
-      return { ok: false, error: 'TIMER_MISMATCH', data: current, persisted: true };
+      return { ok: false, error: 'TIMER_MISMATCH', data: current };
     }
     const task = current.tasks[timer.taskId];
     if (!task) {
-      const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
+      const { data } = store.update((d) => ({ ...d, activeTimer: null }));
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'not-found' });
-      return { ok: false, error: 'TASK_NOT_FOUND', data, persisted };
+      return { ok: false, error: 'TASK_NOT_FOUND', data };
     }
     if (task.isDone) {
-      const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
+      const { data } = store.update((d) => ({ ...d, activeTimer: null }));
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'task-done' });
       // Distinct from TASK_NOT_FOUND: the row exists, we deliberately
       // refused to bill it. Conflating the two told the renderer "nothing
       // to stop" for a stop that actually threw the session away.
       //
-      // `persisted` rides alongside rather than replacing that code: whether
-      // the store accepted the write is a fact about the *store*, orthogonal
-      // to why the timer was dropped. Substituting WRITE_REFUSED for these two
-      // would make a refusal on a done task indistinguishable from a refusal
-      // on a missing one — re-introducing the exact conflation this comment
-      // is about, for three codes instead of two.
-      return { ok: false, error: 'TASK_ALREADY_DONE', data, persisted };
+      // A refused write takes the WRITE_REFUSED branch instead, on its own:
+      // these two carry `data` because the drop was actually written, and a
+      // refusal carries none because nothing happened.
+      return { ok: false, error: 'TASK_ALREADY_DONE', data };
     }
     const settlement = settleTimer(timer, now);
     const { data, persisted } = store.update((d) => {
@@ -112,10 +109,10 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         ms: settlement.ms,
         note: 'the settlement was discarded; nothing was written to disk',
       });
-      return { ok: false, error: 'WRITE_REFUSED', data, persisted: false };
+      return { ok: false, error: 'WRITE_REFUSED' };
     }
     logger.info({ action: 'timer:settle:stop', taskId: timer.taskId, ms: settlement.ms });
-    return { ok: true, data, settledMs: settlement.ms, persisted };
+    return { ok: true, data, settledMs: settlement.ms };
   };
 
   return {
