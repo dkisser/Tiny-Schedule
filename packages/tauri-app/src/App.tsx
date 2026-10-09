@@ -1,0 +1,239 @@
+import { Lightbulb } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect } from 'react';
+import { Toaster } from 'sonner';
+import { api } from './api';
+import { CloseIdeaDialog } from './components/CloseIdeaDialog';
+import { CompleteTaskDialog } from './components/CompleteTaskDialog';
+import { FollowUpDetail } from './components/FollowUpDetail';
+import { IdeaDetail } from './components/IdeaDetail';
+import { Layout } from './components/Layout';
+import { Sidebar } from './components/Sidebar';
+import { TaskDetail } from './components/TaskDetail';
+import { TaskList } from './components/TaskList';
+import { TimerBar } from './components/TimerBar';
+import { PomodoroPhaseDialog } from './components/timer/PomodoroPhaseDialog';
+import { UpdateDialog } from './components/UpdateDialog';
+import { UpgradeIdeaDialog } from './components/UpgradeIdeaDialog';
+import { ideaByProjectId } from './lib/ideas';
+import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks } from './lib/tasks';
+import { AiPage } from './pages/AiPage';
+import { ExportPage } from './pages/ExportPage';
+import { FollowUpsPage } from './pages/FollowUpsPage';
+import { IdeasPage } from './pages/IdeasPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { TodayPage } from './pages/TodayPage';
+import { useDataStore } from './stores/data';
+import { useTimerStore } from './stores/timer';
+import { useUiStore } from './stores/ui';
+import { useUpdateStore } from './stores/update';
+import { applyTheme } from './theme';
+
+function ProjectPage({ projectId }: { projectId: string }) {
+  const data = useDataStore((s) => s.data);
+  const setView = useUiStore((s) => s.setView);
+  const selectIdea = useUiStore((s) => s.selectIdea);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
+  if (!data) return null;
+  const viewKey = `project:${projectId}`;
+  // 双向可见：项目源自想法时，标题上方显示来源横幅，点击跳到想法详情。
+  const sourceIdea = ideaByProjectId(data, projectId);
+  const openSourceIdea = () => {
+    if (!sourceIdea) return;
+    setView({ type: 'ideas' });
+    selectIdea(sourceIdea.id);
+  };
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      {sourceIdea && (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={openSourceIdea}
+          onKeyDown={(e) => e.key === 'Enter' && openSourceIdea()}
+          className="mb-2 flex cursor-pointer items-center gap-1.5 rounded-md bg-secondary px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <Lightbulb className="h-3 w-3 shrink-0" />
+          <span className="truncate">
+            本项目源自想法《{sourceIdea.title}》·{' '}
+            {sourceIdea.status === 'incubating' ? '验证中' : '已闭环'}
+          </span>
+        </div>
+      )}
+      <h1 className="text-xl font-semibold">{data.projects[projectId]?.title ?? '项目'}</h1>
+      <div className="mt-4">
+        <TaskList
+          tasks={applyManualOrder(projectTasks(data, projectId), taskOrderFor(data, viewKey))}
+          data={data}
+          activeTaskId={activeTaskId}
+          groupDone
+          viewKey={viewKey}
+        />
+      </div>
+    </div>
+  );
+}
+
+function TagPage({ tagId }: { tagId: string }) {
+  const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
+  if (!data) return null;
+  const viewKey = `tag:${tagId}`;
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-xl font-semibold">{data.tags[tagId]?.title ?? '标签'}</h1>
+      <div className="mt-4">
+        <TaskList
+          tasks={applyManualOrder(tagTasks(data, tagId), taskOrderFor(data, viewKey))}
+          data={data}
+          activeTaskId={activeTaskId}
+          viewKey={viewKey}
+        />
+      </div>
+    </div>
+  );
+}
+
+function UpcomingPage() {
+  const data = useDataStore((s) => s.data);
+  const activeTaskId = useTimerStore((s) => s.timer)?.taskId;
+  if (!data) return null;
+  return (
+    <div className="mx-auto max-w-3xl p-6">
+      <h1 className="text-xl font-semibold">Upcoming</h1>
+      <div className="mt-4">
+        <TaskList
+          tasks={applyManualOrder(upcomingTasks(data), taskOrderFor(data, 'upcoming'))}
+          data={data}
+          activeTaskId={activeTaskId}
+          viewKey="upcoming"
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  const data = useDataStore((s) => s.data);
+  const load = useDataStore((s) => s.load);
+  const view = useUiStore((s) => s.view);
+  const selectedTaskId = useUiStore((s) => s.selectedTaskId);
+  const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
+  const selectedIdeaId = useUiStore((s) => s.selectedIdeaId);
+  const theme = data?.settings.theme;
+
+  useEffect(() => {
+    // StrictMode mounts, unmounts and remounts every effect in development, so
+    // this runs twice and the first run's `load()` is still in flight when its
+    // cleanup fires. Without these two guards the timer ends up restored twice:
+    // two 30s heartbeats writing the same dataset, two clock intervals, and two
+    // `onTimerChanged` subscriptions. `restore` hands back a teardown, so the
+    // surviving mount cleans up exactly what it installed.
+    let cancelled = false;
+    let disposeRestore: (() => void) | null = null;
+    void load().then(() => {
+      if (cancelled) return;
+      const data = useDataStore.getState().data;
+      if (data) disposeRestore = useTimerStore.getState().restore(data);
+    });
+    return () => {
+      cancelled = true;
+      disposeRestore?.();
+      disposeRestore = null;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (theme) applyTheme(theme);
+  }, [theme]);
+
+  // Startup update check pushes from main once the renderer is subscribed.
+  useEffect(() => api().onUpdateAvailable((r) => useUpdateStore.getState().notify(r)), []);
+
+  if (!data) return <div className="p-4">加载中…</div>;
+
+  const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
+  const selectedFollowUp = selectedFollowUpId ? (data.followUps[selectedFollowUpId] ?? null) : null;
+  const selectedIdea = selectedIdeaId ? (data.ideas[selectedIdeaId] ?? null) : null;
+
+  const page =
+    view.type === 'today' ? (
+      <TodayPage />
+    ) : view.type === 'project' ? (
+      <ProjectPage projectId={view.id} />
+    ) : view.type === 'tag' ? (
+      <TagPage tagId={view.id} />
+    ) : view.type === 'upcoming' ? (
+      <UpcomingPage />
+    ) : view.type === 'followUps' ? (
+      <FollowUpsPage />
+    ) : view.type === 'ideas' ? (
+      <IdeasPage />
+    ) : view.type === 'ai' ? (
+      <AiPage />
+    ) : view.type === 'export' ? (
+      <ExportPage />
+    ) : (
+      <SettingsPage />
+    );
+
+  return (
+    <>
+      <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
+        <div className="flex h-full">
+          <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
+          {/* Animate the panel width so the list reflows in step with it instead
+              of snapping while cards lag behind on their layout animation. */}
+          <AnimatePresence initial={false}>
+            {selectedTask && (
+              <motion.div
+                key="task-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <TaskDetail key={selectedTask.id} task={selectedTask} />
+              </motion.div>
+            )}
+            {selectedFollowUp && (
+              <motion.div
+                key="followup-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <FollowUpDetail key={selectedFollowUp.id} followUp={selectedFollowUp} />
+              </motion.div>
+            )}
+            {selectedIdea && (
+              <motion.div
+                key="idea-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <IdeaDetail key={selectedIdea.id} idea={selectedIdea} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </Layout>
+      <UpdateDialog />
+      <PomodoroPhaseDialog />
+      <CompleteTaskDialog />
+      <UpgradeIdeaDialog />
+      <CloseIdeaDialog />
+      <Toaster
+        position="bottom-right"
+        theme={theme === 'dark' ? 'dark' : 'light'}
+        toastOptions={{ className: 'text-sm' }}
+      />
+    </>
+  );
+}
