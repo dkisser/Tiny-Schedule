@@ -66,17 +66,29 @@ async function sync(timer: ActiveTimer | null) {
  * 必须留着,调用方要拿它来决定还要不要补一次清空。两种情况都返回 0。
  */
 async function settleOnMain(
-  expectedTaskId?: string,
-): Promise<{ settledMs: number; cleared: boolean }> {
-  const result = await api().timingStop({ taskId: expectedTaskId });
-  useDataStore.setState({ data: result.data });
-  if (result.ok) return { settledMs: result.settledMs, cleared: true };
-  // A refused write is not a stop. Without this branch the user stopped a
-  // 45-minute session, watched the TimerBar clear, and was told nothing —
-  // the work existed nowhere on disk and vanished silently on restart.
-  if (!result.persisted) {
-    toast.error('这次计时未能保存：数据文件当前不可写。计时没有结算，请稍后重试。');
+  expectedTimer: ActiveTimer | null,
+): Promise<{ settledMs: number; cleared: boolean; keepTimer?: ActiveTimer | null }> {
+  const result = await api().timingStop({ taskId: expectedTimer?.taskId });
+  if (result.ok) {
+    useDataStore.setState({ data: result.data });
+    return { settledMs: result.settledMs, cleared: true };
   }
+  // A refused write is not a stop, and carries no dataset: nothing happened, so
+  // there is nothing to converge on and the clock must keep running. Without
+  // this branch the user stopped a 45-minute session, watched the TimerBar
+  // clear, and were told nothing — the work existed nowhere on disk.
+  if (result.error === 'WRITE_REFUSED') {
+    toast.error('这次计时未能保存：数据文件当前不可写。计时没有结算，请稍后重试。');
+    // keepTimer: main never dropped it — it could not write — so the caller's
+    // optimistic `timer: null` has to be rolled back or the two sides diverge.
+    // There is no dataset to converge on here (see the contract: this branch
+    // carries none, and the cache may be a degraded fallback), but the caller
+    // already holds the session itself.
+    return { settledMs: 0, cleared: false, keepTimer: expectedTimer ?? null };
+  }
+  // The domain rejections did write: main dropped the timer (task done or
+  // gone), so adopt what it has on record.
+  useDataStore.setState({ data: result.data });
   // TIMER_MISMATCH means a *different* session is running on the main side and
   // was deliberately left alone. Reporting "cleared" here would have the
   // caller wipe that session's accumulated time with no TimeEntry, no log and
@@ -97,8 +109,14 @@ async function settleOnMain(
  * the protection thirty seconds later.
  */
 async function settlePrevious(taskId: string): Promise<boolean> {
-  const { cleared } = await settleOnMain(taskId);
+  const { cleared, keepTimer } = await settleOnMain(useTimerStore.getState().timer);
   if (cleared) return true;
+  if (keepTimer) {
+    // A refused write, not a mismatch: main still holds *this* session, so
+    // there is nothing on its side to adopt.
+    useTimerStore.setState({ timer: keepTimer, now: Date.now() });
+    return false;
+  }
   const { activeTimer } = useDataStore.getState().data ?? {};
   useTimerStore.setState({ timer: activeTimer ?? null, now: Date.now() });
   return false;
@@ -176,9 +194,19 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // process is what decides how much that was — so report its number rather
     // than predicting one here. doneAt is left to the main process too, so a
     // task that was already done keeps the day it was done on.
-    const { data, settledMs } = await useDataStore.getState().upsertTask({ ...task, isDone: true });
-    set({ timer: data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
-    return settledMs;
+    const outcome = await useDataStore.getState().upsertTask({ ...task, isDone: true });
+    // A refused write must not touch the TimerBar: `data` here would be the
+    // renderer's own pre-write dataset, so adopting its activeTimer leaves the
+    // clock counting a session the main process never settled.
+    if (!outcome.ok) {
+      // Thrown, not returned as 0: the dialog reads 0 as "nothing to report"
+      // and would close with no message and a clock frozen mid-session. Its
+      // catch branch already toasts and resumes the paused clock, which is
+      // exactly the right recovery for a write that did not land.
+      throw new Error('complete refused: ' + outcome.error);
+    }
+    set({ timer: outcome.data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
+    return outcome.settledMs;
   },
 
   pause: () => {
@@ -218,7 +246,16 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     let cleared = true;
     let settled = false;
     try {
-      ({ cleared } = await settleOnMain(cur?.taskId));
+      const outcome = await settleOnMain(cur ?? null);
+      cleared = outcome.cleared;
+      if (outcome.keepTimer) {
+        // Main is still counting the session the UI just cleared. Rolling the
+        // optimistic clear back keeps both sides on the same session; letting
+        // them diverge means the next start() overwrites an abandoned timer
+        // with no TimeEntry and no log — which the expectedTaskId pin exists
+        // to prevent.
+        set({ timer: outcome.keepTimer, now: Date.now() });
+      }
       settled = true;
     } finally {
       if (cleared) {

@@ -68,6 +68,7 @@ export const Ipc = {
   appCheckUpdate: 'app:checkUpdate',
   appOpenExternal: 'app:openExternal',
   uiUpdateAvailable: 'ui:updateAvailable',
+  storeWritable: 'store:writable',
   notifyPhaseComplete: 'notify:phaseComplete',
   setAlwaysOnTopWindow: 'window:setAlwaysOnTop',
 } as const;
@@ -126,7 +127,17 @@ export const IDEA_CLEARABLE_FIELDS = ['validationGoal'] as const;
 // "契约里根本不存在这个操作"——主进程侧的守卫只对下面这组命令生效。
 // ---------------------------------------------------------------------------
 
-/** 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。 */
+/**
+ * 想法终态规则拒绝时返回的判别联合，沿用契约既有的 { ok, error } 惯例。
+ *
+ * A refusal is a normal return value, not an exception (ADR-0003).
+ *
+ * WRITE_REFUSED rides in the same branch as the domain rejections because the
+ * caller's response is identical: nothing happened, so the dialog stays open
+ * and the message explains why. That is the point of putting it here rather
+ * than in a separate flag — a separate flag is one more thing a caller can
+ * forget to check, and forgetting is invisible.
+ */
 export type IdeaCommandRejection = { ok: false; error: string };
 
 /**
@@ -135,7 +146,7 @@ export type IdeaCommandRejection = { ok: false; error: string };
  */
 export type FollowUpCommandResult =
   | { ok: true; data: AppData }
-  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
+  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' | 'WRITE_REFUSED' };
 
 export const IdeaIdReqSchema = z.object({ id: z.string().min(1) });
 export type IdeaIdReq = z.infer<typeof IdeaIdReqSchema>;
@@ -457,11 +468,14 @@ export type ChatEvent =
 export type IdeaCommandResult = { ok: true; data: AppData } | IdeaCommandRejection;
 
 /** 转为任务额外带回生成的任务：渲染进程据此高亮/跳转，无需再猜 id。 */
-export type IdeaConvertResult = { ok: true; data: AppData; taskId: string } | IdeaCommandRejection;
+export type IdeaConvertResult =
+  | ({ ok: true; taskId: string } & WriteOutcome)
+  | IdeaCommandRejection;
+/** The same, plus the id of the project created in the same atomic write. */
 
 /** 升级为项目额外带回新建的项目：原子转换的另一半，调用方需要它的 id。 */
 export type IdeaUpgradeResult =
-  | { ok: true; data: AppData; projectId: string }
+  | ({ ok: true; projectId: string } & WriteOutcome)
   | IdeaCommandRejection;
 
 /**
@@ -473,36 +487,47 @@ export type IdeaUpgradeResult =
  * - TASK_NOT_FOUND / TASK_ALREADY_DONE：计时被丢弃，data 带回落库后的状态。
  */
 /**
+ * 控制流写通道的返回（ADR-0004）。
+ *
+ * 只有**返回值被当作控制流**的通道才用这个形状：调用方会拿它决定关不关弹窗、
+ * 记不记录、TimerBar 动不动。其余写通道返回裸 AppData，因为它们的结果只用来
+ * 刷新界面，而"这个应用现在还在保存吗"是一个全局状态，由 store 模式推送
+ * （Ipc.storeWritable + StoreUnreadableBanner），不需要逐次携带。
+ *
+ * 判别式把"成功"和"落盘"合成一个真相：`ok: true` 蕴含 persisted，被拒绝时
+ * 结果与既有领域拒绝同构（`{ ok: false, error }`），所以调用点原有的
+ * `if (!result.ok)` 一行都不用改，也不存在"ok 为真但其实没存下来"的组合。
+ *
+ * 诚实地说：类型系统无法强制一次布尔判断——判别联合摆在那里，不检查也能编译。
+ * 这里能保证的是把需要检查的通道从二十个缩到五个，且每个都紧挨着一个本来就
+ * 存在的分支。不要指望它替代 review。
+ */
+export type WriteOutcome = { ok: true; data: AppData } | { ok: false; error: 'WRITE_REFUSED' };
+
+/**
  * 停止计时的结算结果。主进程自己跑 settleTimer，因此这里是"记了多少"的权威答案，
  * 而不是渲染进程的预测值；与 quit / auto-pause 路径共用同一份结算语义。
  *
- * 拒绝分支也带 data：主进程在拒绝前可能已经丢弃了 activeTimer（任务已完成的
- * 情况就是这样），渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着
- * 一次结算根本没动过的旧 timeSpent。
+ * 三个分支，而不是"ok + 一个 persisted 布尔"：后者要求调用方判两件独立的事，
+ * 而 ADR-0004 承诺的正是「不存在 ok 为真却没落库的组合」。分支的划分是按
+ * **有没有东西发生变化**：
+ *
+ * - `ok: true` —— 结算落库了，带回实际记录的 ms。
+ * - 领域拒绝 **带 data** —— 主进程确实丢弃了计时（任务已完成或已删除），写入
+ *   成功。渲染进程必须拿到落库后的数据集才能收敛，否则会一直显示着一次结算根本
+ *   没动过的旧 timeSpent。
+ * - `WRITE_REFUSED` —— **不带 data**：什么都没发生，所以没有数据集可采纳，只有
+ *   一个"这次没存上"的事实。与上面两个分支分开，正是为了不让人误以为
+ *   data 里的计时器状态代表真实落库结果。
  */
 export type TimingStopResult =
-  | { ok: true; data: AppData; settledMs: number; persisted: boolean }
+  | ({ settledMs: number } & WriteOutcome)
   | {
       ok: false;
-      /**
-       * What was true of the *timer*. WRITE_REFUSED is the exception: it
-       * describes the store, and it is the one code where a settlement that
-       * should have happened did not.
-       */
-      error:
-        | 'NO_ACTIVE_TIMER'
-        | 'TIMER_MISMATCH'
-        | 'TASK_NOT_FOUND'
-        | 'TASK_ALREADY_DONE'
-        | 'WRITE_REFUSED';
+      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
       data: AppData;
-      /**
-       * Whether the store accepted the write. Orthogonal to `error`: a stop
-       * that dropped the timer because its task was done is still worth
-       * reporting accurately when the refusal means the drop never landed.
-       */
-      persisted: boolean;
-    };
+    }
+  | { ok: false; error: 'WRITE_REFUSED' };
 
 export const TimingStopReqSchema = z.object({
   /**
@@ -521,6 +546,19 @@ export type TimingStopReq = z.infer<typeof TimingStopReqSchema>;
 // outside this contract; see IpcEventChannels.
 export const IpcInvokeContract = {
   dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
+  /**
+   * The store's read-only mode, as a pull (ADR-0004).
+   *
+   * Push-only was not enough: main subscribes before the window exists, so the
+   * latch a corrupt data.json set at startup was announced to a null window and
+   * dropped. A renderer reload or dev HMR has the same problem — the main-side
+   * listener is still registered and will not fire again until the mode
+   * *changes*, which for a store that has been read-only since launch is never.
+   *
+   * Pulling on mount is idempotent and costs one round trip; the push channel
+   * stays for the transitions that happen while the app is open.
+   */
+  storeWritable: { ch: Ipc.storeWritable, res: null as unknown as StoreWritablePayload },
   taskUpsert: {
     ch: Ipc.taskUpsert,
     req: TaskSchema,
@@ -528,9 +566,15 @@ export const IpcInvokeContract = {
     // record", so the renderer can report it instead of predicting it.
     // `persisted` says whether it reached the disk at all — without it the
     // renderer reports a save that a refused store silently discarded.
-    res: null as unknown as { data: AppData; settledMs: number; persisted: boolean },
+    res: null as unknown as
+      | ({ settledMs: number } & WriteOutcome)
+      | { ok: false; error: 'WRITE_REFUSED' },
   },
-  taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
+  taskDelete: {
+    ch: Ipc.taskDelete,
+    req: TaskDeleteReqSchema,
+    res: null as unknown as AppData,
+  },
   followUpUpsert: {
     ch: Ipc.followUpUpsert,
     req: FollowUpEditSchema,
@@ -615,7 +659,9 @@ export const IpcInvokeContract = {
     // The id comes back with the dataset: the renderer used to recover it by
     // diffing the whole project list, which picks the wrong project if two
     // creations interleave.
-    res: null as unknown as { data: AppData; projectId: string },
+    res: null as unknown as
+      | ({ ok: true; projectId: string } & WriteOutcome)
+      | { ok: false; error: 'WRITE_REFUSED' },
   },
   projectUpdate: {
     ch: Ipc.projectUpdate,
@@ -633,10 +679,7 @@ export const IpcInvokeContract = {
   settingsUpdate: {
     ch: Ipc.settingsUpdate,
     req: SettingsUpdateReqSchema,
-    // `persisted` says whether the change reached the disk. The renderer adopts
-    // the returned dataset either way, so without it a refused write looks
-    // applied until the app restarts.
-    res: null as unknown as { data: AppData; persisted: boolean },
+    res: null as unknown as AppData,
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
@@ -746,7 +789,27 @@ export type IpcInvokeHandlers = {
 export const IpcEventChannels = [Ipc.aiChunk, Ipc.aiDone, Ipc.aiError] as const;
 
 /** UI push channels (hotkeys, timer updates); separate so ai/chat subscribers stay typed. */
-export const IpcUiEventChannels = [Ipc.uiNewTask, Ipc.uiUpdateAvailable, Ipc.timerChanged] as const;
+export const IpcUiEventChannels = [
+  Ipc.uiNewTask,
+  Ipc.uiUpdateAvailable,
+  Ipc.timerChanged,
+  Ipc.storeWritable,
+] as const;
+
+/**
+ * The store's read-only mode, pushed rather than returned (ADR-0004).
+ *
+ * Not a per-write outcome: data.json being unparseable is a *condition the app
+ * is in*, not a property of any one save. Carrying it on every channel's
+ * return value made each new channel another place to forget, and forgetting
+ * is invisible — it type-checks, passes tests, and shows the user a save that
+ * never happened.
+ *
+ * `reason` is the parse/IO failure, kept for the banner: "保存失败，请重试"
+ * asks the user to retry something that cannot succeed until they repair the
+ * file.
+ */
+export type StoreWritablePayload = { writable: boolean; reason: string | null };
 
 /** AppData sent to the renderer never contains real keys. */
 export function maskDataForRenderer(data: AppData): AppData {

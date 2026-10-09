@@ -28,10 +28,12 @@ export interface ProjectUpdateInput {
 
 export function createProjectService({ store, logger }: ServiceDeps) {
   return {
-    create(req: ProjectCreateInput): { data: AppData; projectId: string } {
+    // create is a control-flow channel: the renderer navigates to the id, so
+    // it must be able to tell whether the project was actually written.
+    create(req: ProjectCreateInput): { data: AppData; projectId: string; persisted: boolean } {
       const project = newProject(req);
       const projectId = project.id;
-      const { data: next } = store.update((d) => ({
+      const { data: next, persisted } = store.update((d) => ({
         ...d,
         projects: {
           ...d.projects,
@@ -39,7 +41,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
         },
       }));
       logger.info({ action: 'project:create', title: project.title });
-      return { data: next, projectId };
+      return { data: next, projectId, persisted };
     },
 
     update(req: ProjectUpdateInput): AppData {
@@ -126,10 +128,10 @@ export function createProjectService({ store, logger }: ServiceDeps) {
 
     /** Manual ordering lives in misc.taskOrder; keyed per view. */
     setOrder(viewKey: string, ids: string[]): AppData {
-      const { data: next } = store.update((d) => {
+      const next = store.update((d) => {
         const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;
         return { ...d, misc: { ...d.misc, taskOrder: { ...taskOrder, [viewKey]: ids } } };
-      });
+      }).data;
       logger.info({ action: 'order:set', viewKey, count: ids.length });
       return next;
     },

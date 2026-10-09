@@ -9,6 +9,15 @@ import {
 } from '@tiny-schedule/shared';
 import type { ServiceDeps } from './taskService';
 
+/**
+ * Commands additionally report whether the store accepted the write, so the
+ * handler can turn a refusal into the same shape as FOLLOW_UP_NOT_FOUND
+ * (ADR-0004) — the caller's response is identical either way: nothing happened.
+ */
+type FollowUpCommandWrite =
+  | { ok: true; data: AppData; persisted: boolean }
+  | { ok: false; error: 'FOLLOW_UP_NOT_FOUND' };
+
 /** The only fields a field edit may write. State advances by command only. */
 const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUpDay'] as const;
 
@@ -18,13 +27,13 @@ const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUp
  */
 
 export function createFollowUpService({ store, logger }: ServiceDeps) {
-  const persist = (followUp: FollowUp): AppData => {
-    const { data: next } = store.update((d) => ({
+  const persist = (followUp: FollowUp): { data: AppData; persisted: boolean } => {
+    const { data: next, persisted } = store.update((d) => ({
       ...d,
       followUps: { ...d.followUps, [followUp.id]: followUp },
     }));
     logger.info({ action: 'followUp:upsert', followUpId: followUp.id, title: followUp.title });
-    return next;
+    return { data: next, persisted };
   };
 
   /**
@@ -101,23 +110,25 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
      * would otherwise have no way to tell "this follow-up is gone" from "the
      * dataset failed to load".
      */
-    resolve(id: string, now = Date.now()): FollowUpCommandResult {
+    resolve(id: string, now = Date.now()): FollowUpCommandWrite {
       const current = store.get().followUps[id];
       if (!current) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, data: persist(resolveFollowUp(current, now)) };
+      const { data, persisted } = persist(resolveFollowUp(current, now));
+      return { ok: true, data, persisted };
     },
 
     /** 恢复跟进：清空了结时刻，回到等待中。 */
-    reopen(id: string): FollowUpCommandResult {
+    reopen(id: string): FollowUpCommandWrite {
       const current = store.get().followUps[id];
       if (!current) {
         logger.info({ action: 'followUp:rejected', followUpId: id, error: 'FOLLOW_UP_NOT_FOUND' });
         return { ok: false, error: 'FOLLOW_UP_NOT_FOUND' };
       }
-      return { ok: true, data: persist(reopenFollowUp(current)) };
+      const { data, persisted } = persist(reopenFollowUp(current));
+      return { ok: true, data, persisted };
     },
   };
 }

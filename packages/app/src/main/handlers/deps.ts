@@ -1,4 +1,4 @@
-import { type AppData, maskDataForRenderer } from '@tiny-schedule/shared';
+import { type AppData, maskDataForRenderer, type WriteOutcome } from '@tiny-schedule/shared';
 import type { BrowserWindow } from 'electron';
 import type { Logger } from 'pino';
 import type { FollowUpService } from '../services/followUpService';
@@ -44,6 +44,50 @@ export function maskedResult<T extends { ok: true; data: AppData } | { ok: false
   result: T,
 ): T {
   return result.ok ? ({ ...result, data: masked(result.data) } as T) : result;
+}
+
+/**
+ * The single place a refused write becomes a value a caller can branch on
+ * (ADR-0004).
+ *
+ * Only for control-flow channels — the ones whose result decides whether a
+ * dialog closes or an id gets navigated to. `{ ok: false, error: 'WRITE_REFUSED' }`
+ * is deliberately the same shape as a domain rejection: the caller's response
+ * is identical (nothing happened), so its existing `if (!result.ok)` needs no
+ * change and there is no second flag it might forget.
+ */
+export function written(data: AppData): { ok: true; data: AppData } {
+  return { ok: true, data: masked(data) };
+}
+
+/** The refusal a control-flow channel returns when the store dropped the write. */
+export const REFUSED = { ok: false, error: 'WRITE_REFUSED' } as const;
+
+/**
+ * Map a service command result onto the wire shape, turning a refused write
+ * into the same envelope as a domain rejection.
+ *
+ * One function so every command channel maps it identically. Doing this
+ * per-channel is how a refused write ended up reported as a success: the
+ * shape is uniform, so the mapping has to be too.
+ */
+export function asCommand<
+  R extends { ok: true; data: AppData; persisted: boolean },
+  E extends string,
+>(
+  result: R | { ok: false; error: E },
+): Omit<R, 'persisted'> | { ok: false; error: E | 'WRITE_REFUSED' } {
+  if (!result.ok) return result;
+  // Drop only `persisted`; the rest (taskId, projectId, settledMs) is what the
+  // caller needs to act on, and the renderer was told to expect it by contract.
+  if (!result.persisted) return REFUSED;
+  // Drop only `persisted`; the rest (taskId, projectId, settledMs) is what the
+  // caller needs to act on, and the renderer was told to expect it by contract.
+  const { persisted: _dropped, ...rest } = result;
+  // written() does the masking, so this is not a second spelling of "mask and
+  // wrap": two of them on one file means a change to the masking rule has to
+  // land in both.
+  return { ...rest, data: written(rest.data).data } as Omit<R, 'persisted'>;
 }
 
 export function sendSafe(win: BrowserWindow | null, channel: string, payload: unknown): void {

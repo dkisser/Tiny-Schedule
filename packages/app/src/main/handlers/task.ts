@@ -1,13 +1,16 @@
 import { Ipc, type Task } from '@tiny-schedule/shared';
 import type { HandlerDeps } from './deps';
-import { masked, sendSafe } from './deps';
+import { masked, REFUSED, sendSafe, written } from './deps';
 
 /** 任务与计时的 handler：只转调 taskService，不判断领域规则。 */
 export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
   return {
+    // Control flow: completing a task reports what was actually recorded and
+    // whether it landed, and CompleteTaskDialog branches on both.
     taskUpsert: (task: Task) => {
       const { data, settledMs, persisted } = tasks.upsert(task);
-      return { data: masked(data), settledMs, persisted };
+      if (!persisted) return REFUSED;
+      return { ...written(data), settledMs };
     },
 
     taskDelete: ({ id }: { id: string }) => masked(tasks.remove(id)),
@@ -37,18 +40,13 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
      */
     timingStop: (req: { taskId?: string }) => {
       const result = tasks.stopTiming(Date.now(), req.taskId);
-      if (!result.ok) {
-        // Rejections still carry data: the main process may already have
-        // dropped the timer, and the renderer needs to see that.
-        logger.info({ action: 'timing:stop', error: result.error, persisted: result.persisted });
-        return { ...result, data: masked(result.data) };
-      }
-      return {
-        ok: true as const,
-        data: masked(result.data),
-        settledMs: result.settledMs,
-        persisted: result.persisted,
-      };
+      if (result.ok) return { ...written(result.data), settledMs: result.settledMs };
+      logger.info({ action: 'timing:stop', error: result.error });
+      // Only the domain rejections carry a dataset — the main process dropped
+      // the timer and wrote that down, so the renderer must converge on it.
+      // WRITE_REFUSED carries none because nothing happened.
+      if (result.error === 'WRITE_REFUSED') return result;
+      return { ...result, data: masked(result.data) };
     },
 
     finishDay: () => masked(tasks.finishDay()),

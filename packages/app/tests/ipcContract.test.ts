@@ -72,6 +72,12 @@ beforeAll(async () => {
       data = AppDataSchema.parse(fn(data)) as AppData;
       return { data, persisted: true };
     },
+    // registerIpcHandlers subscribes to push the read-only mode; the real store
+    // reports the current state immediately on subscribe.
+    onModeChanged: (listener: (writable: boolean, reason: string | null) => void) => {
+      listener(true, null);
+      return () => {};
+    },
   } as unknown as DataStore;
   storeRef = store;
   const logger = { info: () => {}, error: () => {} } as unknown as Logger;
@@ -125,6 +131,7 @@ describe('IPC contract', () => {
       'onAiEvent',
       'onChatEvent',
       'onNewTask',
+      'onStoreWritable',
       'onUpdateAvailable',
       'onTimerChanged',
     ];

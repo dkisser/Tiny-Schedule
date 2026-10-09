@@ -8,6 +8,7 @@ import {
   discardIdea,
   IDEA_CLEARABLE_FIELDS,
   type Idea,
+  type IdeaCommandRejection,
   type IdeaCommandResult,
   type IdeaConvertResult,
   type IdeaEdit,
@@ -42,6 +43,21 @@ export interface IdeaUpgradeInput {
   validationGoal?: string;
 }
 
+/**
+ * Commands additionally report whether the store accepted the write, so the
+ * handler can turn a refusal into the same shape as a domain rejection (ADR-0004).
+ * The renderer branches on those, so a refused write must not read as success —
+ * see the note on IdeaCommandRejection.
+ */
+/** Flat, not a union of intersections: three shapes, each one readable. */
+type IdeaCommandWrite = { ok: true; data: AppData; persisted: boolean } | IdeaCommandRejection;
+type IdeaConvertWrite =
+  | { ok: true; data: AppData; taskId: string; persisted: boolean }
+  | IdeaCommandRejection;
+type IdeaUpgradeWrite =
+  | { ok: true; data: AppData; projectId: string; persisted: boolean }
+  | IdeaCommandRejection;
+
 export function createIdeaService({ store, logger }: ServiceDeps) {
   /** Fetch an idea or reject with a stable error code. */
   const load = (id: string): { idea: Idea; data: AppData } | { error: string } => {
@@ -51,15 +67,15 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     return { idea, data };
   };
 
-  const apply = (id: string, transition: (idea: Idea) => Idea): IdeaCommandResult => {
+  const apply = (id: string, transition: (idea: Idea) => Idea): IdeaCommandWrite => {
     const found = load(id);
     if ('error' in found) return { ok: false, error: found.error };
-    const { data: next } = store.update((d) => ({
+    const { data: next, persisted } = store.update((d) => ({
       ...d,
       ideas: { ...d.ideas, [id]: transition(found.idea) },
     }));
     logger.info({ action: 'idea:transition', ideaId: id });
-    return { ok: true, data: next };
+    return { ok: true, data: next, persisted };
   };
 
   /**
@@ -72,7 +88,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
    */
   const editTimeline =
     (apply2: (idea: Idea) => Idea) =>
-    (id: string): IdeaCommandResult => {
+    (id: string): IdeaCommandWrite => {
       const found = load(id);
       if ('error' in found) return { ok: false, error: found.error };
       return apply(id, apply2);
@@ -92,7 +108,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     allowed: readonly Idea['status'][],
     transition: (idea: Idea) => Idea,
     rejectError: string,
-  ): IdeaCommandResult => {
+  ): IdeaCommandWrite => {
     const found = load(id);
     if ('error' in found) return { ok: false, error: found.error };
     if (!allowed.includes(found.idea.status)) {
@@ -169,12 +185,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     },
 
     /** 记录即完成。open 是唯一可分流的状态，incubating/closed/converted 均拒绝。 */
-    complete(id: string): IdeaCommandResult {
+    complete(id: string): IdeaCommandWrite {
       return transitionFrom(id, ['open'], completeIdea, 'IDEA_NOT_IN_OPEN');
     },
 
     /** 废弃。 */
-    discard(id: string): IdeaCommandResult {
+    discard(id: string): IdeaCommandWrite {
       return transitionFrom(id, ['open'], discardIdea, 'IDEA_NOT_IN_OPEN');
     },
 
@@ -182,12 +198,12 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * 重新打开：仅 done/discarded 允许，回到收集箱。
      * converted 与 closed 是终态——契约上根本没有对它们 reopen 的操作。
      */
-    reopen(id: string): IdeaCommandResult {
+    reopen(id: string): IdeaCommandWrite {
       return transitionFrom(id, ['done', 'discarded'], reopenIdea, 'IDEA_NOT_REOPENABLE');
     },
 
     /** 转为任务：任务进 Inbox，想法转 converted（终态）。 */
-    convertToTask(id: string, title?: string): IdeaConvertResult {
+    convertToTask(id: string, title?: string): IdeaConvertWrite {
       const found = load(id);
       if ('error' in found) return { ok: false, error: found.error };
       if (found.idea.status !== 'open') {
@@ -206,7 +222,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const { task, converted } = ideaToTask(found.idea, inbox);
       const named = title ? { ...task, title } : task;
       const now = Date.now();
-      const { data: next } = store.update((d) => {
+      const { data: next, persisted } = store.update((d) => {
         // Route the task write through the shared invariant helper rather than
         // splicing d.tasks: upsertTaskWithTiming ends every task write with
         // dropStaleTiming, which is what guarantees "no write leaves a done
@@ -217,7 +233,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         return { ...r.data, ideas: { ...r.data.ideas, [id]: converted } };
       });
       logger.info({ action: 'idea:convertToTask', ideaId: id, taskId: named.id });
-      return { ok: true, data: next, taskId: named.id };
+      return { ok: true, data: next, persisted, taskId: named.id };
     },
 
     /**
@@ -226,7 +242,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * 渲染进程过去编排两次独立 IPC（先 project:create 再 idea:upsert），中途崩溃
      * 会留下孤儿项目；原子性由此而来——不存在"项目建好了但想法没转"的中间态。
      */
-    upgradeToProject(id: string, input: IdeaUpgradeInput): IdeaUpgradeResult {
+    upgradeToProject(id: string, input: IdeaUpgradeInput): IdeaUpgradeWrite {
       const found = load(id);
       if ('error' in found) return { ok: false, error: found.error };
       if (found.idea.status !== 'open') {
@@ -239,13 +255,13 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const project = newProject(input);
       const projectId = project.id;
       const upgraded = upgradeIdeaToProject(found.idea, projectId, input.validationGoal);
-      const { data: next } = store.update((d) => ({
+      const { data: next, persisted } = store.update((d) => ({
         ...d,
         projects: { ...d.projects, [projectId]: project },
         ideas: { ...d.ideas, [id]: upgraded },
       }));
       logger.info({ action: 'idea:upgradeToProject', ideaId: id, projectId });
-      return { ok: true, data: next, projectId };
+      return { ok: true, data: next, persisted, projectId };
     },
 
     /**
@@ -263,17 +279,17 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
      * appendIdeaEntry to the *stored* idea makes concurrent edits to the
      * timeline and to the scalar fields independent.
      */
-    addEntry(id: string, text: string): IdeaCommandResult {
+    addEntry(id: string, text: string): IdeaCommandWrite {
       return editTimeline((idea) => appendIdeaEntry(idea, text))(id);
     },
 
     /** 改一条演进日志的正文。同 addEntry：改的是主进程存的那条。 */
-    updateEntry(id: string, entryId: string, text: string): IdeaCommandResult {
+    updateEntry(id: string, entryId: string, text: string): IdeaCommandWrite {
       return editTimeline((idea) => updateIdeaEntry(idea, entryId, text))(id);
     },
 
     /** 删掉一条演进日志。同 addEntry：改的是主进程存的那条，不是渲染进程的快照。 */
-    deleteEntry(id: string, entryId: string): IdeaCommandResult {
+    deleteEntry(id: string, entryId: string): IdeaCommandWrite {
       return editTimeline((idea) => deleteIdeaEntry(idea, entryId))(id);
     },
 
@@ -281,7 +297,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       id: string,
       result: 'validated' | 'invalidated' | 'partial',
       text?: string,
-    ): IdeaCommandResult {
+    ): IdeaCommandWrite {
       return transitionFrom(
         id,
         ['incubating', 'closed'],

@@ -635,3 +635,82 @@ describe('DataStore — a recovery must leave a record of what it discarded', ()
     expect(fired).toBe(0);
   });
 });
+
+describe('DataStore — the read-only mode is observable state, not a per-write verdict', () => {
+  test('a subscriber is told the current state immediately', () => {
+    // A store that latched before the renderer mounted would otherwise look
+    // writable until something else happened to trigger a re-render.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const seen: [boolean, string | null][] = [];
+    store.onModeChanged((writable, reason) => seen.push([writable, reason]));
+    expect(seen).toEqual([[false, expect.stringContaining('invalid json')]]);
+  });
+
+  test('a healthy store reports writable, and recovery flips it back', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const seen: boolean[] = [];
+    store.onModeChanged((writable) => seen.push(writable));
+    writeFileSync(join(dir, 'data.json'), JSON.stringify(emptyAppData()), 'utf8');
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
+    expect(seen).toEqual([false, true]);
+  });
+
+  test('deleting the unreadable file flips it back too', () => {
+    // The other recovery path. Missing it leaves a banner up for a store that
+    // has been writable for hours.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const seen: boolean[] = [];
+    store.onModeChanged((writable) => seen.push(writable));
+    unlinkSync(join(dir, 'data.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fresh' } }));
+    expect(seen).toEqual([false, true]);
+  });
+
+  test('a refused write reports read-only even when the file never changed', () => {
+    // Nothing about the file changes while it stays broken, so "did this write
+    // land" can only be answered by the mode — which is why every debounced
+    // edit that nobody checks depends on it.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const seen: boolean[] = [];
+    store.onModeChanged((writable) => seen.push(writable));
+    // The first entry is the immediate report on subscribe; the second is the
+    // first refusal. Three refused writes add nothing after that — the banner
+    // is not a toast, and the latch that stopped the log doing the same is the
+    // same one.
+    for (let i = 0; i < 3; i += 1) {
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: `x${i}` } }));
+    }
+    expect(seen).toEqual([false, false]);
+  });
+
+  test('the unreadable reason is readable without attempting a write', () => {
+    // The pull handler reports { writable:false, reason } and the banner
+    // renders it. Hardcoding reason:null there left the banner invisible on
+    // exactly the case it exists for — a store that latched at startup, before
+    // anything was pushed and before any write was attempted.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    expect(store.isWritable).toBe(false);
+    expect(store.unreadableReason).toContain('invalid json');
+  });
+
+  test('a healthy store reports no reason', () => {
+    const store = new DataStore(tmpDir(), logger);
+    store.load();
+    expect(store.unreadableReason).toBeNull();
+  });
+});

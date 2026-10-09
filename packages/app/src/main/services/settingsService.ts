@@ -39,12 +39,7 @@ export interface SettingsUpdatePatch {
 
 export function createSettingsService({ store, logger, encryptKey }: SettingsDeps) {
   return {
-    /**
-     * 返回落库与否。一笔被 store 拒绝的设置保存必须是可上报的：渲染进程无论如
-     * 何都会用返回的数据集把新主题、用户名显示出来，没有这个标志，用户看到的是
-     * "改好了"，重启后才发现没存上。
-     */
-    update(patch: SettingsUpdatePatch): { data: AppData; persisted: boolean } {
+    update(patch: SettingsUpdatePatch): AppData {
       const { data: next, persisted } = store.update((d) => {
         const settings = { ...d.settings };
         if (patch.userName !== undefined) settings.userName = patch.userName;
@@ -79,8 +74,12 @@ export function createSettingsService({ store, logger, encryptKey }: SettingsDep
         }
         return { ...d, settings };
       });
+      // persisted stays in the log even though it no longer rides the return
+      // value: an operator asking "did this user's setting change land?" reads
+      // the logs, and a line indistinguishable from a successful save is the
+      // only record left of a refused one.
       logger.info({ action: 'settings:update', keys: Object.keys(patch), persisted });
-      return { data: next, persisted };
+      return next;
     },
   };
 }
