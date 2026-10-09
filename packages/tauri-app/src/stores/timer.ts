@@ -2,7 +2,7 @@ import {
   type ActiveTimer,
   type AppData,
   advancePomodoroPhase,
-  applySettlement,
+  autoPauseTimer,
   computeElapsed,
   computeFocusElapsed,
   dropStaleTiming,
@@ -12,12 +12,12 @@ import {
   type PomodoroPhase,
   pauseTimer,
   resumeTimer,
-  settleTimer,
   startPomodoroFocus,
   startTimer,
 } from '@tiny-schedule/shared';
 import { create } from 'zustand';
 import { api } from '../api';
+import { isOfflineResume } from '../bridge/systemEventsLogic';
 import { useDataStore } from './data';
 
 export interface PhasePendingAdvance {
@@ -91,8 +91,31 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // settling on that guess would bill already-recorded time a second time.
     const clean = dropStaleTiming(data);
     const dropped = clean !== data;
-    set({ timer: clean.activeTimer ?? null });
-    if (dropped) void sync(null).catch(() => {});
+
+    // A timer that was still running when the process last exited cannot have
+    // been counting all the way through: the app was gone. Quitting from the
+    // Dock icon skips the settle-on-quit path, so without this the whole
+    // interval between quitting and reopening is billed as work — eight hours
+    // overnight becomes eight hours on the task. Paused at `startedAt` and
+    // recorded as nothing; the user resumes it if the session was real.
+    const offline = clean.activeTimer;
+    const resumed =
+      offline && isOfflineResume(offline, Date.now())
+        ? {
+            ...clean,
+            activeTimer: autoPauseTimer(
+              offline,
+              Date.now(),
+              'sleep',
+              Date.now() - offline.startedAt,
+            ),
+          }
+        : clean;
+
+    set({ timer: resumed.activeTimer ?? null });
+    // Persist either correction, so the same stale timer is not re-read on the
+    // next launch.
+    if (dropped || resumed !== clean) void sync(resumed.activeTimer ?? null).catch(() => {});
     const heartbeat = setInterval(() => {
       const t = get().timer;
       if (t) void sync(t);

@@ -85,3 +85,33 @@ export function suspendBackdateMs(elapsedMs: number, expectedMs: number): number
   if (!Number.isFinite(expectedMs) || expectedMs < 0) return 0;
   return elapsedMs;
 }
+
+/**
+ * Whether a timer restored at launch was still running when the app last
+ * exited, long enough ago that the gap is downtime rather than scheduling.
+ *
+ * The bug this exists for: `on_exit_requested` only fires for a quit the
+ * process is asked to intercept. Quitting from the Dock icon skips it —
+ * `tao` implements no `applicationShouldTerminate:` delegate, so the app goes
+ * straight to `RunEvent::Exit` — and nothing settles the session on the way
+ * out. What lands on disk is `isPaused: false, startedAt: <quit instant>`,
+ * and `computeElapsed` adds `now - startedAt`, so the entire time the machine
+ * was off was billed as work. Eight hours away, eight hours recorded.
+ *
+ * The decision is deliberately conservative about what to do with it: mark
+ * the pause point at `startedAt` and record nothing. Billing the gap would
+ * guess that the user worked while the machine was shut, and ADR 0002 already
+ * settled that the recovery path clears rather than guesses — a state that can
+ * be read two ways must not be turned into money on a coin flip. The user
+ * resumes explicitly, and if the session really was live they resume it.
+ *
+ * A timer already paused, or one whose gap is within
+ * {@link SUSPEND_THRESHOLD_MS}, is left alone: a quick restart is downtime the
+ * user would not think of as downtime, and the same threshold the live sleep
+ * detector uses keeps the two decisions from disagreeing.
+ */
+export function isOfflineResume(timer: ActiveTimer, now: number): boolean {
+  if (timer.isPaused) return false;
+  if (!Number.isFinite(timer.startedAt) || !Number.isFinite(now)) return false;
+  return now - timer.startedAt > SUSPEND_THRESHOLD_MS;
+}
