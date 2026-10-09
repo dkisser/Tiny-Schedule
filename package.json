@@ -5,20 +5,17 @@
     "packages/*"
   ],
   "scripts": {
-    "build:event-helper": "bun run --cwd packages/app build:event-helper",
-    "dev": "bun run build:event-helper && bun run --cwd packages/app dev",
-    "build": "bun run build:event-helper && bun run --cwd packages/app build",
-    "test": "bun run --cwd packages/app test && bun run --cwd packages/shared test",
+    "build:event-helper": "bun run --cwd packages/tauri-app build:event-helper",
+    "dev": "bun run build:event-helper && bun run --cwd packages/tauri-app tauri:dev",
+    "build": "bun run build:event-helper && bun run --cwd packages/tauri-app build",
+    "test": "bun run --cwd packages/tauri-app test && bun run --cwd packages/shared test",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check:ipc": "bun scripts/check-ipc-literals.ts",
     "typecheck": "tsc -b",
-    "release": "bun run --cwd packages/app release",
-    "release:dir": "bun run --cwd packages/app release:dir"
+    "release": "REBUILD_EVENT_HELPER=1 bun run build:event-helper && bun run --cwd packages/tauri-app release",
+    "release:dir": "REBUILD_EVENT_HELPER=1 bun run build:event-helper && bun run --cwd packages/tauri-app release:dir"
   },
-  "trustedDependencies": [
-    "electron"
-  ],
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "@types/bun": "^1.3.14",

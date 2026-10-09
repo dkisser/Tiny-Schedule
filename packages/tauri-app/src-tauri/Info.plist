@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated Info.plist. Tauri picks this file up automatically
+  because it sits next to tauri.conf.json, which is why bundle.macOS.infoPlist
+  stays unset: that key takes a *path*, not an inline map.
+
+  Only the calendar usage string is here. It is not optional on macOS 14+:
+  without it the system refuses EventKit access and event-helper can only
+  report `permission-denied`, which the user has no way to act on.
+  Wording is copied verbatim from packages/app/electron-builder.yml so the two
+  builds ask for the calendar in the same words.
+-->
+<plist version="1.0">
+  <dict>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Tiny Schedule 需要访问系统日历以将任务作为事件写入。</string>
+  </dict>
+</plist>

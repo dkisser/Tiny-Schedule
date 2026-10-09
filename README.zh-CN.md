@@ -1,13 +1,13 @@
 # Tiny-Schedule
 
-> 本地优先的任务管理 + AI 分析桌面应用，基于 Electron，可一键导入 Super Productivity 备份。
+> 本地优先的任务管理 + AI 分析桌面应用，基于 Tauri，可一键导入 Super Productivity 备份。
 
 [English](./README.md) · [简体中文](#)
 
 [![GitHub release](https://img.shields.io/github/v/release/dkisser/Tiny-Schedule?include_prereleases&sort=semver)](https://github.com/dkisser/Tiny-Schedule/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS-blueviolet)](https://github.com/dkisser/Tiny-Schedule/releases)
-[![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
 [![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Bun](https://img.shields.io/badge/Bun-%E2%89%A51.2-000000?logo=bun&logoColor=white)](https://bun.sh/)
@@ -37,7 +37,7 @@
 
 一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器。
 
-- 📦 **本地优先**：所有任务数据保存在本机 JSON 文件，不依赖任何云服务（除你显式配置的 AI Provider）。
+- 📦 **本地优先**：所有任务数据保存在本机 SQLite，不依赖任何云服务（除你显式配置的 AI Provider）。
 - ⌨️ **键盘流**：参考 Super Productivity / Things 的快捷键体验。
 - 🤖 **AI 复盘**：多 Provider OpenAI 兼容接口（OpenAI / DeepSeek / 任意兼容 endpoint），一键生成日报、周报。
 - 🔁 **可迁移**：完整支持 Super Productivity 备份 JSON 整库导入 + 自动备份，避免数据被锁死。
@@ -75,7 +75,7 @@
 - 流式输出、对话视图
 
 ### 📥 导入
-- Super Productivity 备份 JSON 合并导入
+- Super Productivity 备份 JSON 整库覆盖导入
 - 导入前自动备份当前数据
 
 ### 📤 导出
@@ -109,14 +109,14 @@
 
 | 层 | 技术 |
 |---|---|
-| 桌面壳 | [Electron 43](https://www.electronjs.org/) + [electron-vite](https://electron-vite.org/) |
+| 桌面壳 | [Tauri 2](https://tauri.app/)——Rust 薄壳 + 系统 WKWebView |
 | 渲染层 | React 19 + TypeScript 5.7 |
 | 样式 | Tailwind CSS 4 + Radix UI + lucide-react |
 | 状态 | Zustand 5 |
-| 数据 | 本机 JSON 文件（通过 IPC） |
+| 数据 | 本机 JSON 存储（静态加密） |
 | AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)（多 Provider OpenAI 兼容） |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
-| 打包 | electron-builder（DMG, macOS arm64 + x64） |
+| 打包 | Tauri bundler（DMG，macOS arm64 + x64，< 20 MB） |
 | 工具链 | Bun ≥ 1.2 · Biome 2 · TypeScript Project References |
 | 测试 | Bun Test |
 
@@ -165,11 +165,12 @@ Tiny-Schedule 支持将 Super Productivity 的备份 JSON **合并导入**当前
 
 ## 开发指南
 
-环境要求：**Node.js ≥ 20**、**Bun ≥ 1.2**
+环境要求：**Bun ≥ 1.2** 与 **Rust 工具链**（`rustup`；macOS 上还需 Xcode Command
+Line Tools，供 Swift 日历 helper 使用）
 
 ```bash
 bun install
-bun run dev        # 启动 Electron 开发环境
+bun run dev        # 启动 Tauri 开发环境（vite + cargo）
 bun test           # 运行全部测试
 bun run lint       # Biome 检查
 bun run typecheck  # TypeScript 项目引用构建
@@ -180,11 +181,11 @@ bun run typecheck  # TypeScript 项目引用构建
 ```
 Tiny-Schedule/
 ├── packages/
-│   ├── app/      # Electron 主进程 + 渲染层
-│   └── shared/   # 共享领域模型、规则与 IPC 契约（Zod）
-├── scripts/      # 仓库级脚本（IPC 字面量校验等）
-├── docs/         # UI 规范、设计稿
-└── .github/      # GitHub Actions（仅 release.yml）
+│   ├── tauri-app/  # Tauri 壳：React 渲染层 + 薄 Rust 宿主
+│   └── shared/     # 共享类型与领域逻辑（Zod schemas）
+├── scripts/        # 仓库级脚本
+├── docs/           # UI 规范、设计稿、迁移记录
+└── .github/        # GitHub Actions
 ```
 
 ---
@@ -194,16 +195,17 @@ Tiny-Schedule/
 ### 本地构建
 
 ```bash
-bun run build      # 产出 packages/app/out
-bun run release:dir   # 仅展开 .app 到 packages/app/release/
-bun run release      # 产出 .dmg 到 packages/app/release/，不发布
+bun run build         # 构建渲染层产物（vite）
+bun run release:dir   # 仅展开 arm64 的 .app
+bun run release       # 同时产出 arm64 与 x64 两个 .dmg
 ```
 
-> `release` 脚本默认 `--publish never`，仅做本地验证；上传到 GitHub Releases 的逻辑只在 CI 中以 `--publish always` 执行。
+> 产物在 `packages/tauri-app/src-tauri/target/<arch>/bundle/dmg/`。发布流程对
+> **单个 dmg < 20 MB** 设了硬门禁，超出即构建失败。
 
 ### 发布到 GitHub Releases
 
-通过 [electron-builder](https://www.electron.build/) 打包 macOS `.dmg`，由 GitHub Actions 在推送 `v*` tag 时自动发布到 [Releases](https://github.com/dkisser/Tiny-Schedule/releases)。
+通过 [Tauri bundler](https://tauri.app/) 打包 macOS `.dmg`，由 GitHub Actions 在推送 `v*` tag 时自动发布到 [Releases](https://github.com/dkisser/Tiny-Schedule/releases)。
 
 **打 tag 触发**：
 
@@ -212,7 +214,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typecheck/test → 用 electron-vite 编译 → 用 electron-builder 产出 `Tiny Schedule-<version>-arm64.dmg` 与 `Tiny Schedule-<version>-x64.dmg` → 自动创建同名 GitHub Release 并上传。
+Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typecheck/test → 构建 event-helper（Swift）→ 用 `tauri build` 打出双架构产物 → 校验体积门禁 → 自动创建同名 GitHub Release 并上传。
 
 **首次安装（个人未签名）**：
 
@@ -231,7 +233,7 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 ## 路线图
 
-- [ ] Windows / Linux 打包（electron-builder 配置已留位）
+- [ ] Windows / Linux 打包（Tauri 本身跨平台，目前只接了 macOS）
 - [ ] 同步层（可选，用户自托管 WebDAV / S3）
 - [ ] 插件系统（自定义 Prompt / 自定义导出器）
 - [ ] 多语种 UI（i18n 框架预留）
@@ -260,7 +262,7 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 ## 致谢
 
 - [Super Productivity](https://github.com/johannesjo/super-productivity) — 数据模型与 UX 灵感来源
-- [Electron](https://www.electronjs.org/) · [electron-vite](https://electron-vite.org/) · [electron-builder](https://www.electron.build/)
+- [Tauri](https://tauri.app/)
 - [Radix UI](https://www.radix-ui.com/) · [Tailwind CSS](https://tailwindcss.com/) · [lucide-react](https://lucide.dev/)
 - [Zustand](https://github.com/pmndrs/zustand)
 - [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai)

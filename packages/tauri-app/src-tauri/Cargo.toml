@@ -1,0 +1,54 @@
+[package]
+name = "tauri-app"
+version = "0.2.0"
+description = "Tiny Schedule — thin Rust shell (Tauri 2)"
+authors = ["dkisser"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "tauri_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-http = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "stream",
+  "json",
+] }
+tokio = { version = "1", features = ["full"] }
+futures-util = "0.3"
+tauri-plugin-os = "2"
+
+# System idleness (CGEventSourceSecondsSinceLastEventType). The hand-written
+# `core-graphics` crate stopped exposing the event-source API, so this is its
+# objc2-generated successor — already in the tree via tauri, so it adds no new
+# crate to the build. `CGEventTypes` gates the call; without it the method is
+# not compiled in.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-graphics = { version = "0.3", features = ["CGEventTypes"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+# `panic = "abort"` is deliberately not set. It would make `sseFetch`'s
+# `panic` error kind unreachable: a panicking command rejects the `invoke`
+# promise with its panic message (that is the whole of `looksLikeRustPanic`),
+# but under abort the process dies first and takes the running timer, the
+# unsaved data.json write and the SSE stream with it. `unwind` costs
+# negligible size — the panic tables are dwarfed by the ~20 MB of WebView-
+# adjacent assets — and buys both a catchable panic and working `Drop`.
+strip = true

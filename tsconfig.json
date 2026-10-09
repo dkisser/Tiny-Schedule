@@ -1,4 +1,8 @@
 {
   "files": [],
-  "references": [{ "path": "packages/shared" }, { "path": "packages/app" }, { "path": "scripts" }]
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/tauri-app" },
+    { "path": "scripts" }
+  ]
 }

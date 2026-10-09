@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AppData, ChatSession } from '../domain/appData';
-import { FollowUpSchema } from '../domain/followUp';
+import { FollowUpEntrySchema, FollowUpSchema } from '../domain/followUp';
 import { PROJECT_TITLE_MAX_LENGTH } from '../domain/project';
 import { ActiveTimerSchema, TaskSchema } from '../domain/task';
 
@@ -190,7 +190,15 @@ export const FollowUpEditSchema = FollowUpSchema.omit({
   // payload by hand, so an omitted key is the only way to say "don't touch",
   // and clearing a date input has to stay expressible.
   nextFollowUpDay: true,
-}).extend({ nextFollowUpDay: z.string().nullable().optional() });
+})
+  .extend({ nextFollowUpDay: z.string().nullable().optional() })
+  // `entries` is re-declared rather than inherited because `FollowUpSchema`
+  // gives it `.default([])`, and a default defeats the whole contract: an
+  // omitted key would parse to `[]` instead of `undefined`, so a request that
+  // only renamed a follow-up would have wiped its entire timeline while every
+  // caller followed the documented "omitted means don't touch" rule. Ideas
+  // already dropped `timeline` from their edit for the same class of reason.
+  .extend({ entries: z.array(FollowUpEntrySchema).optional() });
 
 /**
  * FollowUpEditSchema fields that may be explicitly nulled to clear them.
