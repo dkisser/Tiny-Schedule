@@ -83,9 +83,10 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   // here rather than from a service keeps the mechanism next to the window it
   // talks to; the store fires immediately with the current state, so a latch
   // that happened before the window existed is still reported.
-  store.onModeChanged((writable, reason) => {
+  const reportMode = (writable: boolean, reason: string | null): void => {
     sendSafe(getWindow(), Ipc.storeWritable, { writable, reason } satisfies StoreWritablePayload);
-  });
+  };
+  store.onModeChanged(reportMode);
 
   const handlerDeps: HandlerDeps = {
     logger,
@@ -102,6 +103,12 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   // compile error.
   const handlers: IpcInvokeHandlers = {
     dataLoad: () => masked(store.get()),
+    // The renderer pulls this on mount. Push alone was not enough: this
+    // subscription is registered before the window exists, so a latch set at
+    // startup was announced to a null window and dropped — and a renderer
+    // reload hits the same gap, because a store that has been read-only since
+    // launch will not change again.
+    storeWritable: () => ({ writable: store.isWritable, reason: null }),
     ...taskHandlers(handlerDeps),
     ...ideaHandlers(handlerDeps),
     ...followUpHandlers(handlerDeps),

@@ -10,7 +10,7 @@ export function Layout({
   children: ReactNode;
 }) {
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       <aside className="w-60 shrink-0 border-r border-border bg-muted/30 overflow-y-auto">
         {sidebar}
       </aside>

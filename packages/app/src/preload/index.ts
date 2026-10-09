@@ -88,6 +88,7 @@ const api: RendererApi = {
     ipcRenderer.on(Ipc.uiUpdateAvailable, listener);
     return () => ipcRenderer.removeListener(Ipc.uiUpdateAvailable, listener);
   },
+  storeWritable: () => ipcRenderer.invoke(IpcInvokeContract.storeWritable.ch),
   onStoreWritable: (cb) => {
     const listener = (_e: unknown, payload: Parameters<typeof cb>[0]) => cb(payload);
     // check-ipc: ok — Ipc.storeWritable constant

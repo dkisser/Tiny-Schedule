@@ -28,6 +28,8 @@ export interface ProjectUpdateInput {
 
 export function createProjectService({ store, logger }: ServiceDeps) {
   return {
+    // create is a control-flow channel: the renderer navigates to the id, so
+    // it must be able to tell whether the project was actually written.
     create(req: ProjectCreateInput): { data: AppData; projectId: string; persisted: boolean } {
       const project = newProject(req);
       const projectId = project.id;
@@ -43,7 +45,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     update(req: ProjectUpdateInput): AppData {
-      const { data: next, persisted } = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const prev = d.projects[req.id];
         // Inbox is a system project: never accept updates through the IPC.
         if (!prev || req.id === INBOX_PROJECT_ID) return d;
@@ -74,7 +76,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
      */
     remove(id: string): AppData {
       if (id === INBOX_PROJECT_ID) return store.get();
-      const { data: next, persisted } = store.update((d) => {
+      const { data: next } = store.update((d) => {
         if (!d.projects[id]) return d;
         const projects = { ...d.projects };
         delete projects[id];
@@ -89,7 +91,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     createTag(req: { title: string; color?: string }): AppData {
-      const { data: next, persisted } = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const id = `tag_${randomUUID()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
@@ -98,7 +100,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     updateTag(req: { id: string; title?: string; color?: string }): AppData {
-      const { data: next, persisted } = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const prev = d.tags[req.id];
         if (!prev) return d;
         const updated = {
@@ -113,7 +115,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     removeTag(id: string): AppData {
-      const { data: next, persisted } = store.update((d) => {
+      const { data: next } = store.update((d) => {
         if (!d.tags[id]) return d;
         const tags = { ...d.tags };
         delete tags[id];

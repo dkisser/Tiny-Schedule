@@ -187,9 +187,14 @@ export class DataStore {
    * renderer needs the current state, and a store that has already latched by
    * the time it subscribes would otherwise look writable.
    */
-  onModeChanged(listener: (writable: boolean, reason: string | null) => void): void {
+  onModeChanged(listener: (writable: boolean, reason: string | null) => void): () => void {
     listener(this.isWritable, this.primaryUnreadable);
     this.modeListeners.push(listener);
+    // Returning an unsubscribe: a renderer reload re-runs the effect, and a
+    // list that only grows would keep notifying a window that is gone.
+    return () => {
+      this.modeListeners = this.modeListeners.filter((l) => l !== listener);
+    };
   }
 
   /**

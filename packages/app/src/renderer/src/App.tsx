@@ -137,9 +137,14 @@ export default function App() {
   // Startup update check pushes from main once the renderer is subscribed.
   useEffect(() => api().onUpdateAvailable((r) => useUpdateStore.getState().notify(r)), []);
 
-  // The store's read-only mode, same shape: main pushes it, and it fires once on
-  // subscribe so a store that latched before this mounted still reports.
-  useEffect(() => useDataStore.getState().subscribeStoreMode(), []);
+  // Pull the store's current mode, then follow the changes (ADR-0004).
+  useEffect(() => {
+    const unsubscribe = useDataStore.getState().subscribeStoreMode();
+    // The promise resolves once the pull lands and the subscription is live.
+    return () => {
+      void unsubscribe.then((off) => off());
+    };
+  }, []);
 
   if (!data) return <div className="p-4">加载中…</div>;
 
@@ -169,53 +174,58 @@ export default function App() {
     );
 
   return (
-    <>
+    // h-screen on the column, h-full on Layout: a banner rendered beside an
+    // h-screen Layout would push the TimerBar and the bottom of the task list
+    // past the viewport, which is exactly when the user most needs to see them.
+    <div className="flex h-screen flex-col overflow-hidden">
       <StoreUnreadableBanner />
-      <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
-        <div className="flex h-full">
-          <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
-          {/* Animate the panel width so the list reflows in step with it instead
+      <div className="min-h-0 flex-1">
+        <Layout sidebar={<Sidebar />} timerBar={<TimerBar />}>
+          <div className="flex h-full">
+            <div className="min-w-0 flex-1 overflow-y-auto">{page}</div>
+            {/* Animate the panel width so the list reflows in step with it instead
               of snapping while cards lag behind on their layout animation. */}
-          <AnimatePresence initial={false}>
-            {selectedTask && (
-              <motion.div
-                key="task-detail"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 380, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
-                className="shrink-0 overflow-hidden"
-              >
-                <TaskDetail key={selectedTask.id} task={selectedTask} />
-              </motion.div>
-            )}
-            {selectedFollowUp && (
-              <motion.div
-                key="followup-detail"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 380, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
-                className="shrink-0 overflow-hidden"
-              >
-                <FollowUpDetail key={selectedFollowUp.id} followUp={selectedFollowUp} />
-              </motion.div>
-            )}
-            {selectedIdea && (
-              <motion.div
-                key="idea-detail"
-                initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 380, opacity: 1 }}
-                exit={{ width: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
-                className="shrink-0 overflow-hidden"
-              >
-                <IdeaDetail key={selectedIdea.id} idea={selectedIdea} />
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </Layout>
+            <AnimatePresence initial={false}>
+              {selectedTask && (
+                <motion.div
+                  key="task-detail"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 380, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <TaskDetail key={selectedTask.id} task={selectedTask} />
+                </motion.div>
+              )}
+              {selectedFollowUp && (
+                <motion.div
+                  key="followup-detail"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 380, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <FollowUpDetail key={selectedFollowUp.id} followUp={selectedFollowUp} />
+                </motion.div>
+              )}
+              {selectedIdea && (
+                <motion.div
+                  key="idea-detail"
+                  initial={{ width: 0, opacity: 0 }}
+                  animate={{ width: 380, opacity: 1 }}
+                  exit={{ width: 0, opacity: 0 }}
+                  transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                  className="shrink-0 overflow-hidden"
+                >
+                  <IdeaDetail key={selectedIdea.id} idea={selectedIdea} />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        </Layout>
+      </div>
       <UpdateDialog />
       <PomodoroPhaseDialog />
       <CompleteTaskDialog />
@@ -226,6 +236,6 @@ export default function App() {
         theme={theme === 'dark' ? 'dark' : 'light'}
         toastOptions={{ className: 'text-sm' }}
       />
-    </>
+    </div>
   );
 }

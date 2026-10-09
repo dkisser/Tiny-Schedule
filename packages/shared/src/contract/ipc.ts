@@ -552,6 +552,19 @@ export type TimingStopReq = z.infer<typeof TimingStopReqSchema>;
 // outside this contract; see IpcEventChannels.
 export const IpcInvokeContract = {
   dataLoad: { ch: Ipc.dataLoad, res: null as unknown as AppData },
+  /**
+   * The store's read-only mode, as a pull (ADR-0004).
+   *
+   * Push-only was not enough: main subscribes before the window exists, so the
+   * latch a corrupt data.json set at startup was announced to a null window and
+   * dropped. A renderer reload or dev HMR has the same problem — the main-side
+   * listener is still registered and will not fire again until the mode
+   * *changes*, which for a store that has been read-only since launch is never.
+   *
+   * Pulling on mount is idempotent and costs one round trip; the push channel
+   * stays for the transitions that happen while the app is open.
+   */
+  storeWritable: { ch: Ipc.storeWritable, res: null as unknown as StoreWritablePayload },
   taskUpsert: {
     ch: Ipc.taskUpsert,
     req: TaskSchema,

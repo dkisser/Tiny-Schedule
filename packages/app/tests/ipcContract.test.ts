@@ -76,6 +76,7 @@ beforeAll(async () => {
     // reports the current state immediately on subscribe.
     onModeChanged: (listener: (writable: boolean, reason: string | null) => void) => {
       listener(true, null);
+      return () => {};
     },
   } as unknown as DataStore;
   storeRef = store;

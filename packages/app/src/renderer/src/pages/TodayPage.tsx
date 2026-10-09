@@ -1,7 +1,6 @@
 import { addDays, localDate } from '@tiny-schedule/shared';
 import { CheckCircle2, ChevronRight, Hourglass } from 'lucide-react';
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { api } from '../api';
 import { FinishDayDialog } from '../components/FinishDayDialog';
 import { TaskList } from '../components/TaskList';

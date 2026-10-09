@@ -22,19 +22,31 @@ mock.module('sonner', () => ({
 }));
 
 const responses = new Map<string, unknown>();
+/** Payloads pushed from main, delivered to whatever onStoreWritable subscribed. */
+const pushed: ((p: { writable: boolean; reason: string | null }) => void)[] = [];
 const calls: string[] = [];
 mock.module('../src/renderer/src/api', () => ({
   api: () =>
     new Proxy({} as Record<string, unknown>, {
-      get:
-        (_t, channel: string) =>
-        async (...args: unknown[]) => {
+      get: (_t, key: string | symbol) => {
+        if (key === 'onStoreWritable') {
+          return (cb: (p: { writable: boolean; reason: string | null }) => void) => {
+            pushed.push(cb);
+            return () => {
+              const i = pushed.indexOf(cb);
+              if (i >= 0) pushed.splice(i, 1);
+            };
+          };
+        }
+        const channel = String(key);
+        return async (...args: unknown[]) => {
           calls.push(channel);
           void args;
           const r = responses.get(channel);
           if (r === undefined) throw new Error(`no stubbed response for ${channel}`);
           return r;
-        },
+        };
+      },
     }),
 }));
 
@@ -66,6 +78,7 @@ function datasetWithATask(): AppData {
 beforeEach(() => {
   toasts.length = 0;
   calls.length = 0;
+  pushed.length = 0;
   responses.clear();
   useDataStore.setState({
     data: datasetWithATask(),
@@ -88,12 +101,30 @@ describe('state channels carry no verdict (ADR-0004)', () => {
     expect(toasts).toHaveLength(0);
   });
 
-  test('subscribeStoreMode records the mode main pushes', () => {
-    // Every debounced edit that nobody checks the result of is covered by this
-    // one signal — which is why it is a banner and not twenty per-write toasts.
-    useDataStore.setState({ storeWritable: false, storeUnreadableReason: 'invalid json: …' });
+  test('subscribeStoreMode records the mode main reports', async () => {
+    // Drives the real subscription rather than setting state directly: the pull
+    // is what covers a latch set before the window existed, and the push is what
+    // covers everything after. Deleting either half used to leave this test
+    // green, which is how the startup gap survived a review round.
+    responses.set('storeWritable', { writable: false, reason: 'invalid json: …' });
+    const off = await useDataStore.getState().subscribeStoreMode();
+    expect(calls).toEqual(['storeWritable']);
     expect(useDataStore.getState().storeWritable).toBe(false);
     expect(useDataStore.getState().storeUnreadableReason).toContain('invalid json');
+    off();
+  });
+
+  test('a mode change pushed after mount is followed, and stops after unsubscribe', async () => {
+    responses.set('storeWritable', { writable: false, reason: 'invalid json: …' });
+    const off = await useDataStore.getState().subscribeStoreMode();
+    // The repair: main pushes the flip, and the banner comes down on its own.
+    pushed.forEach((cb) => cb({ writable: true, reason: null }));
+    expect(useDataStore.getState().storeWritable).toBe(true);
+    expect(useDataStore.getState().storeUnreadableReason).toBeNull();
+    // A renderer reload re-runs the effect; a listener that cannot be removed
+    // would keep notifying a window that is gone.
+    off();
+    expect(pushed).toHaveLength(0);
   });
 });
 

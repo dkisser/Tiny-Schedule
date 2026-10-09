@@ -24,6 +24,8 @@ export type RendererApi = {
    * believing it can save.
    */
   onStoreWritable(cb: (payload: StoreWritablePayload) => void): () => void;
+  /** Pull the current mode on mount; the push channel only covers later changes. */
+  storeWritable(): Promise<StoreWritablePayload>;
 };
 
 export const RENDERER_API_KEY = 'tinyApi';

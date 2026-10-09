@@ -5,6 +5,7 @@ import type {
   Idea,
   IdeaVerdict,
   Project,
+  StoreWritablePayload,
   Task,
   WriteOutcome,
 } from '@tiny-schedule/shared';
@@ -124,7 +125,7 @@ interface DataState {
   /** The parse/IO failure, shown in the banner so the user can act on it. */
   storeUnreadableReason: string | null;
   load: () => Promise<void>;
-  subscribeStoreMode: () => () => void;
+  subscribeStoreMode: () => Promise<() => void>;
   upsertTask: (task: Task) => Promise<TaskUpsertOutcome>;
   deleteTask: (id: string) => Promise<void>;
   /** 字段编辑（标题/备注/条目/下次跟进日）；状态只能走 resolve/reopen 命令。 */
@@ -185,15 +186,24 @@ export const useDataStore = create<DataState>((set, get) => ({
   storeWritable: true,
   storeUnreadableReason: null,
   /**
-   * Subscribe once, at module scope. onStoreWritable fires immediately with
-   * the current state, so a latch that happened before this line ran is still
-   * seen — subscribing inside a component would leave the app showing a normal
-   * UI until something happened to trigger a re-render.
+   * Read the store's mode now, then follow it (ADR-0004).
+   *
+   * Both halves are load-bearing. The pull covers what the push cannot: this
+   * subscription is registered before the window exists, so a latch set at
+   * startup is announced to a null window and dropped — and a store read-only
+   * since launch will not change again to announce it twice. A renderer reload
+   * (Cmd+R) hits the same gap. The subscription then covers everything after
+   * mount.
+   *
+   * Called from a useEffect, not at module scope: the preload bridge is not
+   * ready when this module evaluates.
    */
-  subscribeStoreMode: () =>
-    api().onStoreWritable(({ writable, reason }) => {
+  subscribeStoreMode: async () => {
+    const apply = ({ writable, reason }: StoreWritablePayload) =>
       useDataStore.setState({ storeWritable: writable, storeUnreadableReason: reason });
-    }),
+    apply(await api().storeWritable());
+    return api().onStoreWritable(apply);
+  },
   load: async () => {
     set({ loading: true });
     const data = await api().dataLoad();

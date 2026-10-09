@@ -180,7 +180,13 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     // A refused write must not touch the TimerBar: `data` here would be the
     // renderer's own pre-write dataset, so adopting its activeTimer leaves the
     // clock counting a session the main process never settled.
-    if (!outcome.ok) return 0;
+    if (!outcome.ok) {
+      // Thrown, not returned as 0: the dialog reads 0 as "nothing to report"
+      // and would close with no message and a clock frozen mid-session. Its
+      // catch branch already toasts and resumes the paused clock, which is
+      // exactly the right recovery for a write that did not land.
+      throw new Error('complete refused: ' + outcome.error);
+    }
     set({ timer: outcome.data.activeTimer ?? null, now: Date.now(), phasePendingAdvance: null });
     return outcome.settledMs;
   },

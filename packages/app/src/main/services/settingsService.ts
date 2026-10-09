@@ -74,7 +74,11 @@ export function createSettingsService({ store, logger, encryptKey }: SettingsDep
         }
         return { ...d, settings };
       });
-      logger.info({ action: 'settings:update', keys: Object.keys(patch) });
+      // persisted stays in the log even though it no longer rides the return
+      // value: an operator asking "did this user's setting change land?" reads
+      // the logs, and a line indistinguishable from a successful save is the
+      // only record left of a refused one.
+      logger.info({ action: 'settings:update', keys: Object.keys(patch), persisted });
       return next;
     },
   };
