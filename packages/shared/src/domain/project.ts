@@ -31,7 +31,11 @@ export const ProjectSchema = z.object({
   title: z.string(),
   icon: z.string().optional(),
   isArchived: z.boolean(),
-  primaryColor: z.string().optional(),
+  // Nullable, not merely optional: `null` is what "the user cleared the color
+  // in the picker" persists as, and the schema rejected it. Every save runs
+  // through AppDataSchema, so clearing a project color threw and the whole
+  // write failed — the user could set a color but never remove one.
+  primaryColor: z.string().nullable().optional(),
 });
 
 export const TagSchema = z.object({

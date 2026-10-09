@@ -54,7 +54,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
   const apply = (id: string, transition: (idea: Idea) => Idea): IdeaCommandResult => {
     const found = load(id);
     if ('error' in found) return { ok: false, error: found.error };
-    const next = store.update((d) => ({
+    const { data: next } = store.update((d) => ({
       ...d,
       ideas: { ...d.ideas, [id]: transition(found.idea) },
     }));
@@ -140,7 +140,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
         }
         changes[key] = value;
       }
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const stored = d.ideas[patch.id];
         let merged: Idea = stored
           ? { ...stored, ...changes, id: patch.id }
@@ -159,7 +159,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
     },
 
     remove(id: string): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const ideas = { ...d.ideas };
         delete ideas[id];
         return { ...d, ideas };
@@ -206,7 +206,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const { task, converted } = ideaToTask(found.idea, inbox);
       const named = title ? { ...task, title } : task;
       const now = Date.now();
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         // Route the task write through the shared invariant helper rather than
         // splicing d.tasks: upsertTaskWithTiming ends every task write with
         // dropStaleTiming, which is what guarantees "no write leaves a done
@@ -239,7 +239,7 @@ export function createIdeaService({ store, logger }: ServiceDeps) {
       const project = newProject(input);
       const projectId = project.id;
       const upgraded = upgradeIdeaToProject(found.idea, projectId, input.validationGoal);
-      const next = store.update((d) => ({
+      const { data: next } = store.update((d) => ({
         ...d,
         projects: { ...d.projects, [projectId]: project },
         ideas: { ...d.ideas, [id]: upgraded },

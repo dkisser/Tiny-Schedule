@@ -132,11 +132,26 @@ app.whenReady().then(async () => {
   // runs when the store is writable: writing one derived from a fallback load
   // would put that fallback on disk. (update() handles every other path,
   // re-running the mutation against whatever it recovered.)
+  const runMigrations = (): void => {
+    const s = store;
+    if (!s || !s.isWritable) return;
+    const migrated = migrateRemoveTodayTag(s.get());
+    if (migrated !== s.get()) s.save(migrated);
+    const migrated2 = migrateActiveTimerPomodoroFocus(s.get());
+    if (migrated2 !== s.get()) s.save(migrated2);
+  };
   if (store.isWritable) {
-    const migrated = migrateRemoveTodayTag(store.get());
-    if (migrated !== store.get()) store.save(migrated);
-    const migrated2 = migrateActiveTimerPomodoroFocus(store.get());
-    if (migrated2 !== store.get()) store.save(migrated2);
+    runMigrations();
+  } else {
+    // Skipping the migration used to be silent and permanent: the app stayed
+    // unmigrated for the rest of the session even after the store recovered,
+    // and nothing on disk said so. Say it, and re-run the moment the store
+    // becomes writable again.
+    logger.warn({
+      action: 'app:start:migrationsDeferred',
+      reason: 'data.json is unreadable; migrations will run once it recovers',
+    });
+    store.onRecovered(runMigrations);
   }
   logger.info({ action: 'app:start', activeTimer: store.get().activeTimer?.taskId ?? null });
   // The quit path settles through this same instance. Building a second

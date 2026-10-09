@@ -18,7 +18,10 @@ function emptyStore(): DataStore {
   return {
     get: () => data,
     // Parses, as DataStore.save does — see the note on the other store doubles.
-    update: (fn: (c: typeof data) => typeof data) => AppDataSchema.parse(fn(data)) as typeof data,
+    update: (fn: (c: typeof data) => typeof data) => ({
+      data: AppDataSchema.parse(fn(data)) as typeof data,
+      persisted: true,
+    }),
   } as unknown as DataStore;
 }
 

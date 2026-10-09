@@ -11,6 +11,7 @@ import {
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
 import type { DataStore } from '../src/main/infra/dataStore';
+import { mockElectron } from './fixtures/electronMock';
 
 // IPC contract test: catches the two failure classes the type system cannot
 // see across the process boundary —
@@ -28,42 +29,31 @@ const listened = new Set<string>();
 const handlerFor = new Map<string, (event: unknown, raw: unknown) => unknown>();
 let exposedApi: Record<string, (...args: unknown[]) => unknown> | null = null;
 
-mock.module('electron', () => ({
-  ipcMain: {
-    handle: (channel: string, handler: (event: unknown, raw: unknown) => unknown) => {
-      registered.add(channel);
-      handlerFor.set(channel, handler);
+mock.module('electron', () =>
+  mockElectron({
+    ipcMain: {
+      handle: (channel: string, handler: (event: unknown, raw: unknown) => unknown) => {
+        registered.add(channel);
+        handlerFor.set(channel, handler);
+      },
     },
-  },
-  ipcRenderer: {
-    invoke: (channel: string) => {
-      invoked.add(channel);
-      return Promise.resolve();
+    ipcRenderer: {
+      invoke: (channel: string) => {
+        invoked.add(channel);
+        return Promise.resolve();
+      },
+      on: (channel: string) => {
+        listened.add(channel);
+      },
+      removeListener: () => {},
     },
-    on: (channel: string) => {
-      listened.add(channel);
+    contextBridge: {
+      exposeInMainWorld: (_key: string, api: unknown) => {
+        exposedApi = api as Record<string, (...args: unknown[]) => unknown>;
+      },
     },
-    removeListener: () => {},
-  },
-  contextBridge: {
-    exposeInMainWorld: (_key: string, api: unknown) => {
-      exposedApi = api as Record<string, (...args: unknown[]) => unknown>;
-    },
-  },
-  safeStorage: {
-    isEncryptionAvailable: () => false,
-    encryptString: (s: string) => Buffer.from(s, 'utf8'),
-    decryptString: (b: Buffer) => b.toString('utf8'),
-  },
-  dialog: {},
-  shell: { openExternal: async () => {} },
-  Notification: class {
-    static isSupported() {
-      return false;
-    }
-    show() {}
-  },
-}));
+  }),
+);
 
 beforeAll(async () => {
   const { registerIpcHandlers } = await import('../src/main/ipcHandlers');
@@ -80,7 +70,7 @@ beforeAll(async () => {
       // Same cast as the real DataStore: zod infers z.unknown() fields as
       // optional in the parsed output type.
       data = AppDataSchema.parse(fn(data)) as AppData;
-      return data;
+      return { data, persisted: true };
     },
   } as unknown as DataStore;
   storeRef = store;

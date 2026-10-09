@@ -25,7 +25,7 @@ export function createImportService({ store, logger }: ServiceDeps) {
       // timed. Sweep it here rather than leaving the state for a later write to
       // clean up; the caller announces the drop to the renderer.
       const hadTimer = !!store.get().activeTimer;
-      const data = store.update((d) =>
+      const { data } = store.update((d) =>
         dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
       );
       const droppedTimer = hadTimer && !data.activeTimer;

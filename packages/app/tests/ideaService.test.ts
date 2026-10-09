@@ -28,7 +28,7 @@ function setup(ideas: Record<string, Idea> = { i1: idea() }) {
       // alone would let a schema-breaking write pass green here and only
       // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return AppDataSchema.parse(data) as AppData;
+      return { data: AppDataSchema.parse(data) as AppData, persisted: true };
     },
   } as unknown as DataStore;
   return { data, service: createIdeaService({ store, logger }) };
@@ -48,7 +48,7 @@ function countingSetup(ideas: Record<string, Idea>) {
       // alone would let a schema-breaking write pass green here and only
       // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return AppDataSchema.parse(data) as AppData;
+      return { data: AppDataSchema.parse(data) as AppData, persisted: true };
     },
   } as unknown as DataStore;
   return { data, service: createIdeaService({ store, logger }), writes: () => writes };

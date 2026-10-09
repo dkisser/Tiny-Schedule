@@ -7,6 +7,7 @@ import type {
   Project,
   Task,
 } from '@tiny-schedule/shared';
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import { api } from '../api';
 
@@ -258,7 +259,13 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   updateSettings: async (patch) => {
-    const data = await api().settingsUpdate(patch);
+    // A refused write (data.json unreadable) still returns the dataset, so the
+    // new values render — and then vanish on restart. Say so instead of letting
+    // the user discover it later.
+    const { data, persisted } = await api().settingsUpdate(patch);
     set({ data });
+    if (!persisted) {
+      toast.error('设置未能保存：数据文件当前不可写，重启后会丢失这次修改。');
+    }
   },
 }));

@@ -25,7 +25,7 @@ describe('DataStore', () => {
     const dir = tmpDir();
     const store = new DataStore(dir, logger);
     store.load();
-    const d = store.update((cur) => ({
+    const { data: d } = store.update((cur) => ({
       ...cur,
       tasks: { ...cur.tasks, t1: { ...emptyTask(), id: 't1' } },
     }));
@@ -300,5 +300,202 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     store.load();
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
     expect(new DataStore(dir, logger).load().settings.userName).toBe('me');
+  });
+});
+
+describe('DataStore — a write must be able to report that it did not happen', () => {
+  test('update reports persisted:false when the store refuses', () => {
+    // The refusal used to be invisible to the caller: update() handed back the
+    // degraded fallback and every write-path reported success for a change
+    // that was in memory only. stopTiming returned ok:true on this path, so
+    // the user saw their hours recorded and lost them on restart.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const result = store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    expect(result.persisted).toBe(false);
+    // And the dataset it hands back is the fallback, not the requested change —
+    // which is exactly why callers must not read it as "what I just wrote".
+    expect(result.data.settings.userName).toBe('');
+  });
+
+  test('update reports persisted:true on a normal write', () => {
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    expect(
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } })).persisted,
+    ).toBe(true);
+  });
+
+  test('a mutation that changes nothing skips the write entirely', () => {
+    // The renderer's 30s heartbeat re-sends the timer it already has. Each of
+    // those writes cost a full schema validation, a backup copy and a
+    // tmp+rename — ~120 an hour for a dataset that did not change.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, tasks: { ...d.tasks, t1: { ...emptyTask(), id: 't1' } } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    const before = readFileSync(join(dir, 'data.json'), 'utf8');
+    const backupBefore = readFileSync(join(dir, 'data.backup.json'), 'utf8');
+    // Returning the same reference is how "nothing to write" is expressed.
+    const result = store.update((d) => d);
+    expect(result.persisted).toBe(true);
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(before);
+    // The backup is the tell: a rotation would have replaced it.
+    expect(readFileSync(join(dir, 'data.backup.json'), 'utf8')).toBe(backupBefore);
+  });
+});
+
+describe('DataStore — backup rotation', () => {
+  const withTask = (dir: string) => {
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, tasks: { ...d.tasks, t1: { ...emptyTask(), id: 't1' } } }));
+    return store;
+  };
+
+  test('an emptied library does not rotate over a readable backup', () => {
+    // The guard this restores used to test `projects` for emptiness, which
+    // made it unreachable: emptyAppData() always ships INBOX_PROJECT. So it
+    // was deleted as dead code. Excluding INBOX makes it reachable, and this
+    // is the scenario it exists for: the user deletes every task, and the very
+    // next ordinary write used to demote that emptiness over the backup that
+    // still held their library.
+    const dir = tmpDir();
+    const store = withTask(dir);
+    store.update((d) => ({ ...d, tasks: {} }));
+    expect(new DataStore(dir, logger).load().tasks).toEqual({});
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    expect(Object.keys(backup.tasks)).toEqual(['t1']);
+  });
+
+  test('the backup is not frozen: content rotates it normally again', () => {
+    // The earlier concern with this guard was that it would freeze the backup
+    // permanently once triggered. It only suppresses the rotation *while* the
+    // dataset is empty, so the first write carrying content demotes normally.
+    const dir = tmpDir();
+    const store = withTask(dir);
+    store.update((d) => ({ ...d, tasks: {} }));
+    store.update((d) => ({ ...d, tasks: { ...d.tasks, t2: { ...emptyTask(), id: 't2' } } }));
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    expect(Object.keys(backup.tasks)).toEqual([]);
+    expect(Object.keys(new DataStore(dir, logger).load().tasks)).toEqual(['t2']);
+  });
+
+  test('an emptied library with no readable backup still rotates', () => {
+    // Nothing is lost by rotating here, and refusing to would strand a stale
+    // backup as the only recovery point forever.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
+    // The user clears their library and the backup goes unreadable in the same
+    // breath — the guard's precondition ("a readable backup worth keeping")
+    // no longer holds, so it must not block the rotation.
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'cleared' } }));
+    unlinkSync(join(dir, 'data.backup.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'after' } }));
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(true);
+    // The backup now holds the file that was on disk before this write.
+    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
+      'cleared',
+    );
+  });
+
+  test('the backup is rotated through a temp file, never in place', () => {
+    // copyFileSync straight into data.backup.json had the asymmetry PR #7's
+    // review flagged: the primary write is tmp+rename, so a crash cannot
+    // truncate it, while a crash during the copy left a half-written backup —
+    // turning one damaged file into two.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
+    expect(existsSync(join(dir, 'data.backup.json.tmp'))).toBe(false);
+    expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
+      'first',
+    );
+  });
+});
+
+describe('DataStore — a recovery must leave a record of what it discarded', () => {
+  test('a re-read that quarantined records reports them', () => {
+    // tryRecover passed an empty callback into readValidated, so a re-read
+    // that succeeded *only* after dropping records logged a plain "recovered"
+    // — telling the operator nothing had been lost.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const lines: Record<string, unknown>[] = [];
+    const loud = {
+      info: (o: Record<string, unknown>) => lines.push(o),
+      warn: (o: Record<string, unknown>) => lines.push(o),
+      error: (o: Record<string, unknown>) => lines.push(o),
+    } as unknown as Logger;
+    const s2 = new DataStore(dir, loud);
+    s2.load();
+    lines.length = 0;
+    // The user repairs the file, but one idea in it is still unparseable.
+    const repaired = {
+      ...emptyAppData(),
+      tasks: { t1: { ...emptyTask(), id: 't1' } },
+      ideas: { i2: { id: 'i2', title: 'x', notes: '', createdAt: 1, status: 'archived' } },
+    };
+    writeFileSync(join(dir, 'data.json'), JSON.stringify(repaired), 'utf8');
+    s2.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
+    const recovered = lines.find((l) => l.action === 'dataStore:save:recovered');
+    expect(recovered).toBeDefined();
+    expect(JSON.stringify(recovered?.quarantined)).toContain('quarantined idea i2');
+  });
+
+  test('the file-removed log names the backup state', () => {
+    // `previousReason` describes the *deleted* file, so it says nothing about
+    // the backup — and `adopted: 'empty'` cannot tell "no backup existed" from
+    // "the backup was there and unreadable". Those are different incidents for
+    // whoever restores by hand.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const lines: Record<string, unknown>[] = [];
+    const loud = {
+      info: () => {},
+      warn: (o: Record<string, unknown>) => lines.push(o),
+      error: () => {},
+    } as unknown as Logger;
+    const store = new DataStore(dir, loud);
+    store.load();
+    unlinkSync(join(dir, 'data.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } }));
+    const removed = lines.find((l) => l.action === 'dataStore:save:file-removed');
+    expect(removed?.adopted).toBe('empty');
+    expect(removed?.backupState).toBe('missing');
+  });
+
+  test('onRecovered fires when the store recovers, so deferred work can run', () => {
+    // Startup migrations are skipped when the store is read-only. Before this
+    // hook, a session that recovered mid-run stayed unmigrated for good, with
+    // nothing on disk saying so.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    let fired = 0;
+    store.onRecovered(() => {
+      fired += 1;
+    });
+    writeFileSync(join(dir, 'data.json'), JSON.stringify({ ...emptyAppData() }), 'utf8');
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
+    expect(fired).toBe(1);
+    // Still unreadable: nothing ran, and nothing claimed it had.
+    const stillBad = new DataStore(dir, logger);
+    writeFileSync(join(dir, 'data.json'), '{ still not json', 'utf8');
+    stillBad.load();
+    expect(stillBad.isWritable).toBe(false);
   });
 });

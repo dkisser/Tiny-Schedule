@@ -484,7 +484,20 @@ export type TimingStopResult =
   | { ok: true; data: AppData; settledMs: number }
   | {
       ok: false;
-      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
+      /**
+       * WRITE_REFUSED means the settlement itself never reached the disk:
+       * data.json is unreadable, so the store dropped the write rather than
+       * overwrite the only good copy. Distinct from every other code here —
+       * those all describe what was true of the timer, this one describes the
+       * store — because the user-visible consequence is the same in all of
+       * them (the work is not recorded) and only this one survives a restart.
+       */
+      error:
+        | 'NO_ACTIVE_TIMER'
+        | 'TIMER_MISMATCH'
+        | 'TASK_NOT_FOUND'
+        | 'TASK_ALREADY_DONE'
+        | 'WRITE_REFUSED';
       data: AppData;
     };
 
@@ -510,7 +523,9 @@ export const IpcInvokeContract = {
     req: TaskSchema,
     // `settledMs` is the authoritative answer to "how much time did this write
     // record", so the renderer can report it instead of predicting it.
-    res: null as unknown as { data: AppData; settledMs: number },
+    // `persisted` says whether it reached the disk at all — without it the
+    // renderer reports a save that a refused store silently discarded.
+    res: null as unknown as { data: AppData; settledMs: number; persisted: boolean },
   },
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
   followUpUpsert: {
@@ -615,7 +630,10 @@ export const IpcInvokeContract = {
   settingsUpdate: {
     ch: Ipc.settingsUpdate,
     req: SettingsUpdateReqSchema,
-    res: null as unknown as AppData,
+    // `persisted` says whether the change reached the disk. The renderer adopts
+    // the returned dataset either way, so without it a refused write looks
+    // applied until the app restarts.
+    res: null as unknown as { data: AppData; persisted: boolean },
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },

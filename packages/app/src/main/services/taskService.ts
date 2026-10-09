@@ -38,6 +38,8 @@ export interface UpsertTaskOutcome {
   data: AppData;
   /** Ms recorded because this write completed a timed task; 0 otherwise. */
   settledMs: number;
+  /** False when the store refused the write (data.json unreadable). */
+  persisted: boolean;
 }
 
 export function createTaskService({ store, logger }: ServiceDeps) {
@@ -63,20 +65,24 @@ export function createTaskService({ store, logger }: ServiceDeps) {
     }
     const task = current.tasks[timer.taskId];
     if (!task) {
-      const data = store.update((d) => ({ ...d, activeTimer: null }));
+      const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'not-found' });
-      return { ok: false, error: 'TASK_NOT_FOUND', data };
+      return persisted
+        ? { ok: false, error: 'TASK_NOT_FOUND', data }
+        : { ok: false, error: 'WRITE_REFUSED', data };
     }
     if (task.isDone) {
-      const data = store.update((d) => ({ ...d, activeTimer: null }));
+      const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
       logger.info({ action: 'timer:drop:stop', taskId: timer.taskId, reason: 'task-done' });
       // Distinct from TASK_NOT_FOUND: the row exists, we deliberately
       // refused to bill it. Conflating the two told the renderer "nothing
       // to stop" for a stop that actually threw the session away.
-      return { ok: false, error: 'TASK_ALREADY_DONE', data };
+      return persisted
+        ? { ok: false, error: 'TASK_ALREADY_DONE', data }
+        : { ok: false, error: 'WRITE_REFUSED', data };
     }
     const settlement = settleTimer(timer, now);
-    const data = store.update((d) => {
+    const { data, persisted } = store.update((d) => {
       const t = d.tasks[timer.taskId];
       if (!t) return { ...d, activeTimer: null };
       // A zero-length stop records nothing. Without this guard a timer started
@@ -91,6 +97,19 @@ export function createTaskService({ store, logger }: ServiceDeps) {
         activeTimer: null,
       };
     });
+    // A refused write is not a settlement. Reporting ok:true here told the
+    // renderer "this time was recorded" for a settlement that exists nowhere
+    // but in the returned (degraded, unpersisted) dataset — the user closed
+    // the app believing their hours were saved.
+    if (!persisted) {
+      logger.error({
+        action: 'timer:settle:refused',
+        taskId: timer.taskId,
+        ms: settlement.ms,
+        note: 'the settlement was discarded; nothing was written to disk',
+      });
+      return { ok: false, error: 'WRITE_REFUSED', data };
+    }
     logger.info({ action: 'timer:settle:stop', taskId: timer.taskId, ms: settlement.ms });
     return { ok: true, data, settledMs: settlement.ms };
   };
@@ -106,17 +125,17 @@ export function createTaskService({ store, logger }: ServiceDeps) {
      */
     upsert(task: Task, now = Date.now()): UpsertTaskOutcome {
       let settledMs = 0;
-      const next = store.update((d) => {
+      const { data: next, persisted } = store.update((d) => {
         const r = upsertTaskWithTiming(d, task, now);
         settledMs = r.settledMs;
         return r.data;
       });
       logger.info({ action: 'task:upsert', taskId: task.id, title: task.title, settledMs });
-      return { data: next, settledMs };
+      return { data: next, settledMs, persisted };
     },
 
     remove(id: string): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const tasks = { ...d.tasks };
         delete tasks[id];
         // detach from parent's subTaskIds
@@ -150,24 +169,38 @@ export function createTaskService({ store, logger }: ServiceDeps) {
      * Persist a timer the renderer reports. Same invariant as upsert: a timer
      * may never be persisted for a task that is already done, whoever is
      * asking to sync it. Returns the persisted state so the caller can tell
-     * whether the timer survived.
+     * whether the timer survived, and whether the write was refused.
      */
-    syncTimer(timer: ActiveTimer | null): { data: AppData; dropped: boolean } {
+    syncTimer(timer: ActiveTimer | null): { data: AppData; dropped: boolean; persisted: boolean } {
       if (!timer) {
         // Nothing to clear. Every write re-validates the whole dataset and
         // copies the backup, and stop() clears after settling — so skipping
         // the no-op keeps a stop at one write instead of two.
         const current = store.get();
-        if (!current.activeTimer) return { data: current, dropped: false };
-        return { data: store.update((d) => ({ ...d, activeTimer: null })), dropped: false };
+        if (!current.activeTimer) return { data: current, dropped: false, persisted: true };
+        const { data, persisted } = store.update((d) => ({ ...d, activeTimer: null }));
+        return { data, dropped: false, persisted };
       }
-      const next = store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
+      // The renderer's 30s heartbeat re-sends the same timer it already has.
+      // Persisting it again costs a full schema validation, a backup copy and
+      // a temp+rename per tick — ~120 identical writes an hour, which is the
+      // dominant write load of a running app and wears the disk for nothing.
+      // Identity is the right test here: the renderer holds the object the
+      // main process last handed it, and only a real change (pause, resume,
+      // phase advance) produces a new one.
+      const current = store.get();
+      if (current.activeTimer === timer) {
+        return { data: current, dropped: false, persisted: true };
+      }
+      const { data: next, persisted } = store.update((d) =>
+        dropStaleTiming({ ...d, activeTimer: timer }),
+      );
       if (!next.activeTimer) {
         logger.info({ action: 'timer:drop:sync', taskId: timer.taskId });
-        return { data: next, dropped: true };
+        return { data: next, dropped: true, persisted };
       }
       logger.info({ action: 'timer:sync', taskId: timer.taskId, isPaused: timer.isPaused });
-      return { data: next, dropped: false };
+      return { data: next, dropped: false, persisted };
     },
 
     /**
@@ -184,7 +217,7 @@ export function createTaskService({ store, logger }: ServiceDeps) {
     finishDay(now = Date.now()): AppData {
       const today = localDate(now);
       const tomorrow = addDays(today, 1);
-      const next = store.update((d) => ({
+      const { data: next } = store.update((d) => ({
         ...d,
         tasks: rollUnfinishedDueDay(d.tasks, today, tomorrow),
         misc: { ...d.misc, lastFinishDay: today },

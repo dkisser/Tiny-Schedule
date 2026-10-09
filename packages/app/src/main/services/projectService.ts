@@ -31,7 +31,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     create(req: ProjectCreateInput): { data: AppData; projectId: string } {
       const project = newProject(req);
       const projectId = project.id;
-      const next = store.update((d) => ({
+      const { data: next } = store.update((d) => ({
         ...d,
         projects: {
           ...d.projects,
@@ -43,7 +43,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     update(req: ProjectUpdateInput): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const prev = d.projects[req.id];
         // Inbox is a system project: never accept updates through the IPC.
         if (!prev || req.id === INBOX_PROJECT_ID) return d;
@@ -74,7 +74,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
      */
     remove(id: string): AppData {
       if (id === INBOX_PROJECT_ID) return store.get();
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         if (!d.projects[id]) return d;
         const projects = { ...d.projects };
         delete projects[id];
@@ -89,7 +89,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     createTag(req: { title: string; color?: string }): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const id = `tag_${randomUUID()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
@@ -98,7 +98,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     updateTag(req: { id: string; title?: string; color?: string }): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const prev = d.tags[req.id];
         if (!prev) return d;
         const updated = {
@@ -113,7 +113,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
     },
 
     removeTag(id: string): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         if (!d.tags[id]) return d;
         const tags = { ...d.tags };
         delete tags[id];
@@ -126,7 +126,7 @@ export function createProjectService({ store, logger }: ServiceDeps) {
 
     /** Manual ordering lives in misc.taskOrder; keyed per view. */
     setOrder(viewKey: string, ids: string[]): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const taskOrder = (d.misc.taskOrder ?? {}) as Record<string, string[]>;
         return { ...d, misc: { ...d.misc, taskOrder: { ...taskOrder, [viewKey]: ids } } };
       });

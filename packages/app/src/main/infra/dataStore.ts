@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -13,8 +14,26 @@ import {
   emptyAppData,
   type Idea,
   IdeaSchema,
+  INBOX_PROJECT_ID,
 } from '@tiny-schedule/shared';
 import type { Logger } from 'pino';
+
+/**
+ * The outcome of one write attempt.
+ *
+ * `persisted: false` means the mutation was computed and thrown away: the
+ * caller got back the degraded fallback dataset that is on screen, but nothing
+ * reached the disk. Without this flag every caller reads the returned dataset
+ * as "my write happened" and reports success for a user action that was
+ * silently discarded — the refusal was logged, but the user-facing result
+ * still said it worked.
+ */
+export interface WriteResult {
+  /** The dataset now in effect. Equals what was passed to update() on success. */
+  data: AppData;
+  /** False when the write was refused and nothing was written. */
+  persisted: boolean;
+}
 
 export class DataStore {
   private cache: AppData | null = null;
@@ -28,6 +47,8 @@ export class DataStore {
   private primaryUnreadable: string | null = null;
   /** Latch on the refusal log, so one incident reports once, not per write. */
   private refusalReported = false;
+  /** Runs once each time a refusal clears and the store becomes writable. */
+  private recoveryListeners: (() => void)[] = [];
 
   constructor(
     private readonly dir: string,
@@ -95,21 +116,31 @@ export class DataStore {
    * fallback cache would write that cache over the file the user just fixed —
    * the very destruction the refusal exists to prevent, reached by another
    * door. One re-entry only, so a file that is still unreadable cannot loop.
+   *
+   * Returns `persisted: false` when the write was refused. Callers that report
+   * a user-visible result (stopTiming, syncTimer, settings) must check it:
+   * the returned dataset is the degraded fallback, so reading it as "what I
+   * just wrote" is how a dropped write gets reported as a success.
    */
-  update(fn: (current: AppData) => AppData): AppData {
+  update(fn: (current: AppData) => AppData): WriteResult {
     let base = this.get();
     if (this.primaryUnreadable) {
       const recovered = this.tryRecover();
       if (!recovered) {
         // get() here is the degraded cache; do not run the mutation against it.
         this.refuse();
-        return base;
+        return { data: base, persisted: false };
       }
       base = recovered;
     }
     const next = fn(base);
-    this.save(next);
-    return next;
+    // A mutation that changed nothing must not rewrite the file: the 30s
+    // heartbeat hits this path constantly, and each write costs a full schema
+    // validation, a backup copy and a temp+rename. Skipping the no-op is the
+    // difference between one write per real change and ~120 writes an hour.
+    if (next === base) return { data: base, persisted: true };
+    const persisted = this.save(next);
+    return { data: persisted ? next : (this.cache ?? next), persisted };
   }
 
   /**
@@ -172,11 +203,22 @@ export class DataStore {
         previousReason,
         file: this.filePath,
         adopted: backup ? 'backup' : 'empty',
+        // Name the backup's own state rather than leaving it to be inferred.
+        // `adopted: 'empty'` alone cannot distinguish "there was no backup" from
+        // "the backup was there and unreadable" — two very different incidents
+        // for whoever has to restore this by hand, and the previousReason above
+        // describes the *deleted* file, so it says nothing about the backup.
+        backupState: existsSync(this.backupPath) ? 'present' : 'missing',
         ...(backupProblems.length > 0 ? { backupProblems } : {}),
       });
+      for (const listener of this.recoveryListeners) listener();
       return this.cache;
     }
-    const recovered = this.readValidated(this.filePath, () => {});
+    // Collect the reasons rather than discarding them: a re-read that succeeds
+    // only after quarantining records has still dropped data, and reporting
+    // that as a plain `recovered` told the operator nothing was lost.
+    const problems: string[] = [];
+    const recovered = this.readValidated(this.filePath, (r) => problems.push(r));
     if (!recovered) return null;
     // Adopt it. Clearing the latch while leaving the stale fallback in `cache`
     // is what made the next write overwrite the repaired file. No recursion
@@ -184,11 +226,40 @@ export class DataStore {
     this.cache = recovered;
     this.primaryUnreadable = null;
     this.refusalReported = false;
-    this.logger.info({ action: 'dataStore:save:recovered', file: this.filePath });
+    const log =
+      problems.length > 0 ? this.logger.warn.bind(this.logger) : this.logger.info.bind(this.logger);
+    log({
+      action: 'dataStore:save:recovered',
+      file: this.filePath,
+      ...(problems.length > 0 ? { quarantined: problems } : {}),
+    });
+    for (const listener of this.recoveryListeners) listener();
     return recovered;
   }
 
-  save(data: AppData): void {
+  /**
+   * Run `listener` once each time the store recovers from a refusal.
+   *
+   * The load-time migrations run once at startup and cannot be replayed: they
+   * are absolute results computed from the loaded dataset, not mutations of it.
+   * When startup found the store read-only they were skipped — and silently,
+   * because "the store is not writable" was the same as "nothing to do". A
+   * session that later recovered therefore stayed unmigrated for good, with no
+   * record that it had been skipped. Subscribing here is what lets the
+   * migration run at the moment the store becomes writable again.
+   */
+  onRecovered(listener: () => void): void {
+    this.recoveryListeners.push(listener);
+  }
+
+  /**
+   * Persist `data`, rotating the outgoing file to the backup first.
+   *
+   * Returns false when the write was refused. The refusal is also logged (once
+   * per incident), but a caller that has to report a user-visible result cannot
+   * afford to wait for a log line it will never read.
+   */
+  save(data: AppData): boolean {
     if (this.primaryUnreadable) {
       // Refuse rather than persist a degraded cache over the only good copy.
       // Without this, the first ordinary write — a settings change,
@@ -196,17 +267,81 @@ export class DataStore {
       // load and the second overwrites the backup, leaving nothing
       // recoverable. The data stays on disk exactly as the user left it.
       this.refuse();
-      return;
+      return false;
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;
-    if (existsSync(this.filePath)) {
-      copyFileSync(this.filePath, this.backupPath);
+    if (existsSync(this.filePath) && this.rotationIsSafe(validated)) {
+      this.rotateBackup();
     }
     const tmp = `${this.filePath}.tmp`;
     writeFileSync(tmp, JSON.stringify(validated), 'utf8');
     renameSync(tmp, this.filePath); // atomic on POSIX
     this.cache = validated;
+    return true;
+  }
+
+  /**
+   * Demote data.json to the backup, atomically.
+   *
+   * The primary write is tmp+rename, so a crash mid-write cannot truncate it.
+   * copyFileSync straight into the backup had no such protection: a crash (or
+   * a full disk) during the copy left a half-written backup, and the next
+   * start then had two damaged files instead of one recoverable one. Copy to a
+   * temp name and rename, so the backup is always either the old file or the
+   * new one — never a partial one.
+   */
+  private rotateBackup(): void {
+    const tmp = `${this.backupPath}.tmp`;
+    try {
+      copyFileSync(this.filePath, tmp);
+      renameSync(tmp, this.backupPath);
+    } catch (err) {
+      // A backup that cannot be rotated is not a reason to drop the user's
+      // write: data.json is still the newer copy and is written atomically.
+      try {
+        existsSync(tmp) && unlinkSync(tmp);
+      } catch {
+        // best effort
+      }
+      this.logger.warn({
+        action: 'dataStore:backup:rotateFailed',
+        file: this.backupPath,
+        reason: err instanceof Error ? err.message : String(err),
+        note: 'continuing with the primary write',
+      });
+    }
+  }
+
+  /**
+   * Whether the outgoing data.json may become the backup.
+   *
+   * The rotation is what makes a corrupt primary survivable, so it is also the
+   * single step that can destroy the last good copy. The case where it must
+   * not run is a dataset with no user content: once the user deletes every
+   * task, an ordinary write rotates that emptiness over a backup that still
+   * holds their library, and both generations are gone. The previous guard
+   * tested `projects` for emptiness too, which made it unreachable —
+   * emptyAppData() always ships INBOX_PROJECT — so INBOX is excluded here.
+   *
+   * The guard never freezes the backup: it only suppresses the rotation while
+   * the dataset is empty, and the first write that carries content rotates
+   * normally.
+   */
+  private rotationIsSafe(next: AppData): boolean {
+    const hasContent =
+      Object.keys(next.tasks).length > 0 ||
+      Object.keys(next.ideas).length > 0 ||
+      Object.keys(next.followUps).length > 0 ||
+      Object.keys(next.projects).some((id) => id !== INBOX_PROJECT_ID);
+    if (hasContent) return true;
+    if (!existsSync(this.backupPath)) return true;
+    if (!this.readValidated(this.backupPath, () => {})) return true;
+    this.logger.warn({
+      action: 'dataStore:backup:kept',
+      note: 'an empty dataset will not replace a readable backup',
+    });
+    return false;
   }
 
   /**

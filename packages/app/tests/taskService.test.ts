@@ -45,7 +45,7 @@ function setup(tasks: Record<string, Task> = {}, activeTimer: AppData['activeTim
       // alone would let a schema-breaking write pass green here and only
       // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return AppDataSchema.parse(data) as AppData;
+      return { data: AppDataSchema.parse(data) as AppData, persisted: true };
     },
   } as unknown as DataStore;
   return { data, service: createTaskService({ store, logger }) };
@@ -244,5 +244,86 @@ describe('taskService.remove — deleting a task must not leave a ghost timer', 
     );
     service.remove('t1');
     expect(data.activeTimer?.taskId).toBe('t2');
+  });
+});
+
+/**
+ * A store whose writes are all refused — the state data.json is in when it
+ * cannot be parsed. `persisted` is what the service reads to decide whether a
+ * user-visible action actually happened.
+ */
+function refusingSetup(
+  tasks: Record<string, Task> = {},
+  activeTimer: AppData['activeTimer'] = null,
+) {
+  const data: AppData = { ...emptyAppData(), tasks, activeTimer };
+  const store = {
+    get: () => data,
+    update: (fn: (c: AppData) => AppData) => {
+      // The refusal path: the mutation is never applied and the degraded cache
+      // comes back instead.
+      return { data, persisted: false };
+    },
+  } as unknown as DataStore;
+  return { data, service: createTaskService({ store, logger }) };
+}
+
+describe('a refused write must not read as success', () => {
+  test('stopTiming reports WRITE_REFUSED instead of a settlement', () => {
+    // The user-facing consequence here is that reported time disappears on
+    // restart. stopTiming used to return ok:true with the settlement in the
+    // returned (unpersisted) dataset, so the renderer reported the hours as
+    // recorded — they existed nowhere else.
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 45 * 60_000));
+    const result = service.stopTiming(NOW);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe('WRITE_REFUSED');
+  });
+
+  test('settleForQuit records nothing when the store refuses', () => {
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 45 * 60_000));
+    expect(service.settleForQuit(NOW)).toBe(0);
+  });
+
+  test('upsert reports persisted:false', () => {
+    const { service } = refusingSetup();
+    expect(service.upsert(task()).persisted).toBe(false);
+  });
+
+  test('syncTimer reports persisted:false', () => {
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 1_000));
+    expect(service.syncTimer(timerAt(NOW, 2_000)).persisted).toBe(false);
+  });
+});
+
+describe('taskService.syncTimer — the 30s heartbeat', () => {
+  test('an unchanged timer is not written again', () => {
+    // The renderer re-sends the identical timer object every 30 seconds. Each
+    // of those writes re-validated the whole dataset, copied the backup and
+    // did a tmp+rename — ~120 an hour for a dataset that had not changed, which
+    // at 20k tasks is minutes of pure redundant disk write.
+    const inFlight = timerAt(NOW, 1_000);
+    let writes = 0;
+    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: inFlight };
+    const store = {
+      get: () => data,
+      update: (fn: (c: AppData) => AppData) => {
+        writes += 1;
+        Object.assign(data, fn(data));
+        return { data: AppDataSchema.parse(data) as AppData, persisted: true };
+      },
+    } as unknown as DataStore;
+    const svc = createTaskService({ store, logger });
+    expect(svc.syncTimer(inFlight).dropped).toBe(false);
+    expect(writes).toBe(0);
+  });
+
+  test('a genuinely changed timer is still written', () => {
+    // The identity check must not turn into a cache that swallows real
+    // changes: a pause is a different object and has to reach disk.
+    const { data, service } = setup({ t1: task() }, timerAt(NOW, 1_000));
+    const paused = { ...timerAt(NOW, 1_000), isPaused: true, pausedAt: NOW };
+    expect(service.syncTimer(paused).dropped).toBe(false);
+    expect(data.activeTimer?.isPaused).toBe(true);
   });
 });
