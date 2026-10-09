@@ -78,10 +78,14 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
 
-  const addEntry = () => {
+  // The draft is cleared only once the entry exists. A refused write returns
+  // the degraded dataset, so clearing up front would discard text the user
+  // just typed over a save that never happened.
+  const addEntry = async () => {
     const text = entryDraft.trim();
     if (!text) return;
-    void runIdeaCommand(() => api().ideaAddEntry({ id: idea.id, text }));
+    const added = await runIdeaCommand(() => api().ideaAddEntry({ id: idea.id, text }));
+    if (!added.ok) return;
     setEntryDraft('');
   };
 
@@ -90,12 +94,15 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
     setEditingText(entry.text);
   };
 
-  const submitEdit = () => {
+  // Likewise: leaving edit mode discards the edited text, so it stays open
+  // until the entry was actually updated.
+  const submitEdit = async () => {
     const text = editingText.trim();
-    if (editingEntryId && text)
-      void runIdeaCommand(() =>
-        api().ideaUpdateEntry({ id: idea.id, entryId: editingEntryId, text }),
-      );
+    if (!editingEntryId || !text) return;
+    const saved = await runIdeaCommand(() =>
+      api().ideaUpdateEntry({ id: idea.id, entryId: editingEntryId, text }),
+    );
+    if (!saved.ok) return;
     setEditingEntryId(null);
     setEditingText('');
   };
@@ -112,7 +119,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
             placeholder="记录验证过程中的思考、方向调整…"
             onChange={(e) => setEntryDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) addEntry();
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void addEntry();
             }}
           />
           <Button
@@ -142,7 +149,7 @@ function IdeaTimeline({ idea, editable }: { idea: Idea; editable: boolean }) {
                     value={editingText}
                     onChange={(e) => setEditingText(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submitEdit();
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void submitEdit();
                       if (e.key === 'Escape') setEditingEntryId(null);
                     }}
                   />

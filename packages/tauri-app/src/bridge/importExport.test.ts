@@ -378,3 +378,42 @@ describe('exportMarkdown', () => {
     );
   });
 });
+
+/**
+ * A completed task needs a completion time.
+ *
+ * Super Productivity's backup does not carry one, so an imported task arrived
+ * as `isDone: true` with `doneAt` undefined. `upsertTaskWithTiming` resolves
+ * `incoming.doneAt ?? stored?.doneAt ?? now`, so the first edit after an import
+ * stamped the current time onto a task completed years ago: it reported
+ * "做完于 今天" and landed in today's done group for work that was not done
+ * today.
+ */
+describe('imported completed tasks carry a completion time', () => {
+  const backupWith = (task: Record<string, unknown>) => ({
+    data: {
+      task: { entities: { t1: { title: '旧任务', ...task } } },
+      project: { entities: {} },
+      tag: { entities: {} },
+    },
+  });
+
+  test('a done task without doneAt falls back to its created time', () => {
+    const created = Date.UTC(2023, 4, 17);
+    const { data } = normalizeBackup(backupWith({ isDone: true, created }));
+    expect(data.tasks.t1?.isDone).toBe(true);
+    expect(data.tasks.t1?.doneAt).toBe(created);
+  });
+
+  test('an explicit doneAt is preserved', () => {
+    const doneAt = Date.UTC(2024, 0, 2);
+    const { data } = normalizeBackup(backupWith({ isDone: true, doneAt, created: 1 }));
+    expect(data.tasks.t1?.doneAt).toBe(doneAt);
+  });
+
+  test('an open task has no completion time', () => {
+    const { data } = normalizeBackup(backupWith({ isDone: false, created: 1 }));
+    expect(data.tasks.t1?.isDone).toBe(false);
+    expect(data.tasks.t1?.doneAt).toBeUndefined();
+  });
+});

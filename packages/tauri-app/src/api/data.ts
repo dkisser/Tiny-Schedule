@@ -200,7 +200,14 @@ export function createDataApi(store: DataStore): DataApi {
             tasks[t.id] = { ...t, subTaskIds: t.subTaskIds.filter((s) => s !== id) };
           }
         }
-        return { ...d, tasks };
+        // Sweep in the same write. `dropStaleTiming` treats a missing task as
+        // stale, so deleting a task that is currently being timed clears the
+        // timer here rather than leaving it pointing at a row that no longer
+        // exists — an unkillable ghost that every heartbeat re-persisted and
+        // that a later stop reported as TASK_NOT_FOUND without recording.
+        // The sweep belongs on every write path, not behind a UI rule that hides
+        // the delete button while timing.
+        return dropStaleTiming({ ...d, tasks });
       });
       return masked(result.data);
     },

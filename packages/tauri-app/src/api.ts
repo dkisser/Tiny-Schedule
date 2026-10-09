@@ -159,6 +159,20 @@ export function createApi(options: CreateApiOptions): RendererApi {
    *  - **Dropped** — the task is done, so the timer was correctly removed. The
    *    clock should stop.
    */
+  /**
+   * Deleting a task that is being timed also drops its timer, and the sweep
+   * has to be announced like every other drop — otherwise the renderer keeps
+   * a clock running over a session that nothing persisted, and the next stop
+   * bills the interval onto a task the user no longer has.
+   */
+  const dataTaskDelete = data.taskDelete;
+  const taskDelete: RendererApi['taskDelete'] = async (req) => {
+    const hadTimer = (await store.get()).activeTimer ?? null;
+    const next = await dataTaskDelete(req);
+    if (hadTimer && !next.activeTimer) timerChanged.emit(DROPPED_TIMER);
+    return next;
+  };
+
   const requested = (req: { timer: ActiveTimer | null } | undefined) => req?.timer ?? null;
   const dataTimerSync = data.timerSync;
   const timerSync: RendererApi['timerSync'] = async (req) => {
@@ -171,7 +185,7 @@ export function createApi(options: CreateApiOptions): RendererApi {
     if (wanted && !result.data.activeTimer) timerChanged.emit(DROPPED_TIMER);
   };
 
-  return { ...combined, timerSync };
+  return { ...combined, taskDelete, timerSync };
 }
 
 let active: RendererApi | null = null;

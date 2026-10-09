@@ -53,7 +53,6 @@ function useIdeaRow(idea: Idea) {
 
 // 收集箱行：整行点击选中；hover 只放轻操作（完成/废弃），转任务与升级在详情面板。
 function OpenIdeaRow({ idea }: { idea: Idea }) {
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
   const runIdeaCommand = useDataStore((s) => s.runIdeaCommand);
   const { rowProps } = useIdeaRow(idea);
 
@@ -207,7 +206,7 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
 
 export function IdeasPage() {
   const data = useDataStore((s) => s.data);
-  const upsertIdea = useDataStore((s) => s.upsertIdea);
+  const createIdea = useDataStore((s) => s.createIdea);
   const [draft, setDraft] = useState('');
   if (!data) return null;
 
@@ -218,8 +217,11 @@ export function IdeasPage() {
   const create = async () => {
     const title = draft.trim();
     if (!title) return;
+    // Cleared only once the record exists. A refused store returns the
+    // degraded dataset without it, so dropping the draft up front would
+    // discard what the user typed over a save that never happened.
+    if (!(await createIdea(title))) return;
     setDraft('');
-    await upsertIdea(blankIdea(title));
   };
 
   return (

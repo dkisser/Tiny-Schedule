@@ -80,6 +80,23 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
       timeEntries: [],
       notes: typeof t.notes === 'string' ? t.notes : '',
       created: typeof t.created === 'number' ? t.created : Date.now(),
+      // A completed task needs a completion time, or the first edit that
+      // follows the import stamps one: `upsertTaskWithTiming` resolves
+      // `incoming.doneAt ?? stored?.doneAt ?? now`, so leaving it undefined
+      // produced `isDone: true` with no doneAt, and the user saw a task
+      // completed in 2023 report "做完于 今天" the moment they touched its
+      // title — plus a fresh entry in today's done group for work that
+      // happened long ago. Backups carry no completion time, so the created
+      // timestamp is used as the floor: it is a real date from the task's own
+      // history and never later than the completion it stands in for.
+      doneAt:
+        t.isDone === true
+          ? typeof t.doneAt === 'number'
+            ? t.doneAt
+            : typeof t.created === 'number'
+              ? t.created
+              : Date.now()
+          : undefined,
     };
   }
   // derive parentTaskId from subTaskIds

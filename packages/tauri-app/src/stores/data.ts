@@ -1,4 +1,13 @@
-import type { AppData, AppSettings, FollowUp, Idea, Project, Task } from '@tiny-schedule/shared';
+import {
+  type AppData,
+  type AppSettings,
+  blankFollowUp,
+  blankIdea,
+  type FollowUp,
+  type Idea,
+  type Project,
+  type Task,
+} from '@tiny-schedule/shared';
 import { create } from 'zustand';
 import { api } from '../api';
 
@@ -22,6 +31,22 @@ interface DataState {
   upsertFollowUp: (followUp: FollowUp) => Promise<void>;
   deleteFollowUp: (id: string) => Promise<void>;
   upsertIdea: (idea: Idea) => Promise<void>;
+  /**
+   * Create a fresh idea, reporting whether it actually landed.
+   *
+   * `ideaUpsert` is not a control-flow channel, so it hands back a bare
+   * dataset and the caller is meant to learn about a refused store from the
+   * mode banner rather than from a return value. That is the right default for
+   * a field edit, where the input keeps its own state and nothing is lost. It
+   * is wrong for *creating* something: the draft is cleared on the way out, so
+   * a refusal silently discards what the user typed.
+   *
+   * Presence is the signal, and it is the honest one — a refused write returns
+   * the degraded dataset the store already held, which cannot contain a record
+   * that was never written.
+   */
+  createIdea: (title: string) => Promise<boolean>;
+  createFollowUp: (title: string) => Promise<boolean>;
   /** Run an idea intent command and adopt its dataset. See the implementation. */
   runIdeaCommand: <R extends { ok: true; data: AppData }>(
     run: () => Promise<R | { ok: false; error: string }>,
@@ -113,6 +138,33 @@ export const useDataStore = create<DataState>((set, get) => ({
       validationGoal: idea.validationGoal,
     });
     set({ data });
+  },
+
+  createIdea: async (title) => {
+    const blank = blankIdea(title);
+    const data = await api().ideaUpsert({
+      id: blank.id,
+      title: blank.title,
+      notes: blank.notes,
+      createdAt: blank.createdAt,
+    });
+    if (!data.ideas[blank.id]) return false;
+    set({ data });
+    return true;
+  },
+
+  createFollowUp: async (title) => {
+    const blank = blankFollowUp(title);
+    const data = await api().followUpUpsert({
+      id: blank.id,
+      title: blank.title,
+      notes: blank.notes,
+      createdAt: blank.createdAt,
+      entries: blank.entries,
+    });
+    if (!data.followUps[blank.id]) return false;
+    set({ data });
+    return true;
   },
 
   /**

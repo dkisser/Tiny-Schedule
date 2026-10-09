@@ -42,9 +42,14 @@ export function CloseIdeaDialog() {
   if (!idea) return null;
 
   const confirm = async () => {
-    await runIdeaCommand(() =>
+    // Stays open unless the idea actually closed. Closing unconditionally
+    // threw away the verdict the user had just typed when the write was
+    // refused or the idea was not in a closeable state, and left it
+    // incubating with no explanation.
+    const closed = await runIdeaCommand(() =>
       api().ideaCloseWithVerdict({ id: idea.id, result, text: text.trim() || undefined }),
     );
+    if (!closed.ok) return;
     setClosingIdea(null);
   };
 

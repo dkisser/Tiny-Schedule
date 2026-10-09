@@ -438,3 +438,31 @@ describe('a field edit leaves the fields it did not mention', () => {
     expect(renamed.followUps.f1?.entries[0]?.text).toBe('已提交');
   });
 });
+
+/**
+ * A sweep has to belong to the write, not to a UI rule.
+ *
+ * DeleteTaskDialog hides its button while a task is timing, so the ghost timer
+ * this covers was unreachable through that one path — but TaskDetail reaches
+ * the same handler, and "the button is hidden" is exactly the kind of
+ * enforcement ADR-0003 exists to move out of the UI and into the write.
+ */
+test('deleting a task that is being timed also drops its timer', async () => {
+  const { api, store } = await setup();
+  await api.taskUpsert(task('t1') as never);
+  await api.timerSync({
+    timer: {
+      taskId: 't1',
+      startedAt: Date.now() - 30_000,
+      accumulatedMs: 30_000,
+      isPaused: false,
+    },
+  } as never);
+  expect((await store.get()).activeTimer?.taskId).toBe('t1');
+
+  await api.taskDelete({ id: 't1' });
+  // Without the sweep the timer keeps pointing at a row that no longer exists:
+  // every heartbeat re-persists it, and the next stop reports TASK_NOT_FOUND
+  // without recording anything.
+  expect((await store.get()).activeTimer).toBeNull();
+});
