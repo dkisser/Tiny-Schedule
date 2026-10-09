@@ -17,7 +17,7 @@ import { projectHandlers } from './handlers/project';
 import { settingsHandlers } from './handlers/settings';
 import { taskHandlers } from './handlers/task';
 import type { DataStore } from './infra/dataStore';
-import { decryptKey } from './infra/keys';
+import { decryptKey, encryptKey } from './infra/keys';
 import { createAiHistoryService } from './services/aiHistoryService';
 import { type ChatEventSink, createChatService } from './services/chatService';
 import { createFollowUpService } from './services/followUpService';
@@ -59,7 +59,7 @@ export function registerIpcHandlers(deps: IpcDeps): RegisterResult {
   const projects = createProjectService(serviceDeps);
   const imports = createImportService(serviceDeps);
   const aiHistory = createAiHistoryService(serviceDeps);
-  const settings = createSettingsService(serviceDeps);
+  const settings = createSettingsService({ ...serviceDeps, encryptKey });
   const chatSink: ChatEventSink = {
     chunk: (sessionId, requestId, delta) =>
       sendSafe(getWindow(), Ipc.chatChunk, { sessionId, requestId, delta }),

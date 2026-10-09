@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   type AppData,
   AppDataSchema,
@@ -6,11 +9,12 @@ import {
   type FollowUp,
   INBOX_PROJECT_ID,
 } from '@tiny-schedule/shared';
-import type { DataStore } from '../src/main/infra/dataStore';
+import type { Logger } from 'pino';
+import { DataStore } from '../src/main/infra/dataStore';
 import { createFollowUpService } from '../src/main/services/followUpService';
 import { createProjectService } from '../src/main/services/projectService';
 
-const logger = { info: () => {}, error: () => {}, warn: () => {} } as never;
+const logger = { info: () => {}, error: () => {}, warn: () => {} } as unknown as Logger;
 
 function followUp(over: Partial<FollowUp> = {}): FollowUp {
   return {
@@ -33,7 +37,7 @@ function setup(data: Partial<AppData> = {}) {
       // every AppDataSchema defect — a schema-breaking write would pass green
       // here and only corrupt data.json in production.
       Object.assign(state, fn(state));
-      return AppDataSchema.parse(state) as AppData;
+      return { data: AppDataSchema.parse(state) as AppData, persisted: true };
     },
   } as unknown as DataStore;
   return { data: state, deps: { store, logger } };
@@ -63,13 +67,13 @@ describe('projectService — Inbox guards live here, not in the handler', () => 
     expect(after).toEqual({ id: projectId, title: '写作', isArchived: true });
   });
 
-  // KNOWN FAILING — a pre-existing defect deliberately left out of this PR.
-  // ProjectSchema.primaryColor is z.string().optional() while the domain type
-  // and ProjectUpdateReqSchema both use null for "cleared", so the clear path
-  // throws out of DataStore.save and nothing persists. The honest store double
+  // ProjectSchema.primaryColor was z.string().optional() while the domain type
+  // and ProjectUpdateReqSchema both use null for "cleared", so clearing a
+  // project colour threw out of DataStore.save and nothing persisted — the
+  // user could set a colour but never remove one. The honest store double
   // above is what surfaced it: this test passed for as long as the double
-  // skipped the parse. One-line fix: z.string().nullable().optional().
-  test.skip('an explicit null clears the color; omitted leaves it intact', () => {
+  // skipped the parse.
+  test('an explicit null clears the color; omitted leaves it intact', () => {
     const { data, deps } = setup();
     const s = createProjectService(deps);
     const { projectId } = s.create({ title: '写作', primaryColor: 'red' });
@@ -179,5 +183,22 @@ describe('followUpService', () => {
     expect(data.followUps.f1?.resolvedAt).toBe(1000);
     // The intended edit still lands.
     expect(data.followUps.f1?.notes).toBe('改过的备注');
+  });
+});
+
+describe('clearing a project color reaches the disk', () => {
+  test('null survives a real DataStore round-trip', () => {
+    // The service-level test above goes through a store double. This one uses
+    // the real one, because the defect lived in AppDataSchema — the layer the
+    // double was standing in for.
+    const dir = mkdtempSync(join(tmpdir(), 'tsproj-'));
+    const store = new DataStore(dir, logger);
+    store.load();
+    const s = createProjectService({ store, logger });
+    const { projectId } = s.create({ title: '写作', primaryColor: 'red' });
+    s.update({ id: projectId, primaryColor: null });
+
+    const reloaded = new DataStore(dir, logger).load();
+    expect(reloaded.projects[projectId]?.primaryColor).toBeNull();
   });
 });

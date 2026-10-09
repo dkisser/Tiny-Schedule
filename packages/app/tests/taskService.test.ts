@@ -45,7 +45,7 @@ function setup(tasks: Record<string, Task> = {}, activeTimer: AppData['activeTim
       // alone would let a schema-breaking write pass green here and only
       // corrupt data.json in production.
       Object.assign(data, fn(data));
-      return AppDataSchema.parse(data) as AppData;
+      return { data: AppDataSchema.parse(data) as AppData, persisted: true };
     },
   } as unknown as DataStore;
   return { data, service: createTaskService({ store, logger }) };
@@ -68,7 +68,7 @@ describe('taskService.stopTiming — main-side settlement', () => {
   test('rejects when nothing is being timed, handing back the dataset', () => {
     const { data, service } = setup({ t1: task() });
     const r = service.stopTiming(NOW);
-    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data });
+    expect(r).toEqual({ ok: false, error: 'NO_ACTIVE_TIMER', data, persisted: true });
   });
 
   test('drops a timer whose task is gone rather than inventing a task', () => {
@@ -244,5 +244,176 @@ describe('taskService.remove — deleting a task must not leave a ghost timer', 
     );
     service.remove('t1');
     expect(data.activeTimer?.taskId).toBe('t2');
+  });
+});
+
+/**
+ * A store whose writes are all refused — the state data.json is in when it
+ * cannot be parsed. `persisted` is what the service reads to decide whether a
+ * user-visible action actually happened.
+ */
+function refusingSetup(
+  tasks: Record<string, Task> = {},
+  activeTimer: AppData['activeTimer'] = null,
+) {
+  const data: AppData = { ...emptyAppData(), tasks, activeTimer };
+  const store = {
+    get: () => data,
+    update: (fn: (c: AppData) => AppData) => {
+      // The refusal path: the mutation is never applied and the degraded cache
+      // comes back instead.
+      return { data, persisted: false };
+    },
+  } as unknown as DataStore;
+  return { data, service: createTaskService({ store, logger }) };
+}
+
+describe('a refused write must not read as success', () => {
+  test('stopTiming reports WRITE_REFUSED instead of a settlement', () => {
+    // The user-facing consequence here is that reported time disappears on
+    // restart. stopTiming used to return ok:true with the settlement in the
+    // returned (unpersisted) dataset, so the renderer reported the hours as
+    // recorded — they existed nowhere else.
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 45 * 60_000));
+    const result = service.stopTiming(NOW);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBe('WRITE_REFUSED');
+  });
+
+  test('settleForQuit records nothing when the store refuses', () => {
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 45 * 60_000));
+    expect(service.settleForQuit(NOW)).toBe(0);
+  });
+
+  test('upsert reports persisted:false', () => {
+    const { service } = refusingSetup();
+    expect(service.upsert(task()).persisted).toBe(false);
+  });
+
+  test('syncTimer reports persisted:false', () => {
+    const { service } = refusingSetup({ t1: task() }, timerAt(NOW, 1_000));
+    expect(service.syncTimer(timerAt(NOW, 2_000)).persisted).toBe(false);
+  });
+});
+
+describe('taskService.syncTimer — the 30s heartbeat', () => {
+  /**
+   * A store that counts writes, so "did this reach the disk" is observable.
+   *
+   * `isWritable` is part of the contract the service reads, and a double that
+   * omitted it reported undefined — i.e. not writable — which silently
+   * disabled the no-op short-circuit these tests exist to exercise.
+   */
+  function countingService(
+    timer: AppData['activeTimer'],
+    tasks: Record<string, Task> = { t1: task() },
+  ) {
+    let writes = 0;
+    const data: AppData = { ...emptyAppData(), tasks, activeTimer: timer };
+    const store = {
+      get: () => data,
+      isWritable: true,
+      update: (fn: (c: AppData) => AppData) => {
+        writes += 1;
+        Object.assign(data, fn(data));
+        return { data: AppDataSchema.parse(data) as AppData, persisted: true };
+      },
+    } as unknown as DataStore;
+    return { service: createTaskService({ store, logger }), writes: () => writes, data };
+  }
+
+  test('an unchanged timer does not reach the disk', () => {
+    // The renderer re-sends the same timer every 30 seconds. Each of those
+    // writes re-validated the whole dataset, copied the backup and did a
+    // tmp+rename — ~120 an hour for a dataset that had not changed, which at
+    // 20k tasks is minutes of pure redundant disk write.
+    //
+    // The two timers here are distinct objects with equal contents, which is
+    // what actually crosses the process boundary: the renderer's copy is an
+    // IPC structured clone and the stored one is whatever zod allocated on the
+    // last parse. A reference comparison here would be false every time.
+    const { service, writes } = countingService(timerAt(NOW, 1_000));
+    expect(service.syncTimer({ ...timerAt(NOW, 1_000) }).dropped).toBe(false);
+    expect(writes()).toBe(0);
+  });
+
+  test('an unchanged timer on a completed task is still dropped', () => {
+    // The equality test must not short-circuit the invariant: the task was
+    // completed after the timer started, so the heartbeat must sweep it even
+    // though nothing about the timer itself changed. Testing equality first
+    // left a done task being timed indefinitely.
+    const { service, writes, data } = countingService(timerAt(NOW, 1_000), {
+      t1: task({ isDone: true }),
+    });
+    const r = service.syncTimer({ ...timerAt(NOW, 1_000) });
+    expect(r.dropped).toBe(true);
+    expect(data.activeTimer).toBeNull();
+    expect(writes()).toBe(1);
+  });
+
+  test('every field that records state counts as a change', () => {
+    // One field that did not compare would let a real change through as a
+    // no-op — the failure this check is guarding against, one field at a time.
+    const base = { ...timerAt(NOW, 1_000), mode: 'pomodoro' as const, phase: 'focus' as const };
+    const variants = [
+      { ...base, isPaused: true, pausedAt: NOW },
+      { ...base, accumulatedMs: 5_000 },
+      { ...base, startedAt: NOW - 2_000 },
+      { ...base, sessionStartedAt: NOW - 9_000 },
+      { ...base, phase: 'break' as const },
+      { ...base, phaseAccumulatedMs: 1_000 },
+      { ...base, cyclesCompleted: 2 },
+      { ...base, focusAccumulatedMs: 1_000 },
+      { ...base, phaseDurationMs: 25 * 60_000 },
+      { ...base, autoPausedBy: 'sleep' as const },
+    ];
+    for (const changed of variants) {
+      const { service, writes } = countingService(base);
+      service.syncTimer(changed);
+      expect(writes()).toBe(1);
+    }
+  });
+
+  test('an unchanged timer still attempts recovery on a refused store', () => {
+    // update() is what re-reads data.json and clears the refusal latch. The
+    // equality short-circuit returns before it, so a store that had latched on
+    // an unreadable file — and whose fallback happened to carry the very timer
+    // the renderer is sending — matched on every heartbeat, never noticed the
+    // user had repaired the file, and stayed read-only for the whole session.
+    // The deferred startup migrations never ran either.
+    let attempts = 0;
+    const timer = timerAt(NOW, 1_000);
+    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: timer };
+    let writable = false;
+    const store = {
+      get: () => data,
+      get isWritable() {
+        return writable;
+      },
+      update: (fn: (c: AppData) => AppData) => {
+        attempts += 1;
+        if (!writable) return { data, persisted: false };
+        Object.assign(data, fn(data));
+        return { data: AppDataSchema.parse(data) as AppData, persisted: true };
+      },
+    } as unknown as DataStore;
+    const service = createTaskService({ store, logger });
+
+    service.syncTimer({ ...timer });
+    expect(attempts).toBe(1);
+
+    // Once the store is writable again the no-op short-circuit is safe to
+    // resume: the latch is clear, so nothing depends on update() running.
+    writable = true;
+    service.syncTimer({ ...timer });
+    expect(attempts).toBe(1);
+  });
+
+  test('a genuinely changed timer is still written', () => {
+    // The comparison must not turn into a cache that swallows real changes.
+    const { data, service } = setup({ t1: task() }, timerAt(NOW, 1_000));
+    const paused = { ...timerAt(NOW, 1_000), isPaused: true, pausedAt: NOW };
+    expect(service.syncTimer(paused).dropped).toBe(false);
+    expect(data.activeTimer?.isPaused).toBe(true);
   });
 });

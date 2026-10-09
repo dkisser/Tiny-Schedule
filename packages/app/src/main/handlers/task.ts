@@ -6,18 +6,25 @@ import { masked, sendSafe } from './deps';
 export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
   return {
     taskUpsert: (task: Task) => {
-      const { data, settledMs } = tasks.upsert(task);
-      return { data: masked(data), settledMs };
+      const { data, settledMs, persisted } = tasks.upsert(task);
+      return { data: masked(data), settledMs, persisted };
     },
 
     taskDelete: ({ id }: { id: string }) => masked(tasks.remove(id)),
 
     timerSync: ({ timer }: { timer: Parameters<HandlerDeps['tasks']['syncTimer']>[0] }) => {
-      const { dropped } = tasks.syncTimer(timer);
+      const { dropped, persisted } = tasks.syncTimer(timer);
       if (dropped) {
         // Announce the drop. Staying silent would leave the renderer's clock
         // ticking for a session the main process just discarded — and its next
         // stop would settle that time into the done task.
+        sendSafe(getWindow(), Ipc.timerChanged, null);
+      }
+      if (!persisted) {
+        // The renderer keeps ticking a session that is not on disk. Say so,
+        // rather than letting the next stop report a settlement that never
+        // happened and that vanishes on restart.
+        logger.error({ action: 'timer:sync:refused', taskId: timer?.taskId ?? null });
         sendSafe(getWindow(), Ipc.timerChanged, null);
       }
     },
@@ -33,10 +40,15 @@ export function taskHandlers({ tasks, logger, getWindow }: HandlerDeps) {
       if (!result.ok) {
         // Rejections still carry data: the main process may already have
         // dropped the timer, and the renderer needs to see that.
-        logger.info({ action: 'timing:stop', error: result.error });
+        logger.info({ action: 'timing:stop', error: result.error, persisted: result.persisted });
         return { ...result, data: masked(result.data) };
       }
-      return { ok: true as const, data: masked(result.data), settledMs: result.settledMs };
+      return {
+        ok: true as const,
+        data: masked(result.data),
+        settledMs: result.settledMs,
+        persisted: result.persisted,
+      };
     },
 
     finishDay: () => masked(tasks.finishDay()),

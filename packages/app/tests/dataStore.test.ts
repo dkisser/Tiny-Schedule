@@ -25,7 +25,7 @@ describe('DataStore', () => {
     const dir = tmpDir();
     const store = new DataStore(dir, logger);
     store.load();
-    const d = store.update((cur) => ({
+    const { data: d } = store.update((cur) => ({
       ...cur,
       tasks: { ...cur.tasks, t1: { ...emptyTask(), id: 't1' } },
     }));
@@ -300,5 +300,338 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     store.load();
     store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
     expect(new DataStore(dir, logger).load().settings.userName).toBe('me');
+  });
+});
+
+describe('DataStore — a write must be able to report that it did not happen', () => {
+  test('update reports persisted:false when the store refuses', () => {
+    // The refusal used to be invisible to the caller: update() handed back the
+    // degraded fallback and every write-path reported success for a change
+    // that was in memory only. stopTiming returned ok:true on this path, so
+    // the user saw their hours recorded and lost them on restart.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const result = store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    expect(result.persisted).toBe(false);
+    // And the dataset it hands back is the fallback, not the requested change —
+    // which is exactly why callers must not read it as "what I just wrote".
+    expect(result.data.settings.userName).toBe('');
+  });
+
+  test('update reports persisted:true on a normal write', () => {
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    expect(
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } })).persisted,
+    ).toBe(true);
+  });
+
+  test('a mutation that changes nothing skips the write entirely', () => {
+    // The renderer's 30s heartbeat re-sends the timer it already has. Each of
+    // those writes cost a full schema validation, a backup copy and a
+    // tmp+rename — ~120 an hour for a dataset that did not change.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, tasks: { ...d.tasks, t1: { ...emptyTask(), id: 't1' } } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    const before = readFileSync(join(dir, 'data.json'), 'utf8');
+    const backupBefore = readFileSync(join(dir, 'data.backup.json'), 'utf8');
+    // Returning the same reference is how "nothing to write" is expressed.
+    const result = store.update((d) => d);
+    expect(result.persisted).toBe(true);
+    expect(readFileSync(join(dir, 'data.json'), 'utf8')).toBe(before);
+    // The backup is the tell: a rotation would have replaced it.
+    expect(readFileSync(join(dir, 'data.backup.json'), 'utf8')).toBe(backupBefore);
+  });
+});
+
+describe('DataStore — backup rotation', () => {
+  /** Seeds two tasks and rotates, so the backup holds both. */
+  const withTasks = (dir: string) => {
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({
+      ...d,
+      tasks: { ...d.tasks, t1: { ...emptyTask(), id: 't1' }, t2: { ...emptyTask(), id: 't2' } },
+    }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
+    return store;
+  };
+
+  test('a poorer dataset does not replace a richer backup', () => {
+    // The guard has to be a generation rule, not a one-write reprieve. The
+    // first attempt at this only checked "is the outgoing dataset empty", which
+    // bought exactly one write: the user cleared their tasks, the backup was
+    // spared, and then the first new task rotated the emptiness over that
+    // backup anyway — losing both generations, which is the outcome the guard
+    // claims to prevent.
+    const dir = tmpDir();
+    const store = withTasks(dir);
+    store.update((d) => ({ ...d, tasks: {} }));
+    expect(new DataStore(dir, logger).load().tasks).toEqual({});
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t1', 't2']);
+
+    // Rebuilding to fewer records than the backup holds must not demote it.
+    store.update((d) => ({ ...d, tasks: { ...d.tasks, t3: { ...emptyTask(), id: 't3' } } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t1', 't2']);
+    expect(Object.keys(new DataStore(dir, logger).load().tasks)).toEqual(['t3']);
+  });
+
+  test('rotation resumes once the dataset on disk is itself as rich as the backup', () => {
+    // The other half of the property: without it the guard would freeze the
+    // backup forever, which was the objection that killed the original.
+    // Rotation promotes the file currently on disk, so the dataset has to reach
+    // the backup's size *and then be written once more* before it can be
+    // promoted in turn.
+    const dir = tmpDir();
+    const store = withTasks(dir);
+    store.update((d) => ({ ...d, tasks: {} }));
+    store.update((d) => ({
+      ...d,
+      tasks: { ...d.tasks, t3: { ...emptyTask(), id: 't3' }, t4: { ...emptyTask(), id: 't4' } },
+    }));
+    // Still blocked: what is on disk is the empty dataset.
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t1', 't2']);
+
+    // One more write, with the on-disk dataset now holding two records.
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'again' } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t3', 't4']);
+  });
+
+  test('an emptied library with no readable backup still rotates', () => {
+    // Nothing is lost by rotating here, and refusing to would strand a stale
+    // backup as the only recovery point forever.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
+    unlinkSync(join(dir, 'data.backup.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'third' } }));
+    expect(existsSync(join(dir, 'data.backup.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
+      'second',
+    );
+  });
+
+  test('a rotation refreshes what the guard believes about the backup', () => {
+    // The guard's answer is cached, and a stale cache would decide against the
+    // previous generation. Sequence: the backup holds one task, the dataset is
+    // emptied (rotation suppressed), then rebuilt large enough to rotate — and
+    // the rotation leaves an empty backup that the *next* empty write must be
+    // measured against, not the old one-task figure.
+    const dir = tmpDir();
+    const store = withTasks(dir);
+    store.update((d) => ({ ...d, tasks: {} }));
+    store.update((d) => ({
+      ...d,
+      tasks: { ...d.tasks, t3: { ...emptyTask(), id: 't3' }, t4: { ...emptyTask(), id: 't4' } },
+    }));
+    // The rotation above left a two-record backup on disk. A write that shrinks
+    // to one record must now be measured against *that*. A cache still holding
+    // the pre-rotation figure (2 as well, coincidentally) would allow it; the
+    // discriminating case is the next step, where the refreshed figure (2) must
+    // block a one-record write that a stale "0" would have allowed.
+    store.update((d) => ({ ...d, tasks: { t9: { ...emptyTask(), id: 't9' } } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t3', 't4']);
+  });
+
+  test('the guard measures the dataset the backup will hold, not the one replacing it', () => {
+    // rotateBackup copies data.json, so the dataset that becomes the backup is
+    // the one *currently on disk*. Comparing the incoming dataset instead let
+    // an import pass the check — 200 tasks beats a 10-task backup — and then
+    // demote the 2-task file that was actually on disk over that backup. The
+    // generation the guard exists to protect, gone.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    const many = (prefix: string, n: number) =>
+      Object.fromEntries(
+        Array.from({ length: n }, (_, i) => [
+          `${prefix}${i}`,
+          { ...emptyTask(), id: `${prefix}${i}` },
+        ]),
+      );
+    store.update((d) => ({ ...d, tasks: many('t', 10) }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toHaveLength(10);
+
+    // Shrink to 2: blocked, backup keeps 10.
+    store.update((d) => ({ ...d, tasks: many('s', 2) }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toHaveLength(10);
+
+    // Import 200. The incoming dataset dwarfs the backup and passes the check —
+    // but the file being rotated is the 2-task one, which is far poorer.
+    store.update((d) => ({ ...d, tasks: many('i', 200) }));
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    expect(Object.keys(backup.tasks)).toHaveLength(10);
+    expect(new DataStore(dir, logger).load().tasks.i0).toBeDefined();
+  });
+
+  test('a rotation updates the cached count instead of discarding it', () => {
+    // Nulling the cache on every rotation meant the common path filled and
+    // cleared it on the same save, so the cache only ever helped when rotation
+    // was suppressed — the case it was not written for.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({
+      ...d,
+      tasks: { t1: { ...emptyTask(), id: 't1' }, t2: { ...emptyTask(), id: 't2' } },
+    }));
+    store.update((d) => ({ ...d, tasks: { t1: { ...emptyTask(), id: 't1' } } }));
+    const cache = (store as unknown as { cachedBackupRecords: number | null }).cachedBackupRecords;
+    expect(cache).toBe(2);
+  });
+
+  test('the backup is rotated through a temp file, never in place', () => {
+    // copyFileSync straight into data.backup.json had the asymmetry PR #7's
+    // review flagged: the primary write is tmp+rename, so a crash cannot
+    // truncate it, while a crash during the copy left a half-written backup —
+    // turning one damaged file into two.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'first' } }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'second' } }));
+    expect(existsSync(join(dir, 'data.backup.json.tmp'))).toBe(false);
+    expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).settings.userName).toBe(
+      'first',
+    );
+  });
+});
+
+describe('DataStore — a recovery must leave a record of what it discarded', () => {
+  test('a re-read that quarantined records reports them', () => {
+    // tryRecover passed an empty callback into readValidated, so a re-read
+    // that succeeded *only* after dropping records logged a plain "recovered"
+    // — telling the operator nothing had been lost.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const lines: Record<string, unknown>[] = [];
+    const loud = {
+      info: (o: Record<string, unknown>) => lines.push(o),
+      warn: (o: Record<string, unknown>) => lines.push(o),
+      error: (o: Record<string, unknown>) => lines.push(o),
+    } as unknown as Logger;
+    const s2 = new DataStore(dir, loud);
+    s2.load();
+    lines.length = 0;
+    // The user repairs the file, but one idea in it is still unparseable.
+    const repaired = {
+      ...emptyAppData(),
+      tasks: { t1: { ...emptyTask(), id: 't1' } },
+      ideas: { i2: { id: 'i2', title: 'x', notes: '', createdAt: 1, status: 'archived' } },
+    };
+    writeFileSync(join(dir, 'data.json'), JSON.stringify(repaired), 'utf8');
+    s2.update((d) => ({ ...d, settings: { ...d.settings, userName: 'fixed' } }));
+    const recovered = lines.find((l) => l.action === 'dataStore:save:recovered');
+    expect(recovered).toBeDefined();
+    expect(JSON.stringify(recovered?.quarantined)).toContain('quarantined idea i2');
+  });
+
+  test('the file-removed log names the backup state', () => {
+    // `previousReason` describes the *deleted* file, so it says nothing about
+    // the backup — and `adopted: 'empty'` cannot tell "no backup existed" from
+    // "the backup was there and unreadable". Those are different incidents for
+    // whoever restores by hand.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const lines: Record<string, unknown>[] = [];
+    const loud = {
+      info: () => {},
+      warn: (o: Record<string, unknown>) => lines.push(o),
+      error: () => {},
+    } as unknown as Logger;
+    const store = new DataStore(dir, loud);
+    store.load();
+    unlinkSync(join(dir, 'data.json'));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } }));
+    const removed = lines.find((l) => l.action === 'dataStore:save:file-removed');
+    expect(removed?.adopted).toBe('empty');
+    expect(removed?.backupState).toBe('missing');
+  });
+
+  test('a listener runs before the write that triggered recovery', () => {
+    // main.ts defers the startup migrations through this hook. A listener that
+    // migrated the recovered dataset and was then overwritten by update()'s own
+    // save meant the feature did nothing on the first recovery — the only case
+    // it exists for. This asserts the write that recovered the store is what
+    // lands, with the listener's contribution already in it.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    const seen: string[] = [];
+    store.onRecovered(() => {
+      seen.push(store.get().settings.userName);
+      // Stand in for the migration: mutate the recovered dataset in place.
+      store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'migrated' } }));
+    });
+    writeFileSync(join(dir, 'data.json'), JSON.stringify(emptyAppData()), 'utf8');
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'user-write' } }));
+
+    expect(seen).toEqual(['']);
+    // The user's write is what survives — the listener ran before it, not
+    // after, and not in a state the save then clobbered.
+    expect(new DataStore(dir, logger).load().settings.userName).toBe('user-write');
+  });
+
+  test('the recovery write is applied on top of what the listener left', () => {
+    // The listener's job is to migrate the recovered base; the pending user
+    // write must then apply to that migrated dataset rather than to the
+    // pre-migration object update() originally re-read.
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.onRecovered(() => {
+      store.update((d) => ({ ...d, misc: { ...d.misc, migrated: true } }));
+    });
+    writeFileSync(
+      join(dir, 'data.json'),
+      JSON.stringify({ ...emptyAppData(), tasks: { t1: { ...emptyTask(), id: 't1' } } }),
+      'utf8',
+    );
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'after' } }));
+
+    const after = new DataStore(dir, logger).load();
+    expect(after.misc.migrated).toBe(true);
+    expect(after.settings.userName).toBe('after');
+    expect(Object.keys(after.tasks)).toEqual(['t1']);
+  });
+
+  test('a recovery that cannot be written notifies nobody', () => {
+    const dir = tmpDir();
+    writeFileSync(join(dir, 'data.json'), '{ not json', 'utf8');
+    const store = new DataStore(dir, logger);
+    store.load();
+    let fired = 0;
+    store.onRecovered(() => {
+      fired += 1;
+    });
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } }));
+    expect(fired).toBe(0);
   });
 });

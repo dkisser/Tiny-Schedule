@@ -12,7 +12,10 @@ function services(data = emptyAppData()) {
   // Parses, as DataStore.save does — see the note on the other store doubles.
   const store = {
     get: () => data,
-    update: (fn: (c: typeof data) => typeof data) => AppDataSchema.parse(fn(data)) as typeof data,
+    update: (fn: (c: typeof data) => typeof data) => ({
+      data: AppDataSchema.parse(fn(data)) as typeof data,
+      persisted: true,
+    }),
   };
   const deps = { store: store as unknown as DataStore, logger };
   return { tasks: createTaskService(deps), projects: createProjectService(deps) };

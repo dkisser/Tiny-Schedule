@@ -7,6 +7,7 @@ import type {
   Project,
   Task,
 } from '@tiny-schedule/shared';
+import { toast } from 'sonner';
 import { create } from 'zustand';
 import { api } from '../api';
 
@@ -84,7 +85,7 @@ interface DataState {
   data: AppData | null;
   loading: boolean;
   load: () => Promise<void>;
-  upsertTask: (task: Task) => Promise<{ data: AppData; settledMs: number }>;
+  upsertTask: (task: Task) => Promise<{ data: AppData; settledMs: number; persisted: boolean }>;
   deleteTask: (id: string) => Promise<void>;
   /** 字段编辑（标题/备注/条目/下次跟进日）；状态只能走 resolve/reopen 命令。 */
   upsertFollowUp: (followUp: FollowUpEdit) => Promise<void>;
@@ -149,9 +150,16 @@ export const useDataStore = create<DataState>((set, get) => ({
     // The main process enforces "completing a task ends its timing" on write and
     // reports what it actually recorded, so this response is the authority on
     // both the dataset and the timer.
-    const { data, settledMs } = await api().taskUpsert(task);
+    const { data, settledMs, persisted } = await api().taskUpsert(task);
     set({ data });
-    return { data, settledMs };
+    // Without this the renderer adopted the fallback dataset and reported a
+    // clean save. Completing a task through CompleteTaskDialog would close,
+    // claim nothing was recorded, and leave the task unfinished on disk — with
+    // no indication that anything had gone wrong.
+    if (!persisted) {
+      toast.error('保存失败：数据文件当前不可写，这次修改没有落盘。');
+    }
+    return { data, settledMs, persisted };
   },
   deleteTask: async (id) => {
     const data = await api().taskDelete({ id });
@@ -258,7 +266,13 @@ export const useDataStore = create<DataState>((set, get) => ({
     set({ data });
   },
   updateSettings: async (patch) => {
-    const data = await api().settingsUpdate(patch);
+    // A refused write (data.json unreadable) still returns the dataset, so the
+    // new values render — and then vanish on restart. Say so instead of letting
+    // the user discover it later.
+    const { data, persisted } = await api().settingsUpdate(patch);
     set({ data });
+    if (!persisted) {
+      toast.error('设置未能保存：数据文件当前不可写，重启后会丢失这次修改。');
+    }
   },
 }));

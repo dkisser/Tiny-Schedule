@@ -1,5 +1,4 @@
 import type { AppData, AppSettings } from '@tiny-schedule/shared';
-import { encryptKey } from '../infra/keys';
 import type { ServiceDeps } from './taskService';
 
 /**
@@ -8,9 +7,17 @@ import type { ServiceDeps } from './taskService';
  * 设置不属于四个聚合中的任何一个，却有自己的写规则：api key 明文入、密文落盘。
  * 规则住在 handler 层就意味着每条新写路径都得重新记得 encryptKey——任何新的
  * 设置通道、agent 工具或自动流程漏一次，就是把明文 key 写进 data.json。放进
- * service 之后，这条规则只剩一处可以审。（encryptKey 仍是按路径 import 的，
- * 所以约束的是"要审的地方只有一处"，不是"新调用方无法绕过"。）
+ * service 之后，这条规则只剩一处可以审。
+ *
+ * encryptKey 由组装点注入，与 store / logger 同级。此前它仍是按路径 import 的，
+ * 于是这条约束只做了一半：约束的是"要审的地方只有一处"，而不是"新调用方无法绕
+ * 过"。注入之后，换掉加密实现（safeStorage、测试替身）不必改这个文件，而这条
+ * 规则依赖的形状也由类型摆在这里，而不是藏在一个 import 里。
  */
+
+export interface SettingsDeps extends ServiceDeps {
+  encryptKey: (plain: string) => string;
+}
 
 export interface SettingsUpdatePatch {
   userName?: AppSettings['userName'];
@@ -30,10 +37,15 @@ export interface SettingsUpdatePatch {
   }[];
 }
 
-export function createSettingsService({ store, logger }: ServiceDeps) {
+export function createSettingsService({ store, logger, encryptKey }: SettingsDeps) {
   return {
-    update(patch: SettingsUpdatePatch): AppData {
-      const next = store.update((d) => {
+    /**
+     * 返回落库与否。一笔被 store 拒绝的设置保存必须是可上报的：渲染进程无论如
+     * 何都会用返回的数据集把新主题、用户名显示出来，没有这个标志，用户看到的是
+     * "改好了"，重启后才发现没存上。
+     */
+    update(patch: SettingsUpdatePatch): { data: AppData; persisted: boolean } {
+      const { data: next, persisted } = store.update((d) => {
         const settings = { ...d.settings };
         if (patch.userName !== undefined) settings.userName = patch.userName;
         if (patch.avatar !== undefined) settings.avatar = patch.avatar;
@@ -67,8 +79,8 @@ export function createSettingsService({ store, logger }: ServiceDeps) {
         }
         return { ...d, settings };
       });
-      logger.info({ action: 'settings:update', keys: Object.keys(patch) });
-      return next;
+      logger.info({ action: 'settings:update', keys: Object.keys(patch), persisted });
+      return { data: next, persisted };
     },
   };
 }

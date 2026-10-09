@@ -19,7 +19,7 @@ const EDITABLE_FIELDS = ['title', 'notes', 'createdAt', 'entries', 'nextFollowUp
 
 export function createFollowUpService({ store, logger }: ServiceDeps) {
   const persist = (followUp: FollowUp): AppData => {
-    const next = store.update((d) => ({
+    const { data: next } = store.update((d) => ({
       ...d,
       followUps: { ...d.followUps, [followUp.id]: followUp },
     }));
@@ -39,7 +39,7 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
    * 办结 with no error and no log. Ideas got this merge for the same reason.
    */
   const merge = (patch: FollowUpEdit): AppData => {
-    const next = store.update((d) => {
+    const { data: next } = store.update((d) => {
       const stored = d.followUps[patch.id];
       // An allowlist, not "filter out undefined": the state fields are not on
       // the edit contract, and a caller that supplies them anyway (a spread
@@ -85,7 +85,7 @@ export function createFollowUpService({ store, logger }: ServiceDeps) {
     },
 
     remove(id: string): AppData {
-      const next = store.update((d) => {
+      const { data: next } = store.update((d) => {
         const followUps = { ...d.followUps };
         delete followUps[id];
         return { ...d, followUps };

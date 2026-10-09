@@ -9,6 +9,9 @@ import { masked } from './deps';
  */
 export function settingsHandlers({ settings }: { settings: SettingsService }) {
   return {
-    settingsUpdate: (patch: Partial<SettingsUpdatePatch>) => masked(settings.update(patch)),
+    settingsUpdate: (patch: Partial<SettingsUpdatePatch>) => {
+      const { data, persisted } = settings.update(patch);
+      return { data: masked(data), persisted };
+    },
   };
 }

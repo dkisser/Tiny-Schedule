@@ -432,7 +432,7 @@ export function createChatService({
       // binding means the answer stops matching what was persisted the moment
       // update() is made lazy, batched or retrying — and store.update already
       // returns the authoritative value for every other caller here.
-      const data = store.update((d) => {
+      const { data } = store.update((d) => {
         const next = ((d.misc.chatSessions ?? []) as ChatSession[]).filter((x) => x.id !== id);
         return { ...d, misc: { ...d.misc, chatSessions: next } };
       });

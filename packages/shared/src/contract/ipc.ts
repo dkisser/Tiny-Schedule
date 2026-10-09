@@ -481,11 +481,27 @@ export type IdeaUpgradeResult =
  * 一次结算根本没动过的旧 timeSpent。
  */
 export type TimingStopResult =
-  | { ok: true; data: AppData; settledMs: number }
+  | { ok: true; data: AppData; settledMs: number; persisted: boolean }
   | {
       ok: false;
-      error: 'NO_ACTIVE_TIMER' | 'TIMER_MISMATCH' | 'TASK_NOT_FOUND' | 'TASK_ALREADY_DONE';
+      /**
+       * What was true of the *timer*. WRITE_REFUSED is the exception: it
+       * describes the store, and it is the one code where a settlement that
+       * should have happened did not.
+       */
+      error:
+        | 'NO_ACTIVE_TIMER'
+        | 'TIMER_MISMATCH'
+        | 'TASK_NOT_FOUND'
+        | 'TASK_ALREADY_DONE'
+        | 'WRITE_REFUSED';
       data: AppData;
+      /**
+       * Whether the store accepted the write. Orthogonal to `error`: a stop
+       * that dropped the timer because its task was done is still worth
+       * reporting accurately when the refusal means the drop never landed.
+       */
+      persisted: boolean;
     };
 
 export const TimingStopReqSchema = z.object({
@@ -510,7 +526,9 @@ export const IpcInvokeContract = {
     req: TaskSchema,
     // `settledMs` is the authoritative answer to "how much time did this write
     // record", so the renderer can report it instead of predicting it.
-    res: null as unknown as { data: AppData; settledMs: number },
+    // `persisted` says whether it reached the disk at all — without it the
+    // renderer reports a save that a refused store silently discarded.
+    res: null as unknown as { data: AppData; settledMs: number; persisted: boolean },
   },
   taskDelete: { ch: Ipc.taskDelete, req: TaskDeleteReqSchema, res: null as unknown as AppData },
   followUpUpsert: {
@@ -615,7 +633,10 @@ export const IpcInvokeContract = {
   settingsUpdate: {
     ch: Ipc.settingsUpdate,
     req: SettingsUpdateReqSchema,
-    res: null as unknown as AppData,
+    // `persisted` says whether the change reached the disk. The renderer adopts
+    // the returned dataset either way, so without it a refused write looks
+    // applied until the app restarts.
+    res: null as unknown as { data: AppData; persisted: boolean },
   },
   finishDay: { ch: Ipc.finishDay, req: FinishDayReqSchema, res: null as unknown as AppData },
   timerSync: { ch: Ipc.timerSync, req: TimerSyncReqSchema, res: null as unknown as void },
