@@ -105,7 +105,7 @@ function FollowUpRow({ followUp }: { followUp: FollowUp }) {
 
 export function FollowUpsPage() {
   const data = useDataStore((s) => s.data);
-  const upsertFollowUp = useDataStore((s) => s.upsertFollowUp);
+  const createFollowUp = useDataStore((s) => s.createFollowUp);
   const runFollowUpCommand = useDataStore((s) => s.runFollowUpCommand);
   const selectFollowUp = useUiStore((s) => s.selectFollowUp);
   const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
@@ -118,8 +118,10 @@ export function FollowUpsPage() {
   const create = async () => {
     const title = draft.trim();
     if (!title) return;
+    // Cleared only once the record exists, so a refused store leaves the draft
+    // in the input instead of taking what the user typed with it.
+    if (!(await createFollowUp(title))) return;
     setDraft('');
-    await upsertFollowUp(blankFollowUp(title));
   };
 
   return (
