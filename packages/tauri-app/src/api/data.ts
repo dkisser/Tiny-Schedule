@@ -1,7 +1,13 @@
 import {
   type AppData,
   addDays,
+  blankFollowUp,
+  blankIdea,
   dropStaleTiming,
+  type FollowUp,
+  type FollowUpEdit,
+  type Idea,
+  type IdeaEdit,
   INBOX_PROJECT_ID,
   IpcInvokeContract,
   type IpcInvokeFn,
@@ -12,7 +18,7 @@ import {
   type RendererApi,
   upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
-import type { DataStore } from '@/bridge/dataStore';
+import type { DataStore, WriteResult } from '@/bridge/dataStore';
 import { encryptKey } from '@/bridge/keys';
 
 /**
@@ -30,7 +36,21 @@ import { encryptKey } from '@/bridge/keys';
  * only used as opaque ids.
  */
 export type DataApi = {
-  [K in DataInvokeKey]: IpcInvokeFn<K>;
+  // `timerSync` is excluded from the mapped half and re-declared below: an
+  // intersection would leave both signatures callable, and `tsc` resolves the
+  // call to the `void` one.
+  [K in Exclude<DataInvokeKey, 'timerSync'>]: IpcInvokeFn<K>;
+} & {
+  /**
+   * `timerSync` is declared `void` by the contract, and to the renderer it
+   * still is. Its slice implementation, though, returns the store's
+   * {@link WriteResult} so the assembling layer can tell a refused write from
+   * a dropped timer — the one distinction the timer channel has to make
+   * (ADR-0004). Declared here rather than cast at the call site so the extra
+   * information is part of this module's signature instead of an assertion
+   * made where it is consumed.
+   */
+  timerSync: (req?: unknown) => Promise<WriteResult>;
 };
 
 /** The contract keys this slice owns; the rest stay stubbed for later waves. */
@@ -75,6 +95,23 @@ function parse<K extends DataInvokeKey>(key: K, raw: unknown): unknown {
 export function createDataApi(store: DataStore): DataApi {
   const masked = (data: AppData): AppData => maskDataForRenderer(data);
 
+  /**
+   * The two shapes a write can come back in (ADR-0004).
+   *
+   * Only the channels whose *return value is control flow* use `written`/
+   * `refused`: the ones where the caller decides whether to close a dialog,
+   * record something, or stop a clock. The rest return a bare masked dataset,
+   * because their result only refreshes the view — and whether the app can save
+   * at all is a global state pushed by the store's mode channel, not a fact to
+   * carry on every call. See {@link IpcInvokeContract} for which is which.
+   *
+   * `ok: true` implies it reached the disk, so there is no "succeeded but was
+   * dropped" combination for a caller to get wrong. That is the whole point of
+   * the discriminated union over the old `persisted` boolean.
+   */
+  const written = (data: AppData): { ok: true; data: AppData } => ({ ok: true, data: masked(data) });
+  const refused = { ok: false, error: 'WRITE_REFUSED' } as const;
+
   const handlers: Record<DataInvokeKey, (raw: unknown) => Promise<unknown>> = {
     dataLoad: async () => masked(await store.get()),
 
@@ -83,19 +120,22 @@ export function createDataApi(store: DataStore): DataApi {
       // The single enforcement point for "completing a task ends its timing":
       // every write path funnels through here, so no entry point can leave a
       // done task being timed. settledMs goes back to the caller so the
-      // renderer reports what was actually recorded instead of predicting it.
+      // renderer reports what was actually recorded instead of predicting it —
+      // and only when the write landed, because "settled 90s" is a claim about
+      // the disk, not about what the mutation computed.
       let settledMs = 0;
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const r = upsertTaskWithTiming(d, task, Date.now());
         settledMs = r.settledMs;
         return r.data;
       });
-      return { data: masked(next), settledMs };
+      if (!result.persisted) return refused;
+      return { ...written(result.data), settledMs };
     },
 
     taskDelete: async (raw) => {
       const { id } = parse('taskDelete', raw) as { id: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const tasks = { ...d.tasks };
         delete tasks[id];
         // detach from parent's subTaskIds
@@ -106,45 +146,82 @@ export function createDataApi(store: DataStore): DataApi {
         }
         return { ...d, tasks };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
+    /**
+     * A field *edit*, not a replace — see {@link FollowUpEditSchema}.
+     *
+     * The request carries no `isResolved`/`resolvedAt`: those advance only
+     * through followUpResolve/followUpReopen, so writing back the renderer's
+     * snapshot cannot silently undo a 办结 the user already performed. And
+     * `nextFollowUpDay` distinguishes `null` (clear the date input) from
+     * `undefined` (don't touch) — collapsing the two turns the merge back into
+     * an overwrite, which is the same bug from the other direction.
+     */
     followUpUpsert: async (raw) => {
-      const followUp = parse('followUpUpsert', raw) as AppData['followUps'][string];
-      const next = await store.update((d) => ({
-        ...d,
-        followUps: { ...d.followUps, [followUp.id]: followUp },
-      }));
-      return masked(next);
+      const edit = parse('followUpUpsert', raw) as FollowUpEdit;
+      const result = await store.update((d) => {
+        const prev = d.followUps[edit.id] ?? blankFollowUp(edit.title);
+        const next: FollowUp = {
+          ...prev,
+          title: edit.title,
+          notes: edit.notes,
+          createdAt: edit.createdAt,
+          entries: edit.entries ?? prev.entries,
+          nextFollowUpDay:
+            edit.nextFollowUpDay === null
+              ? undefined
+              : (edit.nextFollowUpDay ?? prev.nextFollowUpDay),
+        };
+        return { ...d, followUps: { ...d.followUps, [edit.id]: next } };
+      });
+      return masked(result.data);
     },
 
     followUpDelete: async (raw) => {
       const { id } = parse('followUpDelete', raw) as { id: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const followUps = { ...d.followUps };
         delete followUps[id];
         return { ...d, followUps };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
+    /**
+     * A field *edit*, not a replace — see {@link IdeaEditSchema}.
+     *
+     * Every transition field (`status`, `convertedAt`, `verdict`, `incubatedAt`,
+     * `resolvedAt`, and `timeline`) is absent from the request on purpose, so a
+     * debounced commit landing after the user advanced the idea cannot roll it
+     * back. Those move only through the intent commands.
+     */
     ideaUpsert: async (raw) => {
-      const idea = parse('ideaUpsert', raw) as AppData['ideas'][string];
-      const next = await store.update((d) => ({
-        ...d,
-        ideas: { ...d.ideas, [idea.id]: idea },
-      }));
-      return masked(next);
+      const edit = parse('ideaUpsert', raw) as IdeaEdit;
+      const result = await store.update((d) => {
+        const prev = d.ideas[edit.id] ?? blankIdea(edit.title);
+        const next: Idea = {
+          ...prev,
+          title: edit.title,
+          notes: edit.notes,
+          createdAt: edit.createdAt,
+          validationGoal:
+            edit.validationGoal === null ? undefined : (edit.validationGoal ?? prev.validationGoal),
+        };
+        return { ...d, ideas: { ...d.ideas, [edit.id]: next } };
+      });
+      return masked(result.data);
     },
 
     ideaDelete: async (raw) => {
       const { id } = parse('ideaDelete', raw) as { id: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const ideas = { ...d.ideas };
         delete ideas[id];
         return { ...d, ideas };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     orderSet: async (raw) => {
@@ -162,8 +239,13 @@ export function createDataApi(store: DataStore): DataApi {
         primaryColor?: string;
       };
       const title = req.title.slice(0, PROJECT_TITLE_MAX_LENGTH);
-      const next = await store.update((d) => {
+      // The id is minted inside the mutation and returned alongside the
+      // dataset. The renderer used to recover it by diffing the whole project
+      // list, which picks the wrong project if two creations interleave.
+      let projectId = '';
+      const result = await store.update((d) => {
         const id = `p_${randomId()}`;
+        projectId = id;
         return {
           ...d,
           projects: {
@@ -178,7 +260,8 @@ export function createDataApi(store: DataStore): DataApi {
           },
         };
       });
-      return masked(next);
+      if (!result.persisted) return refused;
+      return { ...written(result.data), projectId };
     },
 
     projectUpdate: async (raw) => {
@@ -188,7 +271,7 @@ export function createDataApi(store: DataStore): DataApi {
         primaryColor?: string;
         isArchived?: boolean;
       };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const prev = d.projects[req.id];
         // Inbox is a system project: never accept updates through the API.
         if (!prev || req.id === INBOX_PROJECT_ID) return d;
@@ -202,13 +285,13 @@ export function createDataApi(store: DataStore): DataApi {
         if (Object.keys(patch).length === 0) return d;
         return { ...d, projects: { ...d.projects, [req.id]: { ...prev, ...patch } } };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     projectDelete: async (raw) => {
       const { id } = parse('projectDelete', raw) as { id: string };
       if (id === INBOX_PROJECT_ID) return masked(await store.get());
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         if (!d.projects[id]) return d;
         const projects = { ...d.projects };
         delete projects[id];
@@ -219,21 +302,21 @@ export function createDataApi(store: DataStore): DataApi {
         }
         return { ...d, projects, tasks };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     tagCreate: async (raw) => {
       const req = parse('tagCreate', raw) as { title: string; color?: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const id = `tag_${randomId()}`;
         return { ...d, tags: { ...d.tags, [id]: { id, title: req.title, color: req.color } } };
       });
-      return masked(next);
+      return result.persisted ? written(result.data) : refused;
     },
 
     tagUpdate: async (raw) => {
       const req = parse('tagUpdate', raw) as { id: string; title?: string; color?: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const prev = d.tags[req.id];
         if (!prev) return d;
         const updated = {
@@ -243,19 +326,19 @@ export function createDataApi(store: DataStore): DataApi {
         };
         return { ...d, tags: { ...d.tags, [req.id]: updated } };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     tagDelete: async (raw) => {
       const { id } = parse('tagDelete', raw) as { id: string };
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         if (!d.tags[id]) return d;
         const tags = { ...d.tags };
         delete tags[id];
         // Tasks keep tagIds + snapshot labels so their chips stay visible.
         return { ...d, tags };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     settingsUpdate: async (raw) => {
@@ -265,7 +348,7 @@ export function createDataApi(store: DataStore): DataApi {
       const patch = parse('settingsUpdate', raw) as Parameters<
         NonNullable<RendererApi['settingsUpdate']>
       >[0];
-      const next = await store.update(async (d) => {
+      const result = await store.update(async (d) => {
         const settings = { ...d.settings };
         if (patch.userName !== undefined) settings.userName = patch.userName;
         if (patch.avatar !== undefined) settings.avatar = patch.avatar;
@@ -302,7 +385,7 @@ export function createDataApi(store: DataStore): DataApi {
         }
         return { ...d, settings };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
     finishDay: async (raw) => {
@@ -311,7 +394,7 @@ export function createDataApi(store: DataStore): DataApi {
       parse('finishDay', raw);
       const today = localDate(Date.now());
       const tomorrow = addDays(today, 1);
-      const next = await store.update((d) => {
+      const result = await store.update((d) => {
         const tasks = { ...d.tasks };
         for (const t of Object.values(tasks)) {
           // Roll unfinished tasks due today to tomorrow so they remain visible
@@ -322,25 +405,28 @@ export function createDataApi(store: DataStore): DataApi {
         }
         return { ...d, tasks, misc: { ...d.misc, lastFinishDay: today } };
       });
-      return masked(next);
+      return masked(result.data);
     },
 
+    /**
+     * Returns the store's {@link WriteResult} rather than nothing.
+     *
+     * The contract says `void`, and it stays `void` as far as callers are
+     * concerned — the wrapper in `api.ts` discards it. But this handler is the
+     * only place that knows whether the write landed, and the announcement on
+     * the timer channel depends on that distinction: a refused sync must not be
+     * read as a drop, or the renderer stops a clock the host never stopped.
+     */
     timerSync: async (raw) => {
       const { timer } = parse('timerSync', raw) as {
         timer: Parameters<typeof dropStaleTiming>[0]['activeTimer'];
       };
       if (!timer) {
-        await store.update((d) => ({ ...d, activeTimer: null }));
-        return;
+        return store.update((d) => ({ ...d, activeTimer: null }));
       }
       // Same invariant as taskUpsert: a timer may never be persisted for a task
       // that is already done, whoever is asking to sync it.
-      const next = await store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
-      if (!next.activeTimer) {
-        // The drop is announced by the caller layer (see api.ts), which owns
-        // the event channel; here we only persist the corrected state.
-        return;
-      }
+      return store.update((d) => dropStaleTiming({ ...d, activeTimer: timer }));
     },
   };
 

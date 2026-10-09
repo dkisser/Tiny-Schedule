@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  type ActiveTimer,
+  DROPPED_TIMER,
   emptyAppData,
   IpcInvokeContract,
   type IpcInvokeKey,
+  REFUSED_TIMER,
   type RendererApi,
   type Task,
+  type TimerChangedPayload,
 } from '@tiny-schedule/shared';
 import { DataStore } from '@/bridge/dataStore';
 import { MemoryFs } from '@/bridge/fsAdapter';
@@ -145,24 +147,45 @@ describe('the local timer-changed channel', () => {
     await api.taskUpsert(task({ isDone: true, doneAt: 1 }));
   }
 
-  test('a swept timer reaches onTimerChanged subscribers as null', async () => {
+  test('a swept timer reaches onTimerChanged subscribers as DROPPED_TIMER', async () => {
     // The renderer started a clock; the store dropped the timing because the
     // task was already done. Without the announcement the clock keeps ticking
     // against a timer nothing persisted.
     const api = await buildApi();
     await withDoneTask(api);
-    const seen: (ActiveTimer | null)[] = [];
-    api.onTimerChanged((timer) => seen.push(timer));
+    const seen: TimerChangedPayload[] = [];
+    api.onTimerChanged((payload) => seen.push(payload));
     await api.timerSync({ timer: running });
-    expect(seen).toEqual([null]);
+    expect(seen).toEqual([DROPPED_TIMER]);
     expect((await api.dataLoad()).activeTimer).toBeNull();
+  });
+
+  test('a refused write announces REFUSED_TIMER, not a drop', async () => {
+    // The case ADR-0004 exists for. data.json will not parse, so the store
+    // latches read-only and the sync writes nothing. The timer's absence from
+    // the store looks identical to a completed task's, but announcing a drop
+    // would clear a clock the user never stopped — so the payload has to say
+    // "not saved" and leave the decision to the banner.
+    const fs = new MemoryFs();
+    await fs.mkdir('/data');
+    await fs.writeText('/data/data.json', '{ truncated');
+    const store = await DataStore.open('/data', fs);
+    await store.load();
+    const api = createApi({ store });
+    expect(store.isWritable).toBe(false);
+
+    const seen: TimerChangedPayload[] = [];
+    api.onTimerChanged((payload) => seen.push(payload));
+    await api.timerSync({ timer: running });
+
+    expect(seen).toEqual([REFUSED_TIMER]);
   });
 
   test('a kept timer announces nothing', async () => {
     const api = await buildApi();
     await api.taskUpsert(task());
-    const seen: (ActiveTimer | null)[] = [];
-    api.onTimerChanged((timer) => seen.push(timer));
+    const seen: TimerChangedPayload[] = [];
+    api.onTimerChanged((payload) => seen.push(payload));
     await api.timerSync({ timer: running });
     expect(seen).toEqual([]);
     expect((await api.dataLoad()).activeTimer?.taskId).toBe('t1');
@@ -175,8 +198,8 @@ describe('the local timer-changed channel', () => {
     const api = await buildApi();
     await api.taskUpsert(task());
     await api.timerSync({ timer: running });
-    const seen: (ActiveTimer | null)[] = [];
-    api.onTimerChanged((timer) => seen.push(timer));
+    const seen: TimerChangedPayload[] = [];
+    api.onTimerChanged((payload) => seen.push(payload));
     await api.timerSync({ timer: null });
     expect(seen).toEqual([]);
   });

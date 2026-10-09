@@ -101,7 +101,7 @@ const created = await api().taskUpsert({
   title: 'W2 冒烟任务',
 } as never);
 await log(
-  `taskUpsert -> ${Object.keys(created.data.tasks).length} tasks, new id present=${!!created.data.tasks[probeId]}`,
+  `taskUpsert -> ${created.ok ? `${Object.keys(created.data.tasks).length} tasks, new id present=${!!created.data.tasks[probeId]}` : `refused: ${created.error}`}`,
 );
 
 // Read it back off disk, not out of the cache, so the assertion is about the file.

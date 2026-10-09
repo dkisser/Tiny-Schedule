@@ -104,8 +104,16 @@ export const useTimerStore = create<TimerState>((set, get) => ({
     }, 1_000);
     // Auto-pauses (sleep/idle) are authoritative; apply them immediately so
     // the heartbeat never resyncs a stale running timer.
-    const offTimerChanged = api().onTimerChanged((timer) => {
-      set({ timer, now: Date.now() });
+    //
+    // The payload is a union, not a bare timer, because "the host stopped the
+    // clock" and "the host could not save your clock" are different events. On a
+    // refusal the timer is left exactly as it is: the host did not drop it, and
+    // clearing it here would stop a session that is still accruing time the
+    // user never ended. The banner (store mode) is what tells them the save is
+    // not landing.
+    const offTimerChanged = api().onTimerChanged((payload) => {
+      if (payload.kind === 'refused') return;
+      set({ timer: payload.timer, now: Date.now() });
     });
     return () => {
       clearInterval(heartbeat);

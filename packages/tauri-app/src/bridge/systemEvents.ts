@@ -177,12 +177,12 @@ async function settleRunningTimer(): Promise<void> {
   // data, captured in the closure rather than recomputed — a second
   // `settleTimer` call could disagree with the write that actually landed.
   let settledMs = 0;
-  const data = await activeStore.update((d) => {
+  const settled = await activeStore.update((d) => {
     const result = settleActiveTimer(d, timer, Date.now());
     settledMs = result.settledMs;
     return result.data;
   });
-  useDataStore.setState({ data: maskDataForRenderer(data) });
+  useDataStore.setState({ data: maskDataForRenderer(settled.data) });
   useTimerStore.setState({ timer: null, now: Date.now() });
 
   if (settledMs > 0) {

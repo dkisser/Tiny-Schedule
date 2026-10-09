@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { type AppData, emptyAppData, INBOX_PROJECT_ID } from '@tiny-schedule/shared';
+import {
+  type AppData,
+  emptyAppData,
+  INBOX_PROJECT_ID,
+  PROJECT_TITLE_MAX_LENGTH,
+} from '@tiny-schedule/shared';
 import { DataStore } from '@/bridge/dataStore';
 import { joinPath, MemoryFs } from '@/bridge/fsAdapter';
 import { _resetKeyCacheForTest, initKeyStore } from '@/bridge/keys';
@@ -32,6 +37,27 @@ async function setup() {
   const store = await DataStore.open(DIR, fs);
   await store.save(emptyAppData());
   return { fs, store, api: createDataApi(store), dataPath: joinPath(DIR, 'data.json') };
+}
+
+/**
+ * Unwrap a control-flow write's result (ADR-0004), asserting it landed.
+ *
+ * Most tests here are about what a write *did*, not about whether the store was
+ * able to accept it, so they would each otherwise repeat a narrowing `if (!r.ok)`
+ * that only exists to satisfy the compiler. Unpacking here keeps every assertion
+ * reading as before — `.data.tasks`, `.settledMs` — while still failing loudly
+ * rather than silently through if a write is refused.
+ *
+ * `projectCreate` gains from this beyond ergonomics: the id comes back on the
+ * result, so a test can name the project it made instead of diffing the whole
+ * project list to find out.
+ */
+async function landed<R extends { ok: true; data: AppData } | { ok: false; error: string }>(
+  write: Promise<R>,
+): Promise<Omit<Extract<R, { ok: true }>, 'ok'>> {
+  const r = await write;
+  if (!r.ok) throw new Error(`expected the write to land, got ${r.error}`);
+  return r as unknown as Omit<Extract<R, { ok: true }>, 'ok'>;
 }
 
 describe('data api slice', () => {
@@ -84,7 +110,7 @@ describe('data api slice', () => {
   test('task CRUD round-trips and persists to disk', async () => {
     const { api, fs, dataPath } = await setup();
 
-    const created = await api.taskUpsert(task('t1', { title: '买牛奶' }) as never);
+    const created = await landed(api.taskUpsert(task('t1', { title: '买牛奶' }) as never));
     expect(created.data.tasks.t1?.title).toBe('买牛奶');
 
     const afterRead = await api.dataLoad();
@@ -123,8 +149,10 @@ describe('data api slice', () => {
       },
     } as never);
 
-    const res = await api.taskUpsert(
-      task('t1', { isDone: true, timeSpent: 4000, timeEstimate: 60_000 }) as never,
+    const res = await landed(
+      api.taskUpsert(
+        task('t1', { isDone: true, timeSpent: 4000, timeEstimate: 60_000 }) as never,
+      ),
     );
 
     expect(res.settledMs).toBeGreaterThan(0);
@@ -137,7 +165,7 @@ describe('data api slice', () => {
     const { api } = await setup();
     await api.taskUpsert(task('t1', { isDone: true }) as never);
 
-    const res = await api.taskUpsert(task('t1', { isDone: true, title: 'renamed' }) as never);
+    const res = await landed(api.taskUpsert(task('t1', { isDone: true, title: 'renamed' }) as never));
     expect(res.settledMs).toBe(0);
   });
 
@@ -147,13 +175,17 @@ describe('data api slice', () => {
     await expect(api.taskDelete({ id: '' })).rejects.toThrow();
   });
 
-  test('projectCreate truncates the title and assigns an id', async () => {
+  test('projectCreate caps the title at the wire, not in the service', async () => {
     const { api } = await setup();
-    const long = 'x'.repeat(100);
-    const next = await api.projectCreate({ title: long } as never);
+    // The contract's own schema bounds the title, so an over-long name never
+    // reaches the store — the service's slice() is a second line of defence
+    // kept in step with the same constant, not the path a user hits.
+    await expect(api.projectCreate({ title: 'x'.repeat(100) } as never)).rejects.toThrow();
 
-    const created = Object.values(next.projects).find((p) => p.id !== INBOX_PROJECT_ID);
-    expect(created?.title).toHaveLength(32);
+    const { data, projectId } = await landed(
+      api.projectCreate({ title: 'A'.repeat(PROJECT_TITLE_MAX_LENGTH) } as never),
+    );
+    expect(data.projects[projectId]?.title).toHaveLength(PROJECT_TITLE_MAX_LENGTH);
   });
 
   test('projectUpdate refuses to modify the system Inbox project', async () => {
@@ -167,8 +199,9 @@ describe('data api slice', () => {
 
   test('projectUpdate applies only the fields present in the request', async () => {
     const { api } = await setup();
-    const created = await api.projectCreate({ title: 'Original', primaryColor: 'red' } as never);
-    const id = Object.values(created.projects).find((p) => p.title === 'Original')?.id as string;
+    const { projectId: id } = await landed(
+      api.projectCreate({ title: 'Original', primaryColor: 'red' } as never),
+    );
 
     const updated = await api.projectUpdate({ id, title: 'Renamed' } as never);
     expect(updated.projects[id]?.title).toBe('Renamed');
@@ -178,8 +211,7 @@ describe('data api slice', () => {
 
   test('projectDelete moves its tasks to Inbox', async () => {
     const { api } = await setup();
-    const created = await api.projectCreate({ title: 'Doomed' } as never);
-    const id = Object.values(created.projects).find((p) => p.title === 'Doomed')?.id as string;
+    const { projectId: id } = await landed(api.projectCreate({ title: 'Doomed' } as never));
     await api.taskUpsert(task('t1', { projectId: id }) as never);
 
     const after = await api.projectDelete({ id } as never);
@@ -189,7 +221,7 @@ describe('data api slice', () => {
 
   test('tagDelete keeps task tagIds so chips stay visible', async () => {
     const { api } = await setup();
-    const created = await api.tagCreate({ title: 'Urgent' } as never);
+    const { data: created } = await landed(api.tagCreate({ title: 'Urgent' } as never));
     const tagId = Object.keys(created.tags).find(
       (k) => created.tags[k]?.title === 'Urgent',
     ) as string;

@@ -110,11 +110,22 @@ export function Sidebar() {
   const submitCreate = async () => {
     const title = draft.trim();
     const group = creating;
+    if (!group || !title) {
+      setCreating(null);
+      setDraft('');
+      return;
+    }
+    // Cleared only once the write actually landed. A refused write is not a
+    // rename that took effect, so closing the input and dropping the draft
+    // would take the user's typing with it — the store-mode banner is what
+    // explains why nothing was saved.
+    const created =
+      group === 'projects'
+        ? (await createProject(title.slice(0, PROJECT_TITLE_MAX_LENGTH))) !== null
+        : await createTag(title);
+    if (!created) return;
     setCreating(null);
     setDraft('');
-    if (!group || !title) return;
-    if (group === 'projects') await createProject(title.slice(0, PROJECT_TITLE_MAX_LENGTH));
-    else await createTag(title);
   };
 
   const cancelCreate = () => {

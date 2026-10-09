@@ -73,10 +73,10 @@ export function createFilesApi(
         // being timed. Sweep it here rather than leaving the state for a later
         // write to clean up, and tell the renderer so its clock stops too.
         const hadTimer = !!(await store.get()).activeTimer;
-        const next = await store.update((d) =>
+        const result = await store.update((d) =>
           dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
         );
-        if (hadTimer && !next.activeTimer) deps.onTimerChanged?.();
+        if (hadTimer && !result.data.activeTimer) deps.onTimerChanged?.();
         return { ok: true, counts };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) };

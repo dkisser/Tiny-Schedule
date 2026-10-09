@@ -38,9 +38,12 @@ export function UpgradeIdeaDialog() {
     const trimmed = title.trim();
     const trimmedGoal = goal.trim();
     if (!trimmed) return;
-    const project = await createProject(trimmed);
-    if (!project) return;
-    await upsertIdea(upgradeIdeaToProject(idea, project.id, trimmedGoal || undefined));
+    // `null` means the write was refused, so no project exists and the dialog
+    // stays open with the user's text intact — returning an id here would point
+    // the idea at a project the store discarded.
+    const projectId = await createProject(trimmed);
+    if (!projectId) return;
+    await upsertIdea(upgradeIdeaToProject(idea, projectId, trimmedGoal || undefined));
     setUpgradeIdea(null);
   };
 

@@ -1,8 +1,11 @@
 import {
   type ActiveTimer,
+  DROPPED_TIMER,
   IpcInvokeContract,
   type IpcInvokeKey,
+  REFUSED_TIMER,
   type RendererApi,
+  type TimerChangedPayload,
 } from '@tiny-schedule/shared';
 import { type AiLogger } from '@/ai/logger';
 import { type CreateAiApiOptions, createAiApi } from '@/api/ai';
@@ -59,15 +62,15 @@ export interface CreateApiOptions {
  * from being told the timer changed.
  */
 function createTimerChangedBus(): {
-  emit: (timer: ActiveTimer | null) => void;
-  subscribe: (cb: (timer: ActiveTimer | null) => void) => () => void;
+  emit: (payload: TimerChangedPayload) => void;
+  subscribe: (cb: (payload: TimerChangedPayload) => void) => () => void;
 } {
-  const listeners = new Set<(timer: ActiveTimer | null) => void>();
+  const listeners = new Set<(payload: TimerChangedPayload) => void>();
   return {
-    emit(timer) {
+    emit(payload) {
       for (const cb of [...listeners]) {
         try {
-          cb(timer);
+          cb(payload);
         } catch (error) {
           console.error('timer: onTimerChanged listener threw', error);
         }
@@ -98,7 +101,7 @@ export function createApi(options: CreateApiOptions): RendererApi {
     ...(options.chatDeps ? { chatDeps: options.chatDeps } : {}),
   });
   const files = createFilesApi(store, {
-    onTimerChanged: () => timerChanged.emit(null),
+    onTimerChanged: () => timerChanged.emit(DROPPED_TIMER),
   });
   const system = createSystemApi(store, options.system ?? {});
   const timer = createTimerApi();
@@ -134,19 +137,31 @@ export function createApi(options: CreateApiOptions): RendererApi {
 
   /**
    * The data slice persists a corrected timer but cannot announce it — it has
-   * no event channel. The announcement belongs here, where the bus lives, so
-   * that a sync asked for a timer and the store refused to keep it (the task
-   * it belonged to is already done) reaches the renderer's clock instead of
-   * leaving it running against a timer nothing persisted.
+   * no event channel. The announcement belongs here, where the bus lives.
+   *
+   * Order matters here, and it is not cosmetic. `dropped` is read off the
+   * dataset the store hands back, so on a refused write that dataset is the
+   * degraded fallback — testing it first would report a drop that never
+   * happened, and clear a clock the host is still counting. Refusal is
+   * therefore decided first, from the write result itself:
+   *
+   *  - **Refused** — nothing was written and the cache never moved, so the
+   *    host may still be holding the session. `REFUSED_TIMER` leaves the
+   *    renderer's clock alone; the store-mode banner is what tells the user
+   *    their saves are not landing.
+   *  - **Dropped** — the task is done, so the timer was correctly removed. The
+   *    clock should stop.
    */
   const requested = (req: { timer: ActiveTimer | null } | undefined) => req?.timer ?? null;
   const dataTimerSync = data.timerSync;
   const timerSync: RendererApi['timerSync'] = async (req) => {
     const wanted = requested(req as { timer: ActiveTimer | null });
     const result = await dataTimerSync(req);
-    const persisted = (await store.get()).activeTimer ?? null;
-    if (wanted && !persisted) timerChanged.emit(null);
-    return result;
+    if (!result.persisted) {
+      timerChanged.emit(REFUSED_TIMER);
+      return;
+    }
+    if (wanted && !result.data.activeTimer) timerChanged.emit(DROPPED_TIMER);
   };
 
   return { ...combined, timerSync };
