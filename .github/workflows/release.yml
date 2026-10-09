@@ -74,7 +74,7 @@ jobs:
       - name: Enforce size budget (< 20 MB per dmg)
         run: |
           set -euo pipefail
-          DMGS=$(find packages/tauri-app/src-tauri/target/*/bundle/dmg -name '*.dmg' | sort)
+          DMGS=$(find packages/tauri-app/src-tauri/target/*/release/bundle/dmg -name '*.dmg' | sort)
           if [ -z "$DMGS" ]; then
             echo "::error::没有找到任何 dmg 产物"; exit 1
           fi
@@ -95,13 +95,13 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            packages/tauri-app/src-tauri/target/*/bundle/dmg/*.dmg
+            packages/tauri-app/src-tauri/target/*/release/bundle/dmg/*.dmg
 
       - name: Upload workflow artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: tiny-schedule-macos-${{ github.ref_name }}
-          path: packages/tauri-app/src-tauri/target/*/bundle/dmg/*.dmg
+          path: packages/tauri-app/src-tauri/target/*/release/bundle/dmg/*.dmg
           if-no-files-found: warn
           retention-days: 30
