@@ -36,3 +36,46 @@ jobs:
 
       - name: Build
         run: bun run build
+
+  # The Rust host had no CI at all until now: it only compiled as a side effect
+  # of the release workflow, so a broken host reached main and only surfaced
+  # when someone pushed a tag. This is the check, not the build — `cargo check`
+  # type-checks without emitting a binary, and nothing here runs `tauri build`,
+  # which is what produces the two dmgs and the 20-minute compile.
+  #
+  # macOS rather than ubuntu, and not for speed: Tauri's Linux backend needs
+  # webkit2gtk, librsvg and friends that the runner does not ship, and this app
+  # only ships a macOS bundle anyway. Installing a Linux desktop stack to
+  # compile a Mac application would be checking a configuration nobody runs.
+  rust:
+    name: Rust host (check only)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # rustfmt and clippy ship as components, not with the toolchain.
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/tauri-app/src-tauri
+
+      # Ordered so each step reuses the previous one's artefacts. `fmt` first
+      # because it is the only one that does not compile at all, which makes a
+      # formatting failure visible in seconds instead of after a cold build.
+      - name: Format
+        run: cargo fmt --manifest-path packages/tauri-app/src-tauri/Cargo.toml --all -- --check
+
+      # --all-targets so the tests and benches are type-checked too; a test
+      # that references a renamed helper should fail here rather than in `test`.
+      - name: Compile
+        run: cargo check --manifest-path packages/tauri-app/src-tauri/Cargo.toml --all-targets
+
+      - name: Lint
+        run: cargo clippy --manifest-path packages/tauri-app/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --manifest-path packages/tauri-app/src-tauri/Cargo.toml
