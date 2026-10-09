@@ -603,6 +603,53 @@ export function dropStaleTiming(data: AppData): AppData {
   return { ...data, activeTimer: null };
 }
 
+export interface ActiveTimerSettlement {
+  data: AppData;
+  /** Ms recorded by this settlement; 0 when the timer was only dropped. */
+  settledMs: number;
+}
+
+/**
+ * Bill the running session into its task and clear the timer, in one immutable
+ * transition. The quit path (`settleForQuit` in the host process) exists in
+ * exactly this shape.
+ *
+ * Single transition, single write, on purpose. Settling and clearing are two
+ * separate mutations of the same singleton, and ADR 0002 rejected the
+ * settle-then-clear pair for a concrete reason: an interruption between them
+ * leaves "the task is settled and `activeTimer` still points at it" on disk,
+ * which recovery cannot distinguish from "this write was interrupted after the
+ * task was recorded" — guessing wrong bills the session twice. Doing both in
+ * one `store.update` removes the window rather than trying to detect it.
+ *
+ * A done task is cleared without recording, matching the original: its time may
+ * already have been settled, and settling again would bill it twice. So is a
+ * timer whose task no longer exists — there is nothing to bill it onto.
+ */
+export function settleActiveTimer(
+  data: AppData,
+  timer: ActiveTimer | null,
+  now: number,
+): ActiveTimerSettlement {
+  if (!timer) return { data, settledMs: 0 };
+  const task = data.tasks[timer.taskId];
+  if (!task || task.isDone) {
+    return { data: { ...data, activeTimer: null }, settledMs: 0 };
+  }
+  const settlement = settleTimer(timer, now);
+  if (settlement.ms <= 0) {
+    return { data: { ...data, activeTimer: null }, settledMs: 0 };
+  }
+  return {
+    data: {
+      ...data,
+      tasks: { ...data.tasks, [task.id]: applySettlement(task, settlement) },
+      activeTimer: null,
+    },
+    settledMs: settlement.ms,
+  };
+}
+
 /**
  * Whether two timers record the same session state.
  *

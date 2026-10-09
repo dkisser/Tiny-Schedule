@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { AppData } from '../src/domain/appData';
+import { emptyAppData } from '../src/domain/appData';
 import type { ActiveTimer, Task } from '../src/domain/task';
 import {
   addDays,
@@ -18,6 +20,7 @@ import {
   POMODORO_FOCUS_MS,
   pauseTimer,
   resumeTimer,
+  settleActiveTimer,
   settleTimer,
   startPomodoroFocus,
   startTimer,
@@ -576,5 +579,125 @@ describe('pomodoro phase alternation (Bug 2 regression)', () => {
     };
     const next = startNextSet(afterSetComplete, T0 + 4 * POMODORO_FOCUS_MS + 3 * POMODORO_BREAK_MS);
     expect(next.phaseDurationMs).toBe(POMODORO_FOCUS_MS);
+  });
+});
+
+describe('settleActiveTimer', () => {
+  function makeTask(id: string, overrides: Partial<Task> = {}): Task {
+    return {
+      id,
+      title: 'T',
+      projectId: 'p',
+      tagIds: [],
+      subTaskIds: [],
+      isDone: false,
+      timeEstimate: 0,
+      timeSpent: 0,
+      timeSpentOnDay: {},
+      timeEntries: [],
+      notes: '',
+      created: 0,
+      ...overrides,
+    };
+  }
+
+  function withTask(task: Task, activeTimer: ActiveTimer | null): AppData {
+    return { ...emptyAppData(), tasks: { [task.id]: task }, activeTimer } as AppData;
+  }
+
+  test('bills the session and clears the timer in one transition', () => {
+    const timer = startTimer('task1', T0);
+    const data = withTask(makeTask('task1'), timer);
+
+    const { data: next, settledMs } = settleActiveTimer(data, timer, T0 + 120_000);
+
+    expect(settledMs).toBe(120_000);
+    expect(next.tasks.task1?.timeSpent).toBe(120_000);
+    expect(next.tasks.task1?.timeEntries).toHaveLength(1);
+    // The two move together — there is no intermediate state in which the task
+    // is settled and the timer still points at it, which is the whole reason
+    // this is one function rather than a settle followed by a clear.
+    expect(next.activeTimer).toBeNull();
+  });
+
+  test('does not mutate its input', () => {
+    const timer = startTimer('task1', T0);
+    const data = withTask(makeTask('task1'), timer);
+
+    settleActiveTimer(data, timer, T0 + 120_000);
+
+    expect(data.activeTimer).toBe(timer);
+    expect(data.tasks.task1?.timeSpent).toBe(0);
+  });
+
+  test('clears without recording for an already-done task', () => {
+    // Its time may already have been settled by the completion write; settling
+    // again would bill the same session twice.
+    const timer = startTimer('task1', T0);
+    const data = withTask(makeTask('task1', { isDone: true, timeSpent: 90_000 }), timer);
+
+    const { data: next, settledMs } = settleActiveTimer(data, timer, T0 + 120_000);
+
+    expect(settledMs).toBe(0);
+    expect(next.tasks.task1?.timeSpent).toBe(90_000);
+    expect(next.activeTimer).toBeNull();
+  });
+
+  test('clears without recording when the task no longer exists', () => {
+    const timer = startTimer('gone', T0);
+    const data = withTask(makeTask('task1'), timer);
+
+    const { data: next, settledMs } = settleActiveTimer(data, timer, T0 + 120_000);
+
+    expect(settledMs).toBe(0);
+    expect(next.activeTimer).toBeNull();
+  });
+
+  test('a zero-length session clears the timer without adding an entry', () => {
+    // Nothing worth recording, but the timer still ends — otherwise a done
+    // task could be left holding one.
+    const timer = startTimer('task1', T0);
+    const data = withTask(makeTask('task1'), timer);
+
+    const { data: next, settledMs } = settleActiveTimer(data, timer, T0);
+
+    expect(settledMs).toBe(0);
+    expect(next.tasks.task1?.timeEntries).toHaveLength(0);
+    expect(next.activeTimer).toBeNull();
+  });
+
+  test('is a no-op with no timer, returning the same reference', () => {
+    const data = withTask(makeTask('task1'), null);
+    const { data: next, settledMs } = settleActiveTimer(data, null, T0);
+
+    expect(next).toBe(data);
+    expect(settledMs).toBe(0);
+  });
+
+  test('settles a paused timer at its own pausedAt, not at now', () => {
+    // A pause the user set earlier must not be advanced to the quit instant,
+    // or stopping the app would bill time they were not working.
+    const timer = pauseTimer(startTimer('task1', T0), T0 + 60_000);
+    const data = withTask(makeTask('task1'), timer);
+
+    const { data: next, settledMs } = settleActiveTimer(data, timer, T0 + 600_000);
+
+    expect(settledMs).toBe(60_000);
+    expect(next.tasks.task1?.timeEntries[0]?.end).toBe(T0 + 60_000);
+  });
+
+  test('banks only focus time for a pomodoro session in a break phase', () => {
+    // Break phases are excluded from a pomodoro settlement, the same rule
+    // `settleTimer` applies everywhere else. The timer has to actually be *in*
+    // a break for that to be visible — a session that never left focus
+    // legitimately bills its whole span.
+    const focus = startPomodoroFocus('task1', T0);
+    const { next: inBreak } = advancePomodoroPhase(focus, T0 + POMODORO_FOCUS_MS);
+    const data = withTask(makeTask('task1'), inBreak);
+    const quitDuringBreak = T0 + POMODORO_FOCUS_MS + 2 * 60_000;
+
+    const { settledMs } = settleActiveTimer(data, inBreak, quitDuringBreak);
+
+    expect(settledMs).toBe(POMODORO_FOCUS_MS);
   });
 });
