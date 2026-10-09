@@ -297,12 +297,22 @@ describe('a refused write must not read as success', () => {
 });
 
 describe('taskService.syncTimer — the 30s heartbeat', () => {
-  /** A store that counts writes, so "did this reach the disk" is observable. */
-  function countingService(timer: AppData['activeTimer']) {
+  /**
+   * A store that counts writes, so "did this reach the disk" is observable.
+   *
+   * `isWritable` is part of the contract the service reads, and a double that
+   * omitted it reported undefined — i.e. not writable — which silently
+   * disabled the no-op short-circuit these tests exist to exercise.
+   */
+  function countingService(
+    timer: AppData['activeTimer'],
+    tasks: Record<string, Task> = { t1: task() },
+  ) {
     let writes = 0;
-    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: timer };
+    const data: AppData = { ...emptyAppData(), tasks, activeTimer: timer };
     const store = {
       get: () => data,
+      isWritable: true,
       update: (fn: (c: AppData) => AppData) => {
         writes += 1;
         Object.assign(data, fn(data));
@@ -332,8 +342,9 @@ describe('taskService.syncTimer — the 30s heartbeat', () => {
     // completed after the timer started, so the heartbeat must sweep it even
     // though nothing about the timer itself changed. Testing equality first
     // left a done task being timed indefinitely.
-    const { service, writes, data } = countingService(timerAt(NOW, 1_000));
-    data.tasks.t1 = { ...task({ isDone: true }) };
+    const { service, writes, data } = countingService(timerAt(NOW, 1_000), {
+      t1: task({ isDone: true }),
+    });
     const r = service.syncTimer({ ...timerAt(NOW, 1_000) });
     expect(r.dropped).toBe(true);
     expect(data.activeTimer).toBeNull();
@@ -361,6 +372,41 @@ describe('taskService.syncTimer — the 30s heartbeat', () => {
       service.syncTimer(changed);
       expect(writes()).toBe(1);
     }
+  });
+
+  test('an unchanged timer still attempts recovery on a refused store', () => {
+    // update() is what re-reads data.json and clears the refusal latch. The
+    // equality short-circuit returns before it, so a store that had latched on
+    // an unreadable file — and whose fallback happened to carry the very timer
+    // the renderer is sending — matched on every heartbeat, never noticed the
+    // user had repaired the file, and stayed read-only for the whole session.
+    // The deferred startup migrations never ran either.
+    let attempts = 0;
+    const timer = timerAt(NOW, 1_000);
+    const data: AppData = { ...emptyAppData(), tasks: { t1: task() }, activeTimer: timer };
+    let writable = false;
+    const store = {
+      get: () => data,
+      get isWritable() {
+        return writable;
+      },
+      update: (fn: (c: AppData) => AppData) => {
+        attempts += 1;
+        if (!writable) return { data, persisted: false };
+        Object.assign(data, fn(data));
+        return { data: AppDataSchema.parse(data) as AppData, persisted: true };
+      },
+    } as unknown as DataStore;
+    const service = createTaskService({ store, logger });
+
+    service.syncTimer({ ...timer });
+    expect(attempts).toBe(1);
+
+    // Once the store is writable again the no-op short-circuit is safe to
+    // resume: the latch is clear, so nothing depends on update() running.
+    writable = true;
+    service.syncTimer({ ...timer });
+    expect(attempts).toBe(1);
   });
 
   test('a genuinely changed timer is still written', () => {

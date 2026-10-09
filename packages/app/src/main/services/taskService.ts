@@ -204,7 +204,14 @@ export function createTaskService({ store, logger }: ServiceDeps) {
       // indefinitely, which is the one thing this port exists to prevent.
       // dropStaleTiming returns the same reference when nothing was stale.
       const storedIsStale = dropStaleTiming(current).activeTimer !== current.activeTimer;
-      if (!storedIsStale && sameTimer(current.activeTimer, timer)) {
+      // Only short-circuit on a *writable* store. update() is what attempts
+      // recovery, so returning early skipped it: a store that had latched on an
+      // unreadable data.json — and whose fallback happened to carry the very
+      // timer the renderer is sending — would match here on every heartbeat,
+      // never re-read the file the user had repaired, and stay latched for the
+      // rest of the session. The deferred migrations never ran, and every other
+      // write stayed refused.
+      if (!storedIsStale && store.isWritable && sameTimer(current.activeTimer, timer)) {
         return { data: current, dropped: false, persisted: true };
       }
       const { data: next, persisted } = store.update((d) =>

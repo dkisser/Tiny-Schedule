@@ -288,7 +288,7 @@ export class DataStore {
     }
     // Cast: zod infers z.unknown() fields as optional in the parsed output type.
     const validated = AppDataSchema.parse(data) as AppData;
-    if (existsSync(this.filePath) && this.rotationIsSafe(validated)) {
+    if (existsSync(this.filePath) && this.rotationIsSafe()) {
       this.rotateBackup();
     }
     const tmp = `${this.filePath}.tmp`;
@@ -313,7 +313,12 @@ export class DataStore {
     try {
       copyFileSync(this.filePath, tmp);
       renameSync(tmp, this.backupPath);
-      this.cachedBackupRecords = null;
+      // The backup now holds exactly what this.cache held a moment ago, so the
+      // count is known without re-reading it. Nulling it instead meant the
+      // cache filled and was cleared on every save that rotates — which is
+      // the common path — so it only ever helped when rotation was suppressed,
+      // the exact case it was not written for.
+      this.cachedBackupRecords = this.cache ? countRecords(this.cache) : 0;
     } catch (err) {
       // A backup that cannot be rotated is not a reason to drop the user's
       // write: data.json is still the newer copy and is written atomically.
@@ -350,8 +355,14 @@ export class DataStore {
    * richer copy is the right side to err on — the cost is a stale backup, the
    * alternative is an unrecoverable one.
    */
-  private rotationIsSafe(next: AppData): boolean {
-    const outgoing = countRecords(next);
+  private rotationIsSafe(): boolean {
+    // The dataset *on disk* — this.cache — not the one about to replace it.
+    // rotateBackup copies data.json, so it is this.cache that becomes the
+    // backup; `data` is what would be written afterwards and never reaches the
+    // backup at all. Comparing the incoming dataset instead let an import of
+    // 200 tasks pass the check and then demote a 2-task file over a
+    // 10-task backup — the generation this guard exists to protect, gone.
+    const outgoing = this.cache ? countRecords(this.cache) : 0;
     const backedUp = this.backupRecordCount();
     // -1 means there is no readable backup, so there is nothing to protect.
     if (backedUp < 0 || outgoing >= backedUp) return true;

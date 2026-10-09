@@ -385,9 +385,12 @@ describe('DataStore — backup rotation', () => {
     expect(Object.keys(new DataStore(dir, logger).load().tasks)).toEqual(['t3']);
   });
 
-  test('the backup rotates once the library is rebuilt to at least its size', () => {
-    // The other half of the property: without this the guard would freeze the
+  test('rotation resumes once the dataset on disk is itself as rich as the backup', () => {
+    // The other half of the property: without it the guard would freeze the
     // backup forever, which was the objection that killed the original.
+    // Rotation promotes the file currently on disk, so the dataset has to reach
+    // the backup's size *and then be written once more* before it can be
+    // promoted in turn.
     const dir = tmpDir();
     const store = withTasks(dir);
     store.update((d) => ({ ...d, tasks: {} }));
@@ -395,14 +398,16 @@ describe('DataStore — backup rotation', () => {
       ...d,
       tasks: { ...d.tasks, t3: { ...emptyTask(), id: 't3' }, t4: { ...emptyTask(), id: 't4' } },
     }));
-    // Equal to the backup's two records, so rotation is allowed again.
-    // Rotation copies the file currently on disk — the empty dataset the
-    // previous write left there — so the backup is empty again and the cycle
-    // can start over.
+    // Still blocked: what is on disk is the empty dataset.
     expect(
       Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
-    ).toEqual([]);
-    expect(Object.keys(new DataStore(dir, logger).load().tasks)).toEqual(['t3', 't4']);
+    ).toEqual(['t1', 't2']);
+
+    // One more write, with the on-disk dataset now holding two records.
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'again' } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toEqual(['t3', 't4']);
   });
 
   test('an emptied library with no readable backup still rotates', () => {
@@ -443,6 +448,58 @@ describe('DataStore — backup rotation', () => {
     expect(
       Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
     ).toEqual(['t3', 't4']);
+  });
+
+  test('the guard measures the dataset the backup will hold, not the one replacing it', () => {
+    // rotateBackup copies data.json, so the dataset that becomes the backup is
+    // the one *currently on disk*. Comparing the incoming dataset instead let
+    // an import pass the check — 200 tasks beats a 10-task backup — and then
+    // demote the 2-task file that was actually on disk over that backup. The
+    // generation the guard exists to protect, gone.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    const many = (prefix: string, n: number) =>
+      Object.fromEntries(
+        Array.from({ length: n }, (_, i) => [
+          `${prefix}${i}`,
+          { ...emptyTask(), id: `${prefix}${i}` },
+        ]),
+      );
+    store.update((d) => ({ ...d, tasks: many('t', 10) }));
+    store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'rotate' } }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toHaveLength(10);
+
+    // Shrink to 2: blocked, backup keeps 10.
+    store.update((d) => ({ ...d, tasks: many('s', 2) }));
+    expect(
+      Object.keys(JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8')).tasks),
+    ).toHaveLength(10);
+
+    // Import 200. The incoming dataset dwarfs the backup and passes the check —
+    // but the file being rotated is the 2-task one, which is far poorer.
+    store.update((d) => ({ ...d, tasks: many('i', 200) }));
+    const backup = JSON.parse(readFileSync(join(dir, 'data.backup.json'), 'utf8'));
+    expect(Object.keys(backup.tasks)).toHaveLength(10);
+    expect(new DataStore(dir, logger).load().tasks.i0).toBeDefined();
+  });
+
+  test('a rotation updates the cached count instead of discarding it', () => {
+    // Nulling the cache on every rotation meant the common path filled and
+    // cleared it on the same save, so the cache only ever helped when rotation
+    // was suppressed — the case it was not written for.
+    const dir = tmpDir();
+    const store = new DataStore(dir, logger);
+    store.load();
+    store.update((d) => ({
+      ...d,
+      tasks: { t1: { ...emptyTask(), id: 't1' }, t2: { ...emptyTask(), id: 't2' } },
+    }));
+    store.update((d) => ({ ...d, tasks: { t1: { ...emptyTask(), id: 't1' } } }));
+    const cache = (store as unknown as { cachedBackupRecords: number | null }).cachedBackupRecords;
+    expect(cache).toBe(2);
   });
 
   test('the backup is rotated through a temp file, never in place', () => {
