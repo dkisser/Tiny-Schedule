@@ -49,12 +49,21 @@ describe('isMacOS', () => {
     expect(isMacOS()).toBe(false);
   });
 
-  test('does not consult node process.platform', async () => {
+  test('does not consult node process.platform', () => {
     // The regression that shipped: the old implementation keyed off
-    // `process.platform`, which in a WKWebView is absent. Asserting the answer
-    // comes from the host alone means putting the two in conflict.
+    // `process.platform`, which in a WKWebView is absent.
+    //
+    // The conflict between host and platform is *constructed*, never assumed.
+    // Asserting `process.platform === 'darwin'` here would say nothing about
+    // this code — it would only make the test unrunnable on any non-Mac
+    // machine, which is where it failed in CI. Instead both directions are
+    // driven from the host stub: a Mac running the tests must still answer
+    // false when the host says windows, and Linux must still answer true when
+    // it says macos. Passing on either platform then means the host decides.
     osTypeValue = 'windows';
-    expect(process.platform).toBe('darwin');
     expect(isMacOS()).toBe(false);
+
+    osTypeValue = 'macos';
+    expect(isMacOS()).toBe(true);
   });
 });
