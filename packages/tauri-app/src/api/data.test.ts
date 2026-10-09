@@ -61,7 +61,7 @@ async function landed<R extends { ok: true; data: AppData } | { ok: false; error
 }
 
 describe('data api slice', () => {
-  test('implements exactly the 17 data invokes and nothing else', async () => {
+  test('implements exactly the 30 data invokes and nothing else', async () => {
     const { api } = await setup();
     for (const key of [
       'dataLoad',
@@ -69,8 +69,19 @@ describe('data api slice', () => {
       'taskDelete',
       'followUpUpsert',
       'followUpDelete',
+      'followUpResolve',
+      'followUpReopen',
       'ideaUpsert',
       'ideaDelete',
+      'ideaComplete',
+      'ideaDiscard',
+      'ideaReopen',
+      'ideaConvertToTask',
+      'ideaUpgradeToProject',
+      'ideaAddEntry',
+      'ideaDeleteEntry',
+      'ideaUpdateEntry',
+      'ideaCloseWithVerdict',
       'orderSet',
       'projectCreate',
       'projectUpdate',
@@ -81,10 +92,12 @@ describe('data api slice', () => {
       'settingsUpdate',
       'finishDay',
       'timerSync',
+      'timingStop',
+      'storeWritable',
     ]) {
       expect(typeof api[key as keyof typeof api]).toBe('function');
     }
-    expect(Object.keys(api).sort()).toHaveLength(17);
+    expect(Object.keys(api).sort()).toHaveLength(30);
   });
 
   test('dataLoad returns masked data — no apiKeyEncrypted reaches the renderer', async () => {
@@ -150,9 +163,7 @@ describe('data api slice', () => {
     } as never);
 
     const res = await landed(
-      api.taskUpsert(
-        task('t1', { isDone: true, timeSpent: 4000, timeEstimate: 60_000 }) as never,
-      ),
+      api.taskUpsert(task('t1', { isDone: true, timeSpent: 4000, timeEstimate: 60_000 }) as never),
     );
 
     expect(res.settledMs).toBeGreaterThan(0);
@@ -165,7 +176,9 @@ describe('data api slice', () => {
     const { api } = await setup();
     await api.taskUpsert(task('t1', { isDone: true }) as never);
 
-    const res = await landed(api.taskUpsert(task('t1', { isDone: true, title: 'renamed' }) as never));
+    const res = await landed(
+      api.taskUpsert(task('t1', { isDone: true, title: 'renamed' }) as never),
+    );
     expect(res.settledMs).toBe(0);
   });
 

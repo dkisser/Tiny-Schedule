@@ -124,10 +124,7 @@ describe('DataStore', () => {
     // the *backup* into place (tmp + rename), so "the first rename" is no
     // longer the primary's once rotation exists.
     const writeIndex = fs.calls.indexOf(`writeText:${dataPath()}.tmp`);
-    const renameIndex = fs.calls.indexOf(
-      `rename:${dataPath()}.tmp->${dataPath()}`,
-      writeIndex + 1,
-    );
+    const renameIndex = fs.calls.indexOf(`rename:${dataPath()}.tmp->${dataPath()}`, writeIndex + 1);
     expect(writeIndex).toBeGreaterThanOrEqual(0);
     expect(renameIndex).toBeGreaterThan(writeIndex);
     // The tmp file must not survive a successful save.
@@ -181,8 +178,12 @@ describe('DataStore', () => {
   test('falls back to the newest backup when data.json is corrupt', async () => {
     const fs = new MemoryFs({
       [dataPath()]: '{ this is not json',
-      [backupPath(1)]: JSON.stringify(seedData({ tasks: { t1: makeTask('t1', { title: 'gen 1' }) } })),
-      [backupPath(2)]: JSON.stringify(seedData({ tasks: { t1: makeTask('t1', { title: 'gen 2' }) } })),
+      [backupPath(1)]: JSON.stringify(
+        seedData({ tasks: { t1: makeTask('t1', { title: 'gen 1' }) } }),
+      ),
+      [backupPath(2)]: JSON.stringify(
+        seedData({ tasks: { t1: makeTask('t1', { title: 'gen 2' }) } }),
+      ),
     });
 
     const loaded = await (await openStore(fs)).load();
@@ -325,7 +326,10 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     const fs = new MemoryFs({
       [dataPath()]: JSON.stringify({
         ...full(),
-        ideas: { ...full().ideas, i2: { id: 'i2', title: '未来状态', notes: '', createdAt: 1, status: 'archived' } },
+        ideas: {
+          ...full().ideas,
+          i2: { id: 'i2', title: '未来状态', notes: '', createdAt: 1, status: 'archived' },
+        },
       }),
     });
 
@@ -345,7 +349,10 @@ describe('DataStore — a bad record must not cost the whole library', () => {
     const store = await openStore(fs);
     await store.load();
 
-    const result = await store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'me' } }));
+    const result = await store.update((d) => ({
+      ...d,
+      settings: { ...d.settings, userName: 'me' },
+    }));
 
     // Assert the value reached the disk, not merely that update() did not
     // throw: a store that latched on the quarantine would refuse every write

@@ -7,7 +7,14 @@ import {
   type FollowUp,
   type FollowUpEdit,
   type Idea,
+  type IdeaAddEntryReq,
+  type IdeaCloseWithVerdictReq,
+  type IdeaConvertToTaskReq,
+  type IdeaDeleteEntryReq,
   type IdeaEdit,
+  type IdeaIdReq,
+  type IdeaUpdateEntryReq,
+  type IdeaUpgradeToProjectReq,
   INBOX_PROJECT_ID,
   IpcInvokeContract,
   type IpcInvokeFn,
@@ -16,10 +23,16 @@ import {
   maskDataForRenderer,
   PROJECT_TITLE_MAX_LENGTH,
   type RendererApi,
+  type TimingStopReq,
   upsertTaskWithTiming,
 } from '@tiny-schedule/shared';
+import { consoleLogger } from '@/ai/logger';
 import type { DataStore, WriteResult } from '@/bridge/dataStore';
+import { createFollowUpService } from '@/bridge/followUpService';
+import { createIdeaService } from '@/bridge/ideaService';
 import { encryptKey } from '@/bridge/keys';
+import { readStoreWritable } from '@/bridge/storeWritableBus';
+import { createTaskService } from '@/bridge/taskService';
 
 /**
  * The data slice of the renderer API: the 17 CRUD invokes that the Electron
@@ -61,8 +74,19 @@ export type DataInvokeKey = Extract<
   | 'taskDelete'
   | 'followUpUpsert'
   | 'followUpDelete'
+  | 'followUpResolve'
+  | 'followUpReopen'
   | 'ideaUpsert'
   | 'ideaDelete'
+  | 'ideaComplete'
+  | 'ideaDiscard'
+  | 'ideaReopen'
+  | 'ideaConvertToTask'
+  | 'ideaUpgradeToProject'
+  | 'ideaAddEntry'
+  | 'ideaDeleteEntry'
+  | 'ideaUpdateEntry'
+  | 'ideaCloseWithVerdict'
   | 'orderSet'
   | 'projectCreate'
   | 'projectUpdate'
@@ -73,6 +97,8 @@ export type DataInvokeKey = Extract<
   | 'settingsUpdate'
   | 'finishDay'
   | 'timerSync'
+  | 'timingStop'
+  | 'storeWritable'
 >;
 
 type DataInvokeKeyCandidate = IpcInvokeKey;
@@ -109,8 +135,42 @@ export function createDataApi(store: DataStore): DataApi {
    * dropped" combination for a caller to get wrong. That is the whole point of
    * the discriminated union over the old `persisted` boolean.
    */
-  const written = (data: AppData): { ok: true; data: AppData } => ({ ok: true, data: masked(data) });
+  const written = (data: AppData): { ok: true; data: AppData } => ({
+    ok: true,
+    data: masked(data),
+  });
   const refused = { ok: false, error: 'WRITE_REFUSED' } as const;
+
+  /**
+   * Map a service result onto the contract envelope, collapsing the write's
+   * `persisted` flag into the union so a caller has exactly one thing to check.
+   *
+   * The services report `persisted` as a separate boolean because they are the
+   * layer that knows whether the store accepted the mutation; the contract
+   * folds it into `ok` because that is what a caller can act on. Keeping both
+   * shapes is deliberate — but only at this boundary. Past it, no caller ever
+   * sees a result where `ok` is true and nothing was written.
+   *
+   * A domain rejection (`IDEA_NOT_REOPENABLE`, `FOLLOW_UP_NOT_FOUND`, …) passes
+   * through untouched: the caller's existing `if (!result.ok)` branch already
+   * handles it, and it arrives with no dataset because nothing changed.
+   */
+  const asCommand = async <
+    R extends { ok: true; data: AppData; persisted: boolean },
+    E extends string,
+  >(
+    result: Promise<R | { ok: false; error: E }>,
+  ): Promise<Omit<R, 'persisted'> | { ok: false; error: E | 'WRITE_REFUSED' }> => {
+    const r = await result;
+    if (!r.ok) return r;
+    if (!r.persisted) return refused;
+    const { persisted: _dropped, ...rest } = r;
+    return { ...rest, data: masked(rest.data) };
+  };
+
+  const ideas = createIdeaService({ store });
+  const followUps = createFollowUpService({ store, logger: consoleLogger });
+  const tasks = createTaskService({ store });
 
   const handlers: Record<DataInvokeKey, (raw: unknown) => Promise<unknown>> = {
     dataLoad: async () => masked(await store.get()),
@@ -223,6 +283,110 @@ export function createDataApi(store: DataStore): DataApi {
       });
       return masked(result.data);
     },
+
+    /**
+     * The idea command set — nine intent commands, each of which is the only
+     * way that transition can happen (ADR-0003). The service owns the status
+     * guards; these handlers only adapt the wire shape.
+     */
+    ideaComplete: async (raw) => {
+      const { id } = parse('ideaComplete', raw) as IdeaIdReq;
+      return asCommand(ideas.complete(id));
+    },
+
+    ideaDiscard: async (raw) => {
+      const { id } = parse('ideaDiscard', raw) as IdeaIdReq;
+      return asCommand(ideas.discard(id));
+    },
+
+    ideaReopen: async (raw) => {
+      const { id } = parse('ideaReopen', raw) as IdeaIdReq;
+      return asCommand(ideas.reopen(id));
+    },
+
+    ideaConvertToTask: async (raw) => {
+      const { id, title } = parse('ideaConvertToTask', raw) as IdeaConvertToTaskReq;
+      const result = await ideas.convertToTask(id, title);
+      if (!result.ok) return result;
+      if (!result.persisted) return refused;
+      const { persisted: _dropped, ...rest } = result;
+      // The task id rides back so the renderer can highlight or navigate to it
+      // rather than searching the list for whatever is new.
+      return { ...rest, data: masked(rest.data), taskId: rest.taskId };
+    },
+
+    ideaUpgradeToProject: async (raw) => {
+      const req = parse('ideaUpgradeToProject', raw) as IdeaUpgradeToProjectReq;
+      const result = await ideas.upgradeToProject(req.id, {
+        title: req.title,
+        ...(req.validationGoal !== undefined ? { validationGoal: req.validationGoal } : {}),
+      });
+      if (!result.ok) return result;
+      if (!result.persisted) return refused;
+      const { persisted: _dropped, ...rest } = result;
+      return { ...rest, data: masked(rest.data), projectId: rest.projectId };
+    },
+
+    ideaAddEntry: async (raw) => {
+      const { id, text } = parse('ideaAddEntry', raw) as IdeaAddEntryReq;
+      return asCommand(ideas.addEntry(id, text));
+    },
+
+    ideaUpdateEntry: async (raw) => {
+      const { id, entryId, text } = parse('ideaUpdateEntry', raw) as IdeaUpdateEntryReq;
+      return asCommand(ideas.updateEntry(id, entryId, text));
+    },
+
+    ideaDeleteEntry: async (raw) => {
+      const { id, entryId } = parse('ideaDeleteEntry', raw) as IdeaDeleteEntryReq;
+      return asCommand(ideas.deleteEntry(id, entryId));
+    },
+
+    ideaCloseWithVerdict: async (raw) => {
+      const req = parse('ideaCloseWithVerdict', raw) as IdeaCloseWithVerdictReq;
+      return asCommand(ideas.closeWithVerdict(req.id, req.result, req.text));
+    },
+
+    /**
+     * Resolve / reopen are commands rather than field edits: they move the
+     * state machine, so they cannot be expressed by writing `isResolved` back.
+     */
+    followUpResolve: async (raw) => {
+      const { id } = parse('followUpResolve', raw) as { id: string };
+      return asCommand(followUps.resolve(id));
+    },
+
+    followUpReopen: async (raw) => {
+      const { id } = parse('followUpReopen', raw) as { id: string };
+      return asCommand(followUps.reopen(id));
+    },
+
+    /**
+     * Stop timing, and settle the session it was running.
+     *
+     * The three branches are not interchangeable, which is why this returns
+     * the service's envelope rather than flattening it: WRITE_REFUSED means
+     * nothing happened and the caller must keep its clock, while a domain
+     * rejection means the host DID drop the timer and persisted that — so the
+     * dataset has to come back for the renderer to converge on.
+     */
+    timingStop: async (raw) => {
+      const { taskId } = parse('timingStop', raw) as TimingStopReq;
+      const result = await tasks.stopTiming(Date.now(), taskId);
+      if (result.ok) return { ...written(result.data), settledMs: result.settledMs };
+      // WRITE_REFUSED carries no dataset — there is nothing new to converge on.
+      if (result.error === 'WRITE_REFUSED') return result;
+      return { ...result, data: masked(result.data) };
+    },
+
+    /**
+     * The read-only mode as a pull (ADR-0004).
+     *
+     * Push-only was not enough: the latch is set during startup, before the
+     * renderer exists, so a store that has been unwritable since launch would
+     * otherwise look writable to a window that mounts afterwards.
+     */
+    storeWritable: async () => readStoreWritable(store),
 
     orderSet: async (raw) => {
       const { viewKey, ids } = parse('orderSet', raw) as { viewKey: string; ids: string[] };

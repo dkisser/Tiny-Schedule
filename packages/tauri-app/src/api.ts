@@ -15,6 +15,7 @@ import { createSystemApi, type SystemApiDeps } from '@/api/system';
 import { createTimerApi } from '@/api/timer';
 import { createWindowApi } from '@/api/window';
 import type { DataStore } from '@/bridge/dataStore';
+import { createStoreWritableBus } from '@/bridge/storeWritableBus';
 
 /**
  * The renderer-facing API: every one of the 35 invokes and 5 subscriptions in
@@ -93,6 +94,7 @@ function createTimerChangedBus(): {
 export function createApi(options: CreateApiOptions): RendererApi {
   const { store } = options;
   const timerChanged = createTimerChangedBus();
+  const storeWritable = createStoreWritableBus(store);
   const data = createDataApi(store);
   const ai = createAiApi({
     store,
@@ -133,6 +135,11 @@ export function createApi(options: CreateApiOptions): RendererApi {
     // Owned here rather than by the timer slice: the slice's version knew only
     // the Rust host channel, which no longer exists. See above.
     onTimerChanged: timerChanged.subscribe,
+    // The store's read-only mode as a push (ADR-0004). The pull half is
+    // `storeWritable` in the data slice; this covers transitions that happen
+    // while the window is open. The bus caches the current mode, so a renderer
+    // that mounts after a startup latch still learns the store is unwritable.
+    onStoreWritable: storeWritable.subscribe,
   } as unknown as RendererApi;
 
   /**
@@ -191,11 +198,12 @@ export function api(): RendererApi {
  */
 export const CONTRACT_INVOKE_KEYS = Object.keys(IpcInvokeContract) as IpcInvokeKey[];
 
-/** The 5 `on*` methods of {@link RendererApi}, by name. */
+/** The 6 `on*` methods of {@link RendererApi}, by name. */
 export const CONTRACT_SUBSCRIPTION_KEYS = [
   'onAiEvent',
   'onChatEvent',
   'onNewTask',
   'onUpdateAvailable',
   'onTimerChanged',
+  'onStoreWritable',
 ] as const satisfies ReadonlyArray<keyof RendererApi>;

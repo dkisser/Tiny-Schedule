@@ -41,11 +41,13 @@ async function buildApi(): Promise<RendererApi> {
 const STUB_PATTERN = /not implemented/i;
 
 describe('contract completeness', () => {
-  test('the contract is 35 invokes and 5 subscriptions', () => {
+  test('the contract is 48 invokes and 6 subscriptions', () => {
     // Pinned so a change to packages/shared cannot quietly shrink the surface
-    // this file claims to cover.
-    expect(CONTRACT_INVOKE_KEYS).toHaveLength(35);
-    expect(CONTRACT_SUBSCRIPTION_KEYS).toHaveLength(5);
+    // this file claims to cover. Both numbers moved when main added the idea
+    // and follow-up command sets, timingStop, and the store-mode pull;
+    // onStoreWritable is the sixth subscription.
+    expect(CONTRACT_INVOKE_KEYS).toHaveLength(48);
+    expect(CONTRACT_SUBSCRIPTION_KEYS).toHaveLength(6);
     expect(CONTRACT_INVOKE_KEYS).toEqual(Object.keys(IpcInvokeContract) as IpcInvokeKey[]);
   });
 

@@ -17,7 +17,7 @@
 // `focus_main` is intentionally never invoked from TS: Rust calls it internally
 // from the menu and window-close paths. It is listed in ALLOW_UNREACHABLE with
 // the reason, so the exemption is auditable rather than an omission.
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -73,7 +73,9 @@ function invokedCommands(): Map<string, string[]> {
   for (const file of collectFiles(TS_SCAN_DIR)) {
     const lines = readFileSync(file, 'utf8').split('\n');
     for (const [i, line] of lines.entries()) {
-      for (const match of line.matchAll(/\binvoke[A-Za-z]*\s*(?:<[^>]*>)?\(\s*'([A-Za-z_][A-Za-z0-9_]*)'/g)) {
+      for (const match of line.matchAll(
+        /\binvoke[A-Za-z]*\s*(?:<[^>]*>)?\(\s*'([A-Za-z_][A-Za-z0-9_]*)'/g,
+      )) {
         const cmd = match[1] ?? '';
         found.set(cmd, [...(found.get(cmd) ?? []), `${file}:${i + 1}`]);
       }
