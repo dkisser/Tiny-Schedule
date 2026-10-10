@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tiny Schedule — thin Rust shell (Tauri 2)"
 authors = ["dkisser"]
 edition = "2021"
