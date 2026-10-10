@@ -11,10 +11,7 @@ describe('emptyAppData', () => {
     expect(d.projects).toEqual({
       INBOX_PROJECT: { id: 'INBOX_PROJECT', title: 'Inbox', icon: 'inbox', isArchived: false },
     });
-    expect(d.tags).toEqual({
-      EM_IMPORTANT: { id: 'EM_IMPORTANT', title: 'Important' },
-      EM_URGENT: { id: 'EM_URGENT', title: 'Urgent' },
-    });
+    expect(d.tags).toEqual({});
     expect(d.activeTimer).toBeNull();
     expect(d.misc).toEqual({});
   });
@@ -24,11 +21,11 @@ describe('emptyAppData', () => {
     expect(d.projects.INBOX_PROJECT?.title).toBe('Inbox');
   });
 
-  test('includes system tags except Today (now dueDay-driven)', () => {
+  test('seeds no system tags (importance is a field, urgency is derived)', () => {
     const d = emptyAppData();
     expect(d.tags[SYSTEM_TAG_IDS.today]).toBeUndefined();
-    expect(d.tags[SYSTEM_TAG_IDS.important]).toBeDefined();
-    expect(d.tags[SYSTEM_TAG_IDS.urgent]).toBeDefined();
+    expect(d.tags[SYSTEM_TAG_IDS.important]).toBeUndefined();
+    expect(d.tags[SYSTEM_TAG_IDS.urgent]).toBeUndefined();
   });
 
   test('returns fresh objects each call', () => {

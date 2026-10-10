@@ -29,6 +29,7 @@ function makeTask(id: string, overrides: Partial<AppData['tasks'][string]> = {})
     tagIds: [],
     subTaskIds: [],
     isDone: false,
+    isImportant: false,
     timeEstimate: 0,
     timeSpent: 0,
     timeSpentOnDay: {},

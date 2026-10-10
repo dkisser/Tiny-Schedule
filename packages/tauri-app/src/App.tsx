@@ -20,6 +20,7 @@ import { applyManualOrder, projectTasks, tagTasks, taskOrderFor, upcomingTasks }
 import { AiPage } from './pages/AiPage';
 import { ExportPage } from './pages/ExportPage';
 import { FollowUpsPage } from './pages/FollowUpsPage';
+import { HomePage } from './pages/HomePage';
 import { IdeasPage } from './pages/IdeasPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
@@ -157,7 +158,9 @@ export default function App() {
   const selectedIdea = selectedIdeaId ? (data.ideas[selectedIdeaId] ?? null) : null;
 
   const page =
-    view.type === 'today' ? (
+    view.type === 'home' ? (
+      <HomePage />
+    ) : view.type === 'today' ? (
       <TodayPage />
     ) : view.type === 'project' ? (
       <ProjectPage projectId={view.id} />

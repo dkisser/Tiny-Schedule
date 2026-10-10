@@ -66,6 +66,7 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
         : [],
       subTaskIds: Array.isArray(t.subTaskIds) ? (t.subTaskIds as string[]) : [],
       isDone: t.isDone === true,
+      isImportant: t.isImportant === true,
       dueDay: typeof t.dueDay === 'string' ? t.dueDay : undefined,
       timeEstimate: typeof t.timeEstimate === 'number' ? t.timeEstimate : 0,
       timeSpent: typeof t.timeSpent === 'number' ? t.timeSpent : 0,

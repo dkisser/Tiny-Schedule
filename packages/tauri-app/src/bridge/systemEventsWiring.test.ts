@@ -73,6 +73,7 @@ function makeTask(id: string, overrides: Record<string, unknown> = {}): AppData[
     tagIds: [],
     subTaskIds: [],
     isDone: false,
+    isImportant: false,
     timeEstimate: 0,
     timeSpent: 0,
     timeSpentOnDay: {},

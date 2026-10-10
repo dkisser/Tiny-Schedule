@@ -16,6 +16,7 @@ export function SettingsPage() {
   const updateSettings = useDataStore((s) => s.updateSettings);
   const updateStatus = useUpdateStore((s) => s.status);
   const updateResult = useUpdateStore((s) => s.result);
+  const currentVersion = useUpdateStore((s) => s.currentVersion);
   const checkUpdate = useUpdateStore((s) => s.check);
   const openDialog = useUpdateStore((s) => s.openDialog);
   const [registry, setRegistry] = useState<ProviderInfo[]>([]);
@@ -47,6 +48,18 @@ export function SettingsPage() {
       const safe = Number.isFinite(parsed) && parsed >= 1 && parsed <= 1440 ? parsed : 0;
       if (safe > 0 && data && safe !== data.settings.idlePauseMinutes) {
         void updateSettings({ idlePauseMinutes: safe });
+      }
+    },
+  );
+  const [urgencyDays, setUrgencyDays, flushUrgencyDays] = useDebouncedCommit<string>(
+    data ? String(data.settings.urgencyThresholdDays) : '2',
+    (v) => {
+      const parsed = Number.parseInt(v, 10);
+      // 0 天是合法阈值（只有今天到期才算紧急），所以下界钳到 0 而不是像
+      // idlePauseMinutes 那样把非法输入当作"不保存"。
+      const safe = Number.isFinite(parsed) ? Math.min(30, Math.max(0, parsed)) : null;
+      if (safe !== null && data && safe !== data.settings.urgencyThresholdDays) {
+        void updateSettings({ urgencyThresholdDays: safe });
       }
     },
   );
@@ -213,6 +226,28 @@ export function SettingsPage() {
       </section>
 
       <section className="mt-8">
+        <h2 className="text-sm font-medium text-muted-foreground">首页看板</h2>
+        <div className="mt-2 flex flex-col gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            截止日距今不超过
+            <Input
+              type="number"
+              min={0}
+              max={30}
+              className="w-20"
+              value={urgencyDays}
+              onChange={(e) => setUrgencyDays(e.target.value)}
+              onBlur={flushUrgencyDays}
+            />
+            天的任务算紧急
+          </label>
+          <p className="text-xs text-muted-foreground">
+            紧急由截止日推导，不单独存储：阈值越大，落进四象限「紧急」一列的任务越多。
+          </p>
+        </div>
+      </section>
+
+      <section className="mt-8">
         <h2 className="text-sm font-medium text-muted-foreground">AI Providers</h2>
         <div className="mt-2 flex flex-col gap-3">
           {drafts.map((d) => (
@@ -264,7 +299,9 @@ export function SettingsPage() {
       <section className="mt-8">
         <h2 className="text-sm font-medium text-muted-foreground">关于与更新</h2>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <span className="text-sm">当前版本 v{updateResult?.current ?? '—'}</span>
+          <span className="text-sm">
+            当前版本 v{currentVersion ?? updateResult?.current ?? '—'}
+          </span>
           <Button
             variant="outline"
             size="sm"

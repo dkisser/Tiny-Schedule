@@ -39,3 +39,36 @@ export function migrateActiveTimerPomodoroFocus(d: AppData): AppData {
   const base = t.phase === 'break' ? (t.cyclesCompleted ?? 0) * POMODORO_FOCUS_MS : 0;
   return { ...d, activeTimer: { ...t, focusAccumulatedMs: base } };
 }
+
+/**
+ * One-time migration away from the EM_IMPORTANT / EM_URGENT system tags:
+ * importance is a real field on Task (ADR-0006), and urgency is derived from
+ * dueDay rather than stored at all. Folds EM_IMPORTANT into `isImportant`,
+ * strips both tags from every task, and deletes the tag entities. Returns the
+ * same reference when nothing changed.
+ */
+export function migrateImportanceTagsToField(d: AppData): AppData {
+  const { important: importantId, urgent: urgentId } = SYSTEM_TAG_IDS;
+  const affected = Object.values(d.tasks).filter(
+    (t) => t.tagIds.includes(importantId) || t.tagIds.includes(urgentId),
+  );
+  if (affected.length === 0 && !d.tags[importantId] && !d.tags[urgentId]) return d;
+
+  const tasks = { ...d.tasks };
+  for (const t of affected) {
+    const keptTagIds = t.tagIds.filter((id) => id !== importantId && id !== urgentId);
+    const snapshots = { ...t.tagSnapshots };
+    delete snapshots[importantId];
+    delete snapshots[urgentId];
+    tasks[t.id] = {
+      ...t,
+      isImportant: t.isImportant || t.tagIds.includes(importantId),
+      tagIds: keptTagIds,
+      tagSnapshots: Object.keys(snapshots).length > 0 ? snapshots : undefined,
+    };
+  }
+  const tags = { ...d.tags };
+  delete tags[importantId];
+  delete tags[urgentId];
+  return { ...d, tasks, tags };
+}

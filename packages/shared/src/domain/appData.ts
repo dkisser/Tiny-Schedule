@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { type FollowUp, FollowUpSchema } from './followUp';
 import { type Idea, IdeaSchema } from './idea';
 import type { Project, Tag } from './project';
-import { INBOX_PROJECT_ID, ProjectSchema, SYSTEM_TAG_IDS, TagSchema } from './project';
+import { INBOX_PROJECT_ID, ProjectSchema, TagSchema } from './project';
 import { type ActiveTimer, ActiveTimerSchema, type Task, TaskSchema } from './task';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -44,6 +44,8 @@ export interface AppSettings {
   autoAiAnalyzeOnFinishDay: boolean;
   idlePauseEnabled: boolean;
   idlePauseMinutes: number;
+  /** dueDay 距今 ≤ 该天数即视为紧急（四象限横轴）。 */
+  urgencyThresholdDays: number;
 }
 
 export interface AppData {
@@ -83,6 +85,8 @@ export const SettingsSchema = z.object({
   // Defaults backfill legacy persisted settings that predate idle auto-pause.
   idlePauseEnabled: z.boolean().default(true),
   idlePauseMinutes: z.number().default(5),
+  // Defaults backfill legacy persisted settings that predate the quadrant board.
+  urgencyThresholdDays: z.number().default(2),
 });
 
 export const AppDataSchema = z.object({
@@ -114,6 +118,7 @@ export function defaultSettings(): AppSettings {
     autoAiAnalyzeOnFinishDay: false,
     idlePauseEnabled: true,
     idlePauseMinutes: 5,
+    urgencyThresholdDays: 2,
   };
 }
 
@@ -129,10 +134,7 @@ export function emptyAppData(): AppData {
         isArchived: false,
       },
     },
-    tags: {
-      [SYSTEM_TAG_IDS.important]: { id: SYSTEM_TAG_IDS.important, title: 'Important' },
-      [SYSTEM_TAG_IDS.urgent]: { id: SYSTEM_TAG_IDS.urgent, title: 'Urgent' },
-    },
+    tags: {},
     timeTracking: null,
     notes: null,
     planner: null,

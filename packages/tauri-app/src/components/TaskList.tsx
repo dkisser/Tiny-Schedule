@@ -1,8 +1,7 @@
 import type { AppData, Task } from '@tiny-schedule/shared';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
 import { splitByDone } from '../lib/tasks';
-import { useDataStore } from '../stores/data';
+import { useManualOrder } from '../lib/useManualOrder';
 import { TaskCard } from './TaskCard';
 
 export function TaskList({
@@ -73,41 +72,11 @@ function ReorderableOpenList({
   activeTaskId?: string | null;
   viewKey: string;
 }) {
-  const setTaskOrder = useDataStore((s) => s.setTaskOrder);
-  const [ids, setIds] = useState<string[]>(() => open.map((t) => t.id));
-  const openRef = useRef(open);
-  openRef.current = open;
-
-  // Reconcile when membership changes (task added/completed/deleted): keep the
-  // current manual order for remaining items, append new ones at the end.
-  const membershipKey = open
-    .map((t) => t.id)
-    .sort()
-    .join(',');
-  useEffect(() => {
-    setIds((prev) => {
-      const current = openRef.current.map((t) => t.id);
-      const currentSet = new Set(current);
-      const kept = prev.filter((id) => currentSet.has(id));
-      const keptSet = new Set(kept);
-      return [...kept, ...current.filter((id) => !keptSet.has(id))];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [membershipKey]);
-
-  const byId = new Map(open.map((t) => [t.id, t]));
-  const ordered = ids.map((id) => byId.get(id)).filter((t): t is Task => Boolean(t));
+  const { ordered, onReorder } = useManualOrder(open, viewKey);
+  const ids = ordered.map((t) => t.id);
 
   return (
-    <Reorder.Group
-      axis="y"
-      values={ids}
-      onReorder={(next) => {
-        setIds(next);
-        setTaskOrder(viewKey, next);
-      }}
-      className="flex flex-col gap-2"
-    >
+    <Reorder.Group axis="y" values={ids} onReorder={onReorder} className="flex flex-col gap-2">
       {ordered.map((t) => (
         <ReorderableItem key={t.id} task={t} data={data} activeTaskId={activeTaskId} />
       ))}

@@ -5,10 +5,15 @@ import { createApi, installApi } from '@/api';
 import { dataDirFor } from '@/bridge/dataDir';
 import { DataStore } from '@/bridge/dataStore';
 import { initKeyStore } from '@/bridge/keys';
-import { migrateActiveTimerPomodoroFocus, migrateRemoveTodayTag } from '@/bridge/migrations';
+import {
+  migrateActiveTimerPomodoroFocus,
+  migrateImportanceTagsToField,
+  migrateRemoveTodayTag,
+} from '@/bridge/migrations';
 import { startSystemEvents } from '@/bridge/systemEvents';
 import { TauriFs } from '@/bridge/tauriFs';
 import { startupUpdateCheck } from '@/bridge/updater';
+import { useUpdateStore } from '@/stores/update';
 
 /**
  * How long after startup the automatic update check runs. Inherited from the
@@ -60,6 +65,8 @@ export async function bootstrap(): Promise<RendererApi> {
   if (migrated !== (await store.get())) await store.save(migrated);
   const migrated2 = migrateActiveTimerPomodoroFocus(await store.get());
   if (migrated2 !== (await store.get())) await store.save(migrated2);
+  const migrated3 = migrateImportanceTagsToField(await store.get());
+  if (migrated3 !== (await store.get())) await store.save(migrated3);
 
   // Every slice closes over the store, so assembly happens here rather than at
   // module scope. `src/api.ts` owns the composition and the cross-slice wiring;
@@ -74,19 +81,22 @@ export async function bootstrap(): Promise<RendererApi> {
   // listeners.
   startSystemEvents(store);
 
-  // The startup update check, wired where the Electron original wired it
-  // (`main.ts`: `did-finish-load` then a 5s timeout). Two details are inherited
-  // deliberately: the delay keeps a network call off the startup path, and it
-  // runs after `installApi`, so the `ui:updateAvailable` push has a subscriber
-  // by the time it can fire. `App.tsx` owns that subscription.
-  setTimeout(() => {
-    void getVersion()
-      .then((version) => startupUpdateCheck(version))
-      .catch(() => {
-        // A failed check is the same outcome as no update: the user still has
-        // the manual "检查更新" action, so there is nothing to report.
-      });
-  }, STARTUP_UPDATE_CHECK_DELAY_MS);
+  // The version read is local (the string baked into the bundle), so it runs
+  // immediately — the settings page shows it without waiting for any network
+  // check. The startup update check keeps the Electron original's wiring
+  // (`main.ts`: `did-finish-load` then a 5s timeout): the delay keeps a
+  // network call off the startup path, and it runs after `installApi`, so the
+  // `ui:updateAvailable` push has a subscriber by the time it can fire.
+  // `App.tsx` owns that subscription.
+  void getVersion()
+    .then((version) => {
+      useUpdateStore.getState().setCurrentVersion(version);
+      setTimeout(() => void startupUpdateCheck(version), STARTUP_UPDATE_CHECK_DELAY_MS);
+    })
+    .catch(() => {
+      // A failed check is the same outcome as no update: the user still has
+      // the manual "检查更新" action, so there is nothing to report.
+    });
 
   return combined;
 }

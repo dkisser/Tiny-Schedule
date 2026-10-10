@@ -4,6 +4,7 @@ import { useDataStore } from './data';
 import { useTimerStore } from './timer';
 
 export type View =
+  | { type: 'home' }
   | { type: 'today' }
   | { type: 'project'; id: string }
   | { type: 'tag'; id: string }
@@ -60,7 +61,7 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
-  view: { type: 'today' },
+  view: { type: 'home' },
   selectedTaskId: null,
   selectedFollowUpId: null,
   selectedIdeaId: null,

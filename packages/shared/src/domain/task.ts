@@ -30,6 +30,8 @@ export interface Task {
   isDone: boolean;
   doneAt?: number;
   dueDay?: string; // YYYY-MM-DD
+  // 手动标记的「重要」，四象限的纵轴。紧急不是字段，由 dueDay 派生。
+  isImportant: boolean;
   timeEstimate: number; // ms
   timeSpent: number; // ms
   timeSpentOnDay: Record<string, number>; // date -> ms
@@ -84,6 +86,8 @@ export const TaskSchema = z.object({
   isDone: z.boolean(),
   doneAt: z.number().optional(),
   dueDay: z.string().optional(),
+  // Defaults backfill data.json files written before importance became a field.
+  isImportant: z.boolean().default(false),
   timeEstimate: z.number().min(0),
   timeSpent: z.number().min(0),
   timeSpentOnDay: z.record(z.string(), z.number()),
@@ -130,6 +134,7 @@ export function blankTask(title: string, project: Project): Task {
     tagIds: [],
     subTaskIds: [],
     isDone: false,
+    isImportant: false,
     timeEstimate: 0,
     timeSpent: 0,
     timeSpentOnDay: {},

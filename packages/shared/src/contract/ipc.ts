@@ -298,6 +298,7 @@ export const SettingsUpdateReqSchema = z
     autoAiAnalyzeOnFinishDay: z.boolean(),
     idlePauseEnabled: z.boolean(),
     idlePauseMinutes: z.number().int().min(1).max(1440),
+    urgencyThresholdDays: z.number().int().min(0).max(30),
   })
   .partial();
 export type SettingsUpdateReq = z.infer<typeof SettingsUpdateReqSchema>;

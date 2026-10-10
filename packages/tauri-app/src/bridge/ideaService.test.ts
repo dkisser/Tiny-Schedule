@@ -228,6 +228,7 @@ describe('ideaService.convertToTask', () => {
       tagIds: [],
       subTaskIds: [],
       isDone: true,
+      isImportant: false,
       timeEstimate: 0,
       timeSpent: 999,
       timeSpentOnDay: {},

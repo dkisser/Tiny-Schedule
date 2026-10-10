@@ -7,7 +7,14 @@ import { TaskList } from '../components/TaskList';
 import { Button } from '../components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { dueFollowUps, waitingDays } from '../lib/followUps';
-import { applyManualOrder, taskOrderFor, todayDoneTasks, todayTasks } from '../lib/tasks';
+import {
+  applyManualOrder,
+  estimateRemainingMs,
+  taskOrderFor,
+  todayDoneTasks,
+  todayTasks,
+  workedTodayMs,
+} from '../lib/tasks';
 import { useDataStore } from '../stores/data';
 import { useTimerStore } from '../stores/timer';
 import { useUiStore } from '../stores/ui';
@@ -30,14 +37,8 @@ export function TodayPage() {
   const tasks = applyManualOrder(todayTasks(data), taskOrderFor(data, 'today'));
   const doneTasks = todayDoneTasks(data);
   const due = dueFollowUps(data);
-  const workedToday = Object.values(data.tasks).reduce(
-    (sum, t) => sum + (t.timeSpentOnDay[today] ?? 0),
-    0,
-  );
-  const estimateRemaining = tasks.reduce(
-    (sum, t) => sum + Math.max(0, t.timeEstimate - t.timeSpent),
-    0,
-  );
+  const workedToday = workedTodayMs(Object.values(data.tasks), today);
+  const estimateRemaining = estimateRemainingMs(Object.values(data.tasks), today);
   const finishedToday = data.misc.lastFinishDay === today;
 
   const handleFinish = async () => {

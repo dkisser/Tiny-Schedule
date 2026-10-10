@@ -505,6 +505,8 @@ export function createDataApi(store: DataStore): DataApi {
           settings.idlePauseEnabled = patch.idlePauseEnabled;
         if (patch.idlePauseMinutes !== undefined)
           settings.idlePauseMinutes = patch.idlePauseMinutes;
+        if (patch.urgencyThresholdDays !== undefined)
+          settings.urgencyThresholdDays = patch.urgencyThresholdDays;
         if (patch.aiProviders !== undefined) {
           // encryptKey is async (WebCrypto), so the providers are mapped in an
           // async pass rather than the original's inline map. Same result: a

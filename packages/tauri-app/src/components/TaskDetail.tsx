@@ -8,7 +8,7 @@ import {
   type TimeEntry,
 } from '@tiny-schedule/shared';
 import type Cherry from 'cherry-markdown';
-import { CalendarPlus, ChevronLeft, Loader2, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { CalendarPlus, ChevronLeft, Loader2, Pencil, Plus, Star, Trash2, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { api } from '../api';
@@ -186,11 +186,24 @@ export function TaskDetail({ task }: { task: Task }) {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <div className="mb-1 text-xs text-muted-foreground">截止日</div>
-          <Input
-            type="date"
-            value={task.dueDay ?? ''}
-            onChange={(e) => save({ dueDay: e.target.value || undefined })}
-          />
+          <div className="flex items-center gap-1">
+            <Input
+              type="date"
+              value={task.dueDay ?? ''}
+              onChange={(e) => save({ dueDay: e.target.value || undefined })}
+            />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={task.isImportant ? '取消重要' : '标为重要'}
+              aria-pressed={task.isImportant}
+              title={task.isImportant ? '取消重要' : '标为重要'}
+              onClick={() => save({ isImportant: !task.isImportant })}
+              className={task.isImportant ? 'shrink-0 text-amber-500' : 'shrink-0'}
+            >
+              <Star className={task.isImportant ? 'fill-current' : undefined} />
+            </Button>
+          </div>
         </div>
         <div>
           <div className="mb-1 text-xs text-muted-foreground">预估（小时）</div>

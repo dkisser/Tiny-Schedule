@@ -7,9 +7,16 @@ export type UpdateStatus = 'idle' | 'checking' | 'upToDate' | 'available' | 'err
 interface UpdateState {
   status: UpdateStatus;
   result: CheckUpdateResult | null;
+  /**
+   * The bundle's own version, read once at bootstrap. Separate from `result`
+   * so the settings page can show it before any update check has run —
+   * `result` only exists after a manual check or an available-update push.
+   */
+  currentVersion: string | null;
   dialogOpen: boolean;
   check: () => Promise<void>;
   notify: (result: CheckUpdateResult) => void;
+  setCurrentVersion: (version: string) => void;
   openDialog: () => void;
   closeDialog: () => void;
 }
@@ -17,6 +24,7 @@ interface UpdateState {
 export const useUpdateStore = create<UpdateState>((set) => ({
   status: 'idle',
   result: null,
+  currentVersion: null,
   dialogOpen: false,
   check: async () => {
     set({ status: 'checking' });
@@ -31,6 +39,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
     if (!result.hasUpdate) return;
     set({ status: 'available', result, dialogOpen: true });
   },
+  setCurrentVersion: (version) => set({ currentVersion: version }),
   openDialog: () => set({ dialogOpen: true }),
   closeDialog: () => set({ dialogOpen: false }),
 }));

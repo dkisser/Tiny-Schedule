@@ -15,7 +15,7 @@ import {
   mergeImport,
   normalizeBackup,
 } from '@/bridge/importExport';
-import { migrateRemoveTodayTag } from '@/bridge/migrations';
+import { migrateImportanceTagsToField, migrateRemoveTodayTag } from '@/bridge/migrations';
 
 /**
  * The file slice: Super Productivity import, Markdown export, avatar picking.
@@ -74,7 +74,9 @@ export function createFilesApi(
         // write to clean up, and tell the renderer so its clock stops too.
         const hadTimer = !!(await store.get()).activeTimer;
         const result = await store.update((d) =>
-          dropStaleTiming(migrateRemoveTodayTag(mergeImport(d, imported))),
+          dropStaleTiming(
+            migrateImportanceTagsToField(migrateRemoveTodayTag(mergeImport(d, imported))),
+          ),
         );
         if (hadTimer && !result.data.activeTimer) deps.onTimerChanged?.();
         return { ok: true, counts };

@@ -1,4 +1,4 @@
-import { type AppData, localDate, type Project, type Task } from '@tiny-schedule/shared';
+import { type AppData, addDays, localDate, type Project, type Task } from '@tiny-schedule/shared';
 
 export function isTopLevel(t: Task): boolean {
   return !t.parentTaskId;
@@ -7,6 +7,138 @@ export function isTopLevel(t: Task): boolean {
 export function isOverdue(t: Task, now = Date.now()): boolean {
   const today = localDate(now);
   return !t.isDone && !!t.dueDay && t.dueDay < today;
+}
+
+// ---------------------------------------------------------------------------
+// 看板查询助手（首页四象限 / 长期池）
+// ---------------------------------------------------------------------------
+
+/** The four quadrant cells, from important×urgent. */
+export type QuadrantKey =
+  | 'important-urgent'
+  | 'important-notUrgent'
+  | 'notImportant-urgent'
+  | 'notImportant-notUrgent';
+
+export const QUADRANT_KEYS: QuadrantKey[] = [
+  'important-urgent',
+  'important-notUrgent',
+  'notImportant-urgent',
+  'notImportant-notUrgent',
+];
+
+/** A task due beyond this many days belongs to the long-term pool. */
+export const LONG_TERM_HORIZON_DAYS = 14;
+
+/**
+ * Urgency is derived, never stored: dueDay within `thresholdDays` of today is
+ * urgent, and an overdue task satisfies it for free. Dates compare as
+ * YYYY-MM-DD strings, the same way the worklog export ranges them.
+ */
+export function isUrgent(t: Task, today: string, thresholdDays: number): boolean {
+  if (t.isDone || !t.dueDay) return false;
+  return t.dueDay <= addDays(today, thresholdDays);
+}
+
+export function quadrantOf(t: Task, today: string, thresholdDays: number): QuadrantKey {
+  const important = t.isImportant ? 'important' : 'notImportant';
+  const urgent = isUrgent(t, today, thresholdDays) ? 'urgent' : 'notUrgent';
+  return `${important}-${urgent}`;
+}
+
+/** Top-level open tasks projected into the four cells. */
+export function quadrantTasks(
+  tasks: Task[],
+  today: string,
+  thresholdDays: number,
+): Record<QuadrantKey, Task[]> {
+  const cells: Record<QuadrantKey, Task[]> = {
+    'important-urgent': [],
+    'important-notUrgent': [],
+    'notImportant-urgent': [],
+    'notImportant-notUrgent': [],
+  };
+  for (const t of tasks) {
+    if (!isTopLevel(t) || t.isDone) continue;
+    cells[quadrantOf(t, today, thresholdDays)].push(t);
+  }
+  return cells;
+}
+
+/**
+ * How many tasks with this cell's coordinates were finished in the last week.
+ * Counted from the whole set (done tasks are not in any open cell) so a cell
+ * can report its own throughput rather than nothing.
+ */
+export function completedInCell(
+  tasks: Task[],
+  cell: QuadrantKey,
+  today: string,
+  thresholdDays: number,
+): number {
+  const from = addDays(today, -6);
+  return tasks.filter(
+    (t) =>
+      isTopLevel(t) &&
+      t.isDone &&
+      t.doneAt !== undefined &&
+      localDate(t.doneAt) >= from &&
+      localDate(t.doneAt) <= today &&
+      quadrantOf(t, today, thresholdDays) === cell,
+  ).length;
+}
+
+/** Top-level open tasks with no due day, and those due beyond the horizon. */
+export function longTermPool(
+  tasks: Task[],
+  today: string,
+): { unscheduled: Task[]; farFuture: Task[] } {
+  const open = tasks.filter((t) => isTopLevel(t) && !t.isDone);
+  const horizon = addDays(today, LONG_TERM_HORIZON_DAYS);
+  return {
+    unscheduled: open.filter((t) => !t.dueDay).sort((a, b) => b.created - a.created),
+    farFuture: open
+      .filter((t) => !!t.dueDay && t.dueDay > horizon)
+      .sort((a, b) => (a.dueDay ?? '').localeCompare(b.dueDay ?? '')),
+  };
+}
+
+export interface FocusPoint {
+  date: string;
+  ms: number;
+}
+
+/** Focus ms per day for the 7 days ending today (today included). */
+export function focusSeries7d(tasks: Task[], today: string): FocusPoint[] {
+  const from = addDays(today, -6);
+  const series: FocusPoint[] = [];
+  for (let i = 0; i < 7; i++) {
+    const date = addDays(from, i);
+    let ms = 0;
+    for (const t of tasks) ms += t.timeSpentOnDay[date] ?? 0;
+    series.push({ date, ms });
+  }
+  return series;
+}
+
+/** Focus ms recorded today across every task, subtasks included. */
+export function workedTodayMs(tasks: Task[], today: string): number {
+  return tasks.reduce((sum, t) => sum + (t.timeSpentOnDay[today] ?? 0), 0);
+}
+
+/** Unfinished work still owed on the tasks due today or earlier. */
+export function estimateRemainingMs(tasks: Task[], today: string): number {
+  return tasks
+    .filter(isTopLevel)
+    .filter((t) => !t.isDone && !!t.dueDay && t.dueDay <= today)
+    .reduce((sum, t) => sum + Math.max(0, t.timeEstimate - t.timeSpent), 0);
+}
+
+/** Top-level tasks finished today (doneAt is epoch ms). */
+export function doneTodayCount(tasks: Task[], today: string): number {
+  return tasks.filter(
+    (t) => isTopLevel(t) && t.isDone && t.doneAt !== undefined && localDate(t.doneAt) === today,
+  ).length;
 }
 
 // Today is driven purely by dueDay: a task belongs to Today when its due day
@@ -93,6 +225,7 @@ export function blankTask(title: string, project: Project): Task {
     tagIds: [],
     subTaskIds: [],
     isDone: false,
+    isImportant: false,
     timeEstimate: 0,
     timeSpent: 0,
     timeSpentOnDay: {},

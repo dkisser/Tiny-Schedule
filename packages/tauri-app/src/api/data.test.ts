@@ -19,6 +19,7 @@ function task(id: string, overrides: Record<string, unknown> = {}) {
     tagIds: [],
     subTaskIds: [],
     isDone: false,
+    isImportant: false,
     timeEstimate: 0,
     timeSpent: 0,
     timeSpentOnDay: {},

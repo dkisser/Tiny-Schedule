@@ -785,9 +785,9 @@ const SYSTEM_TAGS = new Set<string>(Object.values(SYSTEM_TAG_IDS));
 /**
  * How many user records a dataset holds.
  *
- * System entities are excluded: emptyAppData() always ships INBOX_PROJECT and
- * the two system tags, and counting them made an empty library look occupied —
- * which is what made the original guard unreachable and got it deleted.
+ * System entities are excluded: emptyAppData() always ships INBOX_PROJECT, and
+ * counting it made an empty library look occupied — which is what made the
+ * original guard unreachable and got it deleted.
  */
 function countRecords(data: AppData): number {
   return (

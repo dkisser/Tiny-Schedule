@@ -137,6 +137,7 @@ describe('ideaProjectOpenTaskCount', () => {
       tagIds: [],
       subTaskIds: [],
       isDone: false,
+      isImportant: false,
       timeEstimate: 0,
       timeSpent: 0,
       timeSpentOnDay: {},

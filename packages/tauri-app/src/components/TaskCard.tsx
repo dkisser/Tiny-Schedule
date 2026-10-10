@@ -1,6 +1,6 @@
 import type { AppData, Task } from '@tiny-schedule/shared';
 import { hasProjectColor } from '@tiny-schedule/shared';
-import { Check, GripVertical, Pause, Play, Trash2 } from 'lucide-react';
+import { Check, GripVertical, Pause, Play, Star, Trash2 } from 'lucide-react';
 import type { DragControls } from 'motion/react';
 import { useState } from 'react';
 import { isOverdue, taskTagLabel } from '../lib/tasks';
@@ -45,12 +45,14 @@ export function TaskCard({
   const requestComplete = useUiStore((s) => s.requestComplete);
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const deleteTask = useDataStore((s) => s.deleteTask);
+  const upsertTask = useDataStore((s) => s.upsertTask);
   const pauseTimer = useTimerStore((s) => s.pause);
   const resumeTimer = useTimerStore((s) => s.resume);
   const timerPaused = useTimerStore((s) => (active ? (s.timer?.isPaused ?? false) : false));
   const [confirmDelete, setConfirmDelete] = useState(false);
   const selected = selectedTaskId === task.id;
   const overdue = isOverdue(task);
+  const subTasksDone = task.subTaskIds.filter((id) => data.tasks[id]?.isDone).length;
   const stripeColor = hasProjectColor(data.projects[task.projectId]?.primaryColor)
     ? data.projects[task.projectId]?.primaryColor
     : undefined;
@@ -97,6 +99,24 @@ export function TaskCard({
           <GripVertical />
         </Button>
       )}
+      <Button
+        variant="ghost"
+        size="icon-xs"
+        aria-label={task.isImportant ? '取消重要' : '标为重要'}
+        aria-pressed={task.isImportant}
+        onClick={(e) => {
+          e.stopPropagation();
+          void upsertTask({ ...task, isImportant: !task.isImportant });
+        }}
+        className={cn(
+          'shrink-0 transition-opacity',
+          task.isImportant
+            ? 'text-amber-500 opacity-100'
+            : 'text-muted-foreground/40 opacity-0 group-hover:opacity-100',
+        )}
+      >
+        <Star className={cn(task.isImportant && 'fill-current')} />
+      </Button>
       <button
         type="button"
         aria-label={task.isDone ? '取消完成' : '完成'}
@@ -128,6 +148,11 @@ export function TaskCard({
           {overdue && (
             <span className="rounded bg-amber-500/15 px-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
               逾期 {overdueDays} 天
+            </span>
+          )}
+          {task.subTaskIds.length > 0 && (
+            <span className="rounded bg-secondary px-1.5 text-xs text-muted-foreground">
+              子任务 {subTasksDone}/{task.subTaskIds.length}
             </span>
           )}
           {task.tagIds.map((id) => {

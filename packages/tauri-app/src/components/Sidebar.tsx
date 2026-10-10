@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Download,
   Hourglass,
+  House,
   Inbox,
   Lightbulb,
   Pencil,
@@ -291,6 +292,9 @@ export function Sidebar() {
 
   return (
     <nav className="flex flex-col gap-1 p-2">
+      <NavItem active={isActive({ type: 'home' })} onClick={() => setView({ type: 'home' })}>
+        <House className="h-4 w-4" /> 首页
+      </NavItem>
       <NavItem active={isActive({ type: 'today' })} onClick={() => setView({ type: 'today' })}>
         <Sun className="h-4 w-4" /> 今日
       </NavItem>
