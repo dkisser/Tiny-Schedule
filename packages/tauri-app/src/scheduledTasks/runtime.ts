@@ -13,15 +13,34 @@ import { createScheduledTaskRunner, type ScheduledRunnerDeps } from './runner';
 import { type InvokeFn } from './tools';
 
 /**
- * 定时任务运行时：runner 的组装 + **一份** in-flight 账本。
+ * 定时任务运行时：runner 的组装 + 那份 in-flight 账本。
  *
  * 这一层存在的理由是一句话：CONTEXT.md 的重叠规则按**定时任务**算，不按触发
  * 来源算。手动「立即运行」和定时触发落在同一个 in-flight 集合里，于是两个并行
  * 的 Agent——各自握着全部工具——不会踩同一个目录。两处各守各的 `inFlight` 时，
- * 规则看着还在，实现已经不成立了。
+ * 规则看着还在，实现已经不成立。
  *
- * 所以：api slice 与调度器都从这里取，不要自己再组装一个 runner。
+ * 账本是**模块级**的，不是 `createScheduledRuntime` 的局部变量，因为生产代码里
+ * 这个工厂被调用了两次：`startScheduler` 一次，`createScheduledTaskRunApi` 一次。
+ * 账本若跟着实例走，两个实例就各有一把锁，而撞车恰好发生在它们之间——09:00 到点
+ * 调度器开跑，09:00:30 用户按下「立即运行」。
+ *
+ * 为什么是进程级而不是按 store 分：这条规则要防的事发生在**文件系统**上——两个
+ * Agent 在同一个执行目录里各自 writeFile、runCommand。那件事与谁持有哪个 store
+ * 实例无关，所以锁的粒度就应该是"这个进程里这个任务 id 正不正在跑"。
  */
+
+/**
+ * 正在跑的定时任务，**所有**触发来源、所有 runtime 实例共用这一份。
+ *
+ * 进程级单例，理由见模块头。
+ */
+const inFlight = new Set<string>();
+
+/** 测试用：清空账本，让下一个用例从干净状态开始。 */
+export function _resetInFlightForTest(): void {
+  inFlight.clear();
+}
 
 /**
  * 通知权限，与 api/timer.ts 同一套：macOS 的授权提示是一次性的，缓存住免得一次
@@ -95,8 +114,7 @@ export function createScheduledRuntime(deps: ScheduledRuntimeDeps) {
     ...deps.runner,
   });
 
-  /** 正在跑的定时任务，**所有**触发来源共用这一份账本。 */
-  const inFlight = new Set<string>();
+  /** 正在跑的定时任务共用模块级那本账，见文件头。 */
 
   /**
    * 跑一次，带重叠保护。
@@ -105,7 +123,7 @@ export function createScheduledRuntime(deps: ScheduledRuntimeDeps) {
    * 一条 skipped——开始即结束、output 为空（CONTEXT.md）。被跳过不是失败，所以
    * 它返回 `ok: true`，调用方不必把它当异常处理。
    *
-   * 两个入口（手动、调度）都走这里，这是规则唯一成立的地方。
+   * 两个入口（手动、调度）都走这里，且共用模块级账本，这是规则唯一成立的地方。
    */
   const runGuarded = async (
     task: ScheduledTask,

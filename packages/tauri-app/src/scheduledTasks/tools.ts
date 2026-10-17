@@ -152,6 +152,41 @@ function outcomeSummary(resultText: string): string {
     : JSON.stringify(r);
 }
 
+/**
+ * Header names whose values are credentials. Matched case-insensitively because
+ * the name is the model's to spell: `Authorization` is as likely to arrive as
+ * `authorization`, and a check that only matched one spelling would look like it
+ * worked.
+ *
+ * A denylist, not an allowlist, on purpose: an allowlist has to enumerate every
+ * header worth auditing (`Accept`, `If-Match`, …) and misses silently, whereas
+ * this one misses loudly — an unlisted credential-bearing header is a leak
+ * rather than a missing feature. The cost is that an exotic secret header goes
+ * through, which is why `summarizeArgs` keeps the names.
+ */
+const CREDENTIAL_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'api-key',
+  'x-auth-token',
+  'x-access-token',
+]);
+
+/** The header map with credential values replaced by their length. */
+function redactHeaders(headers: unknown): Record<string, unknown> {
+  if (!isRecord(headers)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    out[name] = CREDENTIAL_HEADERS.has(name.toLowerCase())
+      ? `<${String(value).length} chars>`
+      : value;
+  }
+  return out;
+}
+
 /** `{...}` with values that are long or sensitive reduced to their size. */
 function summarizeArgs(params: Record<string, unknown>): string {
   const redacted: Record<string, unknown> = {};
@@ -161,6 +196,10 @@ function summarizeArgs(params: Record<string, unknown>): string {
     // credential the model typed. Their size is the useful part.
     if (key === 'content' || key === 'body') {
       redacted[key] = `<${String(value).length} chars>`;
+    } else if (key === 'headers') {
+      // The header *names* stay — they are what makes the record readable —
+      // but a token rides in the value, so only the length is kept.
+      redacted[key] = redactHeaders(value);
     } else {
       redacted[key] = value;
     }

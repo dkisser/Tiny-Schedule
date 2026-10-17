@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Agent, AgentMessage } from '@earendil-works/pi-agent-core';
 import { type AppData, emptyAppData, type ScheduledTask } from '@tiny-schedule/shared';
 import { silentLogger } from '@/ai/logger';
@@ -6,7 +6,7 @@ import { DataStore } from '@/bridge/dataStore';
 import { MemoryFs } from '@/bridge/fsAdapter';
 import { createScheduledTaskService } from '@/bridge/scheduledTaskService';
 import { installTauriMocks } from '@/test/tauriMocks';
-import { createScheduledRuntime } from './runtime';
+import { _resetInFlightForTest, createScheduledRuntime } from './runtime';
 
 /**
  * 这个文件只测一件事：**一把锁**。
@@ -78,6 +78,12 @@ async function openRuntime(agent: Agent) {
   return { store, runtime };
 }
 
+// 账本是进程级的，所以每个用例从干净的账本开始；否则一个悬而未决的运行
+// 会漏进下一个用例，让"跑完之后锁释放"这类断言失去意义。
+beforeEach(() => {
+  _resetInFlightForTest();
+});
+
 describe('运行时 — 手动与调度共用一把 in-flight 锁', () => {
   test('手动运行在跑时，定时触发被跳过', async () => {
     const { store, runtime } = await openRuntime(HANGING_AGENT);
@@ -141,6 +147,30 @@ describe('运行时 — 手动与调度共用一把 in-flight 锁', () => {
 
     expect(runtime.isRunning('st1')).toBe(true);
     expect(runtime.isRunning('st2')).toBe(false);
+  });
+
+  test('两个 runtime 实例共用同一本账', async () => {
+    // 这条规则失效的样子不是"记错了"，而是**两个并行 Agent 各自握着全部工具**在
+    // 同一个执行目录里跑。而生产代码里确实有两个入口各建一个 runtime：
+    // `startScheduler` 与 `createScheduledTaskRunApi`。09:00 到点调度器开跑，
+    // 09:00:30 用户按下「立即运行」——两个实例、两个集合、两个 Agent。
+    //
+    // 危险发生在文件系统上，不在 store 上，所以账本必须是进程级的：一个任务 id
+    // 在这个进程里正在跑，就是正在跑，与谁发起的无关。
+    const first = await openRuntime(HANGING_AGENT);
+    const second = await openRuntime(HANGING_AGENT);
+
+    void first.runtime.runGuarded(TASK, 'scheduled');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // 第二个 runtime 看得见第一个 runtime 记下的占用。
+    expect(second.runtime.isRunning('st1')).toBe(true);
+
+    const manual = await second.runtime.runGuarded(TASK, 'manual');
+
+    expect(manual.skipped).toBe(true);
+    expect(manual.run.trigger).toBe('manual');
+    expect(manual.run.status).toBe('skipped');
   });
 });
 

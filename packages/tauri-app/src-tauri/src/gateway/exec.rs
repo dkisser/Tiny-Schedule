@@ -158,6 +158,32 @@ pub async fn scheduled_exec(request: ExecRequest) -> Result<ExecOutcome, Gateway
     exec(request).await.map_err(|e| e.with_context(&context))
 }
 
+/// Expands a leading `~` to the user's home directory.
+///
+/// Only the two forms a shell would also expand: `~` and `~/…`. A `~` that is
+/// not the entire first segment (`~backup`) is an ordinary relative name, and
+/// is left alone — matching what a user typing into the dialog expects, and
+/// avoiding the surprise of a directory the shell would have treated literally.
+///
+/// Unresolvable (`HOME` unset, as under some launch daemons) falls back to the
+/// input unchanged, so the caller's `is_dir()` check produces the ordinary
+/// "not a directory" error naming the path rather than a tilde-specific one.
+fn expand_home(raw: &str) -> PathBuf {
+    let rest = match raw.strip_prefix('~') {
+        Some("") => Path::new(""),
+        Some(after_slash) => match after_slash.strip_prefix('/') {
+            Some(tail) => Path::new(tail),
+            // `~user` is another user's home, which this does not resolve.
+            None => return PathBuf::from(raw),
+        },
+        None => return PathBuf::from(raw),
+    };
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() => PathBuf::from(home).join(rest),
+        _ => PathBuf::from(raw),
+    }
+}
+
 /// Resolves and sanity-checks the working directory.
 ///
 /// A missing directory surfaces as an ordinary spawn failure otherwise, and
@@ -168,7 +194,7 @@ fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, GatewayError> {
         return std::env::current_dir()
             .map_err(|e| GatewayError::new(GatewayErrorCode::Io, format!("cannot read cwd: {e}")));
     };
-    let path = PathBuf::from(raw);
+    let path = expand_home(raw);
     if !path.is_dir() {
         return Err(GatewayError::new(
             GatewayErrorCode::InvalidRequest,
@@ -426,6 +452,45 @@ mod tests {
             .expect("a timeout is a result, not a transport error");
         assert!(outcome.timed_out);
         assert_eq!(outcome.exit_code, None);
+    }
+
+    #[test]
+    fn a_tilde_cwd_resolves_to_the_home_directory() {
+        // The renderer sends `~` for "no working directory set", and a task
+        // author may type `~/projects/x` by hand. A literal `~` is a relative
+        // path, so `is_dir()` rejects it and every shell call in every such task
+        // fails — the default must mean "the user's home", not "a directory
+        // named ~".
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(expand_home("~"), PathBuf::from(&home));
+        assert_eq!(expand_home("~/"), PathBuf::from(&home));
+        assert_eq!(
+            expand_home("~/projects/x"),
+            PathBuf::from(&home).join("projects/x")
+        );
+        // A `~` that is not the whole first segment is an ordinary name.
+        assert_eq!(expand_home("~backup"), PathBuf::from("~backup"));
+        assert_eq!(expand_home("/abs/~/x"), PathBuf::from("/abs/~/x"));
+    }
+
+    #[test]
+    fn a_tilde_cwd_is_accepted_by_the_resolver() {
+        let mut req = request("pwd", &[]);
+        req.cwd = Some("~".to_string());
+        let outcome = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(exec(req))
+            .expect("`~` is the documented default, so it must resolve");
+        assert!(!outcome.timed_out);
+        let home = std::env::var("HOME").expect("HOME");
+        assert_eq!(
+            outcome.stdout.trim(),
+            std::fs::canonicalize(&home)
+                .unwrap_or_else(|_| PathBuf::from(&home))
+                .to_string_lossy()
+        );
     }
 
     #[test]
