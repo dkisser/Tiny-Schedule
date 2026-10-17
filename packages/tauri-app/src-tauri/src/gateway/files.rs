@@ -14,11 +14,11 @@
 //!     boundary, and `offset`/`limit` let a model read a slice of a large file
 //!     instead of the head of it.
 //!
-//! Paths are absolute or relative to the app's own working directory — the TS
-//! layer resolves them against the task's `cwd`, so what arrives here is a
-//! decision the caller already made. Nothing restricts *which* path that is;
-//! per ADR-0008, an unreadable or unwriteable path is simply reported as an
-//! error.
+//! Paths are resolved against the task's execution directory by
+//! [`resolve_path`]: an absolute path is taken as written, a `~`-prefixed one
+//! expands against the home directory, and anything else is relative to the
+//! task's `cwd`. Nothing restricts *which* path that is; per ADR-0008, an
+//! unreadable or unwriteable path is simply reported as an error.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -26,6 +26,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::exec::resolve_path;
 use super::{to_text, GatewayContext, GatewayError, GatewayErrorCode};
 
 /// Largest slice returned by one read, in bytes.
@@ -42,6 +43,9 @@ pub struct WriteFileRequest {
     #[serde(flatten)]
     pub context: GatewayContext,
     pub path: String,
+    /// The task's execution directory; a relative `path` is resolved against it.
+    #[serde(default)]
+    pub cwd: Option<String>,
     pub content: String,
 }
 
@@ -53,6 +57,9 @@ pub struct ReadFileRequest {
     #[serde(flatten)]
     pub context: GatewayContext,
     pub path: String,
+    /// The task's execution directory; a relative `path` is resolved against it.
+    #[serde(default)]
+    pub cwd: Option<String>,
     /// Byte offset to start at. `None` means the beginning of the file.
     #[serde(default)]
     pub offset: Option<u64>,
@@ -87,13 +94,7 @@ pub struct ReadFileOutcome {
 
 /// The gateway entry point for `writeFile`.
 pub async fn write_file(request: WriteFileRequest) -> Result<WriteFileOutcome, GatewayError> {
-    let target = PathBuf::from(&request.path);
-    if request.path.trim().is_empty() {
-        return Err(GatewayError::new(
-            GatewayErrorCode::InvalidRequest,
-            "path must not be empty",
-        ));
-    }
+    let target = resolve_path(&request.path, request.cwd.as_deref())?;
 
     let parent = target.parent().filter(|p| !p.as_os_str().is_empty());
     if let Some(parent) = parent {
@@ -189,13 +190,7 @@ fn temp_sibling(target: &Path, run_id: &str) -> PathBuf {
 
 /// The gateway entry point for `readFile`.
 pub async fn read_file(request: ReadFileRequest) -> Result<ReadFileOutcome, GatewayError> {
-    if request.path.trim().is_empty() {
-        return Err(GatewayError::new(
-            GatewayErrorCode::InvalidRequest,
-            "path must not be empty",
-        ));
-    }
-    let path = PathBuf::from(&request.path);
+    let path = resolve_path(&request.path, request.cwd.as_deref())?;
     let span = read_span(request.offset, request.limit);
     read_slice(&path, span).await
 }
@@ -315,6 +310,7 @@ mod tests {
                 run_id: "run-9".to_string(),
             },
             path: path.to_string_lossy().into_owned(),
+            cwd: None,
             content: content.to_string(),
         }
     }
@@ -326,6 +322,7 @@ mod tests {
                 run_id: "r-1".to_string(),
             },
             path: path.to_string_lossy().into_owned(),
+            cwd: None,
             offset,
             limit,
         }

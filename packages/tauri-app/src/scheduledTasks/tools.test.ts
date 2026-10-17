@@ -54,6 +54,20 @@ describe('审计摘要 — 凭据不落库', () => {
     expect(summary).not.toContain(TOKEN);
   });
 
+  test('名单之外的自造凭据头同样被脱敏', () => {
+    // 白名单式的枚举漏得静默：SDK 自造的头名（x-company-session、x-hub-sig…）
+    // 一个都不在名单里，而这恰恰是最容易漏出去的一类。
+    const summary = describeCall('httpRequest', {
+      url: 'https://api.example.com/v1/x',
+      headers: {
+        'X-Company-Session': TOKEN,
+        'X-Hub-Sig': TOKEN,
+        'X-CSRF-Token': TOKEN,
+      },
+    });
+    expect(summary).not.toContain(TOKEN);
+  });
+
   test('非敏感头照常记录，审计仍能看出这次请求带了什么', () => {
     // 全脱敏会让审计失去价值：分不清"没带 Content-Type"和"带了一个被抹掉的"。
     const summary = describeCall('httpRequest', {

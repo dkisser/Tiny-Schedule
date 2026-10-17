@@ -86,6 +86,24 @@ describe('the gateway tools — ADR-0008: 每一次调用都带 taskId/runId', (
     expect(sink.entries()[0]?.target).toBe('/repo');
   });
 
+  test("the file tools carry the task's working directory too", async () => {
+    // 「相对路径相对于执行目录」是这两个工具对模型许下的承诺。不把 cwd 发过去，
+    // 相对路径就落在应用碰巧启动的那个目录里，而记录里看不出差别。
+    const invoke = recordingInvoke({ path: 'a.txt', bytesWritten: 1 });
+    const tools = auditTools(buildScheduledTools(deps(invoke)), createAuditSink());
+
+    await call(tools.find((t) => t.name === 'writeFile') as AgentTool, {
+      path: 'notes.md',
+      content: 'x',
+    });
+    await call(tools.find((t) => t.name === 'readFile') as AgentTool, { path: 'notes.md' });
+
+    for (const c of invoke.calls) {
+      const request = c.args?.request as Record<string, unknown>;
+      expect(request?.cwd).toBe('/repo');
+    }
+  });
+
   test("the three app-data tools come along, so a prompt can read the user's own data", async () => {
     const tools = auditTools(buildScheduledTools(deps(recordingInvoke())), createAuditSink());
     expect(tools.map((t) => t.name).sort()).toEqual([

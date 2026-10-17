@@ -43,6 +43,17 @@ export function _resetInFlightForTest(): void {
 }
 
 /**
+ * 那本账本身，交给调度器用。
+ *
+ * 调度器派发前也要判一次重叠，而它判的那一次必须和 {@link runGuarded} 判的是同一
+ * 次——两份账本可以同时答"在跑"和"没在跑"，于是 `scheduler.isRunning()` 在手动运行
+ * 期间返回 false，恰好在这个人最想看"正在运行"的时刻撒谎。
+ */
+export function taskInFlight(): Set<string> {
+  return inFlight;
+}
+
+/**
  * 通知权限，与 api/timer.ts 同一套：macOS 的授权提示是一次性的，缓存住免得一次
  * 突发触发弹一串。
  */
@@ -113,8 +124,6 @@ export function createScheduledRuntime(deps: ScheduledRuntimeDeps) {
     invoke: deps.invoke ?? defaultInvoke(),
     ...deps.runner,
   });
-
-  /** 正在跑的定时任务共用模块级那本账，见文件头。 */
 
   /**
    * 跑一次，带重叠保护。

@@ -199,6 +199,9 @@ function harness(
     logger: silentLogger,
     now: () => clock,
     timers: { setInterval: () => null, clearInterval: () => undefined },
+    // 生产里这本账是进程级的，跨用例共享；测试里每个 harness 一本，否则上一个
+    // 用例悬着的运行会让下一个用例一开局就"在跑"。
+    inFlight: new Set<string>(),
     ...overrides,
   });
   return {

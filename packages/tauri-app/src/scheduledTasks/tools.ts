@@ -173,16 +173,36 @@ const CREDENTIAL_HEADERS = new Set([
   'api-key',
   'x-auth-token',
   'x-access-token',
+  // Not exhaustive on purpose — the pattern below is what actually carries the
+  // weight, and this list only short-circuits the ones that are always secret.
+  'x-amz-security-token',
+  'x-csrf-token',
+  'x-goog-api-key',
+  'x-rapidapi-key',
 ]);
+
+/**
+ * Header names that are credential-bearing without being on the list.
+ *
+ * The listed names are a starting set, not the rule: SDKs and gateways mint
+ * their own (`x-company-session`, `x-hub-sig`, `x-csrf`, …) and a name the list
+ * has never heard of is exactly the one that leaks. A substring test catches the
+ * whole family, so an unknown spelling fails closed rather than open.
+ */
+const CREDENTIAL_NAME_PATTERN =
+  /(auth|token|secret|password|passwd|api[-_]?key|apikey|session|credential|signature|sig\b)/i;
+
+/** Whether one header's value is a credential worth replacing with its size. */
+function isCredentialHeader(name: string): boolean {
+  return CREDENTIAL_HEADERS.has(name.toLowerCase()) || CREDENTIAL_NAME_PATTERN.test(name);
+}
 
 /** The header map with credential values replaced by their length. */
 function redactHeaders(headers: unknown): Record<string, unknown> {
   if (!isRecord(headers)) return {};
   const out: Record<string, unknown> = {};
   for (const [name, value] of Object.entries(headers)) {
-    out[name] = CREDENTIAL_HEADERS.has(name.toLowerCase())
-      ? `<${String(value).length} chars>`
-      : value;
+    out[name] = isCredentialHeader(name) ? `<${String(value).length} chars>` : value;
   }
   return out;
 }
@@ -354,7 +374,11 @@ export function buildGatewayTools(ctx: ScheduledToolDeps): AuditableTool[] {
       params: writeFileParams,
       description: '写入一个文件，返回写入字节数。相对路径相对于执行目录。',
       target: (p) => String(p.path ?? ''),
-      build: (p) => ({ path: String(p.path ?? ''), content: String(p.content ?? '') }),
+      build: (p) => ({
+        path: String(p.path ?? ''),
+        cwd: ctx.workingDirectory,
+        content: String(p.content ?? ''),
+      }),
     }),
     gatewayTool(ctx, {
       name: 'readFile',
@@ -365,6 +389,7 @@ export function buildGatewayTools(ctx: ScheduledToolDeps): AuditableTool[] {
       target: (p) => String(p.path ?? ''),
       build: (p) => ({
         path: String(p.path ?? ''),
+        cwd: ctx.workingDirectory,
         ...(p.offset !== undefined ? { offset: Number(p.offset) } : {}),
         ...(p.limit !== undefined ? { limit: Number(p.limit) } : {}),
       }),

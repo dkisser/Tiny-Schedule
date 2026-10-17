@@ -1,7 +1,7 @@
 import type { Schedule, ScheduledTask } from '@tiny-schedule/shared';
 import { type AiLogger, silentLogger } from '@/ai/logger';
 import type { DataStore } from '@/bridge/dataStore';
-import { createScheduledRuntime } from './runtime';
+import { createScheduledRuntime, taskInFlight } from './runtime';
 
 /**
  * 定时任务的调度器：到点触发，以及"前一次没跑完就跳过"这条领域规则。
@@ -114,6 +114,8 @@ export interface SchedulerDeps {
   logger?: AiLogger;
   now?: () => number;
   tickMs?: number;
+  /** 测试注入点：默认是运行时的进程级账本，不另建一份。 */
+  inFlight?: Set<string>;
   /** 注入定时器，测试里用假时钟驱动。 */
   timers?: {
     setInterval: (fn: () => void, ms: number) => TimerHandle;
@@ -137,8 +139,13 @@ export function createScheduler(deps: SchedulerDeps) {
 
   /** 调度表：id → 下一次触发。内存里的一份，随数据变化重建。 */
   const table = new Map<string, SchedulerEntry>();
-  /** 正在跑的定时任务；重叠保护的唯一真相来源。 */
-  const inFlight = new Set<string>();
+  /**
+   * 正在跑的定时任务；重叠保护的唯一真相来源。
+   *
+   * 取自 {@link taskInFlight} 而不是自己新建一个：手动「立即运行」也往同一本账里写，
+   * 两份账本会在手动运行期间各答各的，`isRunning()` 恰好在用户盯着看的时候返回 false。
+   */
+  const inFlight = deps.inFlight ?? taskInFlight();
   /** 在途的运行，用于让测试等它落地，也用于 stop() 时不再派发。 */
   const running = new Set<Promise<unknown>>();
   let handle: TimerHandle = null;

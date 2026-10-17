@@ -158,6 +158,23 @@ pub async fn scheduled_exec(request: ExecRequest) -> Result<ExecOutcome, Gateway
     exec(request).await.map_err(|e| e.with_context(&context))
 }
 
+/// The user's home directory, or `None` when the process cannot determine it.
+///
+/// `HOME` is the unix answer and `USERPROFILE` the Windows one; reading only the
+/// former leaves every `~` default failing on Windows, which is the same bug the
+/// expansion exists to remove. Tauri also hands a GUI-launched app a different
+/// environment than a shell does, so both names are checked rather than assumed.
+pub fn home_dir() -> Option<PathBuf> {
+    for name in ["HOME", "USERPROFILE"] {
+        if let Ok(value) = std::env::var(name) {
+            if !value.is_empty() {
+                return Some(PathBuf::from(value));
+            }
+        }
+    }
+    None
+}
+
 /// Expands a leading `~` to the user's home directory.
 ///
 /// Only the two forms a shell would also expand: `~` and `~/…`. A `~` that is
@@ -165,22 +182,33 @@ pub async fn scheduled_exec(request: ExecRequest) -> Result<ExecOutcome, Gateway
 /// is left alone — matching what a user typing into the dialog expects, and
 /// avoiding the surprise of a directory the shell would have treated literally.
 ///
+/// Both separators are accepted after the tilde: a Windows path typed by a user
+/// into the dialog is `~\projects\x`, and expanding only the forward slash would
+/// leave it literal on the platform that uses it.
+///
 /// Unresolvable (`HOME` unset, as under some launch daemons) falls back to the
 /// input unchanged, so the caller's `is_dir()` check produces the ordinary
 /// "not a directory" error naming the path rather than a tilde-specific one.
-fn expand_home(raw: &str) -> PathBuf {
+pub(super) fn expand_home(raw: &str) -> PathBuf {
     let rest = match raw.strip_prefix('~') {
         Some("") => Path::new(""),
-        Some(after_slash) => match after_slash.strip_prefix('/') {
+        Some(after_tilde) => match after_tilde.strip_prefix('/') {
             Some(tail) => Path::new(tail),
-            // `~user` is another user's home, which this does not resolve.
-            None => return PathBuf::from(raw),
+            None => match after_tilde.strip_prefix('\\') {
+                Some(tail) => Path::new(tail),
+                // `~user` is another user's home, which this does not resolve.
+                None => return PathBuf::from(raw),
+            },
         },
         None => return PathBuf::from(raw),
     };
-    match std::env::var("HOME") {
-        Ok(home) if !home.is_empty() => PathBuf::from(home).join(rest),
-        _ => PathBuf::from(raw),
+    match home_dir() {
+        // Joining an empty path would append a separator (`/home/x/`), which is
+        // the same directory but prints with a trailing slash in every error
+        // message and audit record that names the cwd.
+        Some(home) if rest.as_os_str().is_empty() => home,
+        Some(home) => home.join(rest),
+        None => PathBuf::from(raw),
     }
 }
 
@@ -189,7 +217,7 @@ fn expand_home(raw: &str) -> PathBuf {
 /// A missing directory surfaces as an ordinary spawn failure otherwise, and
 /// "No such file or directory (os error 2)" names neither the path nor which of
 /// the two (the directory, or the program) was missing.
-fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, GatewayError> {
+pub(super) fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, GatewayError> {
     let Some(raw) = cwd.map(str::trim).filter(|c| !c.is_empty()) else {
         return std::env::current_dir()
             .map_err(|e| GatewayError::new(GatewayErrorCode::Io, format!("cannot read cwd: {e}")));
@@ -202,6 +230,35 @@ fn resolve_cwd(cwd: Option<&str>) -> Result<PathBuf, GatewayError> {
         ));
     }
     Ok(path)
+}
+
+/// Resolves a path a caller sent, against the task's working directory.
+///
+/// The three cases the TS layer's own doc promises, in one place:
+///   - an absolute path is already decided, and is used as it stands;
+///   - a `~`-prefixed path expands against the home directory;
+///   - anything else is relative to the task's execution directory.
+///
+/// Without this, a relative path lands wherever the OS happens to have started
+/// the app from, and the "execution directory" in the tool description is a
+/// claim rather than a fact.
+pub(super) fn resolve_path(raw: &str, cwd: Option<&str>) -> Result<PathBuf, GatewayError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(GatewayError::new(
+            GatewayErrorCode::InvalidRequest,
+            "path must not be empty",
+        ));
+    }
+    let as_path = Path::new(trimmed);
+    if as_path.is_absolute() {
+        return Ok(as_path.to_path_buf());
+    }
+    if trimmed.starts_with('~') {
+        return Ok(expand_home(trimmed));
+    }
+    let base = resolve_cwd(cwd)?;
+    Ok(base.join(as_path))
 }
 
 /// The captured result of one finished child.
@@ -461,20 +518,62 @@ mod tests {
         // path, so `is_dir()` rejects it and every shell call in every such task
         // fails — the default must mean "the user's home", not "a directory
         // named ~".
-        let home = std::env::var("HOME").expect("HOME");
-        assert_eq!(expand_home("~"), PathBuf::from(&home));
-        assert_eq!(expand_home("~/"), PathBuf::from(&home));
-        assert_eq!(
-            expand_home("~/projects/x"),
-            PathBuf::from(&home).join("projects/x")
-        );
+        let Some(home) = home_dir() else {
+            // No home to expand against; the fallback is covered separately.
+            return;
+        };
+        assert_eq!(expand_home("~"), home);
+        assert_eq!(expand_home("~/"), home);
+        assert_eq!(expand_home("~/projects/x"), home.join("projects/x"));
         // A `~` that is not the whole first segment is an ordinary name.
         assert_eq!(expand_home("~backup"), PathBuf::from("~backup"));
         assert_eq!(expand_home("/abs/~/x"), PathBuf::from("/abs/~/x"));
     }
 
     #[test]
+    fn a_bare_tilde_does_not_gain_a_trailing_separator() {
+        // Every error message and audit record names the cwd; `/home/x/` is the
+        // same directory, and printing it that way reads as a different path.
+        let Some(home) = home_dir() else { return };
+        assert_eq!(expand_home("~").to_string_lossy(), home.to_string_lossy());
+    }
+
+    #[test]
+    fn a_relative_path_resolves_against_the_task_directory() {
+        let dir = std::env::temp_dir().join("tiny-schedule-gateway-resolve");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+
+        let resolved = resolve_path("out/report.md", Some(dir.to_string_lossy().as_ref()))
+            .expect("a relative path resolves against the task's directory");
+        assert!(
+            resolved.ends_with("out/report.md"),
+            "expected the relative path joined onto the task directory, got {}",
+            resolved.display()
+        );
+        // Compared against the un-canonicalized scratch dir: `resolve_path` does
+        // not resolve symlinks, and canonicalizing one side would test that.
+        assert_eq!(resolved.parent().unwrap().parent().unwrap(), dir);
+    }
+
+    #[test]
+    fn an_absolute_path_is_left_exactly_as_written() {
+        let abs = PathBuf::from("/tmp").join("tiny-schedule-abs");
+        assert_eq!(
+            resolve_path(&abs.to_string_lossy(), Some("/nowhere/at/all")).expect("absolute"),
+            abs
+        );
+    }
+
+    #[test]
+    fn an_empty_path_is_refused_before_it_is_resolved() {
+        let error = resolve_path("   ", Some("~")).expect_err("blank path must be refused");
+        assert_eq!(error.code, GatewayErrorCode::InvalidRequest);
+    }
+
+    #[test]
     fn a_tilde_cwd_is_accepted_by_the_resolver() {
+        let Some(home) = home_dir() else { return };
         let mut req = request("pwd", &[]);
         req.cwd = Some("~".to_string());
         let outcome = tokio::runtime::Builder::new_current_thread()
@@ -484,11 +583,10 @@ mod tests {
             .block_on(exec(req))
             .expect("`~` is the documented default, so it must resolve");
         assert!(!outcome.timed_out);
-        let home = std::env::var("HOME").expect("HOME");
         assert_eq!(
             outcome.stdout.trim(),
             std::fs::canonicalize(&home)
-                .unwrap_or_else(|_| PathBuf::from(&home))
+                .unwrap_or(home)
                 .to_string_lossy()
         );
     }
