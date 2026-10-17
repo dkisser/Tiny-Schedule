@@ -1,7 +1,7 @@
 import type { Schedule, ScheduledTask } from '@tiny-schedule/shared';
 import { type AiLogger, silentLogger } from '@/ai/logger';
 import type { DataStore } from '@/bridge/dataStore';
-import { createScheduledRuntime, taskInFlight } from './runtime';
+import { createScheduledRuntime, type ScheduledRuntimeDeps, taskInFlight } from './runtime';
 
 /**
  * 定时任务的调度器：到点触发，以及"前一次没跑完就跳过"这条领域规则。
@@ -279,21 +279,48 @@ export type Scheduler = ReturnType<typeof createScheduler>;
  * 与未来的重新初始化里都可能被调用两次，而两个循环会让每个到点的任务跑两遍。
  */
 let started: Scheduler | null = null;
+/** 数据订阅；`_resetSchedulerForTest` 要一并退订，否则跨用例泄漏。 */
+let schedulerUnsubscribe: (() => void) | null = null;
 
-export async function startScheduler(store: DataStore, logger?: AiLogger): Promise<Scheduler> {
+/**
+ * 测试注入点：`startScheduler` 组装真实 runtime，测试需要一个可控的 Agent
+ * 才能观察一次触发。没有这个参数，接线层就是零覆盖——而接线恰恰是坏掉的地方。
+ */
+export type StartSchedulerOverrides = Pick<ScheduledRuntimeDeps, 'runner' | 'invoke'>;
+
+export async function startScheduler(
+  store: DataStore,
+  logger?: AiLogger,
+  overrides?: StartSchedulerOverrides,
+): Promise<Scheduler> {
   if (started) return started;
   const runtime = createScheduledRuntime({
     store,
     ...(logger ? { logger } : {}),
+    ...(overrides?.invoke ? { invoke: overrides.invoke } : {}),
+    ...(overrides?.runner ? { runner: overrides.runner } : {}),
   });
   const scheduler = createScheduler({
     getTasks: async () => Object.values((await store.get()).scheduledTasks),
-    run: (task) => runtime.runGuarded(task, 'scheduled').then(({ run }) => run),
-    // 调度器在派发前已经判过一次重叠，recordSkipped 只负责把这条 skipped 记下来，
-    // 所以直连 runner，不该再走一遍 runGuarded 的守卫。
+    // 直连 runner，不走 runGuarded：`dispatch` 已经把 task.id 记进账本（那正是
+    // 它做重叠判断的方式），而 runGuarded 的第一件事就是查同一本账本。接在这里
+    // 的话每一次定时触发都会走进跳过分支——任务被记成"已跳过"，Agent 从未被创建，
+    // 而唯一的症状是一条 debug 日志。
+    //
+    // 也就是说：`runGuarded` 是给**手动**入口的，调度器自己已经判过一次重叠。
+    run: (task) => runtime.runner.runScheduledTask(task, 'scheduled').then(({ run }) => run),
     recordSkipped: (task) => runtime.runner.recordSkipped(task, 'scheduled'),
     ...(logger ? { logger } : {}),
   });
+  // 数据一变就重建调度表。没有这条订阅，表只在启动时建一次：新建的任务排在表外
+  // 永不触发（界面却照常显示「下次触发 明天 09:00」），删掉的任务留在表里继续
+  // 触发。模块注释一直写着"数据变更后由调用方 refresh()"，而那个调用方不存在。
+  const unsubscribe = store.onDataChanged(() => {
+    void scheduler.refresh().catch((error: unknown) => {
+      logger?.error({ action: 'scheduler:refreshFailed', error });
+    });
+  });
+  schedulerUnsubscribe = unsubscribe;
   await scheduler.start();
   started = scheduler;
   return scheduler;
@@ -303,4 +330,6 @@ export async function startScheduler(store: DataStore, logger?: AiLogger): Promi
 export function _resetSchedulerForTest(): void {
   started?.stop();
   started = null;
+  schedulerUnsubscribe?.();
+  schedulerUnsubscribe = null;
 }
