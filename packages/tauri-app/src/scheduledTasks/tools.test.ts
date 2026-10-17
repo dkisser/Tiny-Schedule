@@ -103,3 +103,40 @@ describe('审计摘要 — 凭据不落库', () => {
     expect(summary).toContain('status');
   });
 });
+
+describe('审计摘要 — 响应侧同样不落凭据', () => {
+  function summarize(name: string, result: unknown): string {
+    const tool = tools().find((t) => t.tool.name === name);
+    if (!tool) throw new Error(`no such tool: ${name}`);
+    return tool.summarize(JSON.stringify(result));
+  }
+
+  test('http 响应体不进审计摘要', () => {
+    // 请求头已经脱敏了，响应体却是同一个洞的另一侧：一个把 Authorization
+    // 原样回显的 API（调试端点、错误追踪服务都不罕见）就此把凭据写进
+    // data.json 和每一份轮转备份。审计需要知道"这次拿到了多少字节"，不需要
+    // 知道内容。
+    const summary = summarize('httpRequest', {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: `{"echoed":"Bearer ${TOKEN}"}`,
+      truncated: false,
+    });
+    expect(summary).not.toContain(TOKEN);
+    // 状态码与体积是审计真正要留的。
+    expect(summary).toContain('status=200');
+  });
+
+  test('命令的 stderr 照常进摘要 —— 那里是失败原因', () => {
+    // 与响应体相反：一条失败命令的诊断信息就在 stderr 里，抹掉它等于让
+    // "这次运行失败了"永远没有下文。
+    const summary = summarize('runCommand', {
+      exitCode: 1,
+      stdout: '',
+      stderr: 'error: build failed at step 3',
+      timedOut: false,
+    });
+    expect(summary).toContain('exit=1');
+    expect(summary).toContain('build failed at step 3');
+  });
+});

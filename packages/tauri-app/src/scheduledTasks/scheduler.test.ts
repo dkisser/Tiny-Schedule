@@ -121,13 +121,13 @@ describe('nextTriggerAt — 每月', () => {
     expect(human(next)).toBe('2026-11-17 09:00');
   });
 
-  test('31 号在只有 30 天的月份收敛到月末', () => {
-    // 11 月先于 12 月到达，所以答案是 11-30 而不是 12-31 —— 收敛发生在**第一个**
-    // 没有 31 号的月份上。
+  test('31 号跳过没有这一天的月份，而不是收敛到月末', () => {
+    // 界面在选择器下面承诺的是「没有这一天的月份（如 2 月 31 日）会跳过，
+    // 不补跑」。早先的实现收敛到 28/29 号，于是「每月 31 号」一年多跑三次，
+    // 跑在用户被明确告知不会跑的日期上。这里按承诺。
     expect(
       human(nextTriggerAt({ kind: 'monthly', dayOfMonth: 31, time: '09:00' }, local(2026, 11, 5))),
-    ).toBe('2026-11-30 09:00');
-    // 同上：从 10-31 出发，第一档落在 11-30。
+    ).toBe('2026-12-31 09:00');
     expect(
       human(
         nextTriggerAt(
@@ -135,25 +135,33 @@ describe('nextTriggerAt — 每月', () => {
           local(2026, 10, 31, 10, 0),
         ),
       ),
-    ).toBe('2026-11-30 09:00');
-    // 2027 年 1 月 31 日之后是 2 月，只有 28 天。
+    ).toBe('2026-12-31 09:00');
+    // 2027 年 1 月 31 日之后是 2 月（28 天），跳过；3 月才回来。
     expect(
       human(nextTriggerAt({ kind: 'monthly', dayOfMonth: 31, time: '09:00' }, local(2027, 2, 1))),
-    ).toBe('2027-02-28 09:00');
+    ).toBe('2027-03-31 09:00');
   });
 
-  test('闰年的 2 月收敛到 29 号', () => {
+  test('闰年的 2 月（29 天）同样跳过 31 号', () => {
+    // 29 < 31，所以闰年也不例外：跳过的判据是"这个月有没有这一天"，
+    // 而不是"这个月够不够长"。
     expect(
       human(nextTriggerAt({ kind: 'monthly', dayOfMonth: 31, time: '09:00' }, local(2028, 2, 1))),
-    ).toBe('2028-02-29 09:00');
+    ).toBe('2028-03-31 09:00');
   });
 
-  test('收敛后的时刻已过则再退一个月', () => {
-    // 2 月 28 日 10:00 问一个 09:00 的 31 号任务：2 月那一档（收敛到 28 号 09:00）
-    // 已经过了，必须退到 3 月 31 号，而不是留在 2 月再报一次。
+  test('30 号跳过 2 月但踩上 4 月与 6 月——按"有没有这一天"判', () => {
+    // 4 月和 6 月各有 30 天，所以 30 号在这两个月是存在的，只有 2 月被跳过。
+    expect(
+      human(nextTriggerAt({ kind: 'monthly', dayOfMonth: 30, time: '09:00' }, local(2027, 3, 31))),
+    ).toBe('2027-04-30 09:00');
+  });
+
+  test('跳过一个之后下一个有这一天的月份仍然命中', () => {
+    // 跳过的月份不消耗下一档：2 月跳过之后，答案必须是 3 月 31 号。
     const next = nextTriggerAt(
       { kind: 'monthly', dayOfMonth: 31, time: '09:00' },
-      local(2027, 2, 28, 10, 0),
+      local(2027, 1, 31, 10, 0),
     );
     expect(human(next)).toBe('2027-03-31 09:00');
   });
@@ -482,5 +490,34 @@ describe('生命周期', () => {
     await h.scheduler.start();
     await h.scheduler.start();
     expect(arms).toBe(1);
+  });
+});
+
+describe('stop 之后调度表真的停了', () => {
+  test('stop 之后 tick 不再派发任何任务', async () => {
+    // 原来的守卫是 `handle === null && table.size === 0`：两个条件都要成立才
+    // 早退。stop() 只把 handle 置空，调度表还在，于是「停用的调度器」照样
+    // 从一张本该拆掉的表里派发真实运行。
+    const h = harness([task()], local(2026, 10, 17, 8, 0));
+    await h.scheduler.start();
+    expect(h.scheduler.peek()).toHaveLength(1);
+
+    h.scheduler.stop();
+    for (const entry of h.scheduler.peek()) entry.nextAt = 0;
+    await h.scheduler.tick();
+
+    expect(h.runs).toHaveLength(0);
+  });
+
+  test('stop 之后调度表被清空，peek 不再报告已拆掉的任务', async () => {
+    // stop 之后 peek 仍列出任务，是"这个调度器还活着"的假象：测试据此断言
+    // 什么都没发生时，其实那张表正是残留物本身。
+    const h = harness([task()], local(2026, 10, 17, 8, 0));
+    await h.scheduler.start();
+
+    h.scheduler.stop();
+
+    expect(h.scheduler.peek()).toHaveLength(0);
+    expect(h.scheduler.isRunning('st1')).toBe(false);
   });
 });

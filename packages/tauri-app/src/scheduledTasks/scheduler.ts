@@ -66,16 +66,25 @@ export function nextTriggerAt(schedule: Schedule, from: number): number {
       if (candidate > from) next = candidate;
     }
   } else {
-    // 扫未来 13 个月，同理：今天这一档被否掉之后，下个月的同一号必然在前。
+    // 扫未来 13 个月。12 这个上界对"跳过"语义仍然够：任何 `dayOfMonth` 都
+    // 至少在 28 天以上的月份存在，所以最长连跳两个月（31 号遇上 2 月）之后必然
+    // 命中。
     for (let offset = 0; offset <= 12 && next === null; offset += 1) {
       const probe = new Date(year, month + offset, 1);
-      // 31 号在 2 月不存在，收敛到当月最后一天。这是调度该跳过的那个月，不是
-      // 该拒绝这个定时任务的时刻。
-      const target = Math.min(
+      // 没有这一天的月份**跳过**，不收敛到月末。界面在选择器下面就是这么承诺的
+      // （「没有这一天的月份（如 2 月 31 日）会跳过，不补跑」），而早先的实现
+      // 悄悄收敛到 28/29 号——于是「每月 31 号」一年多跑三次，跑在用户被明确
+      // 告知不会跑的日期上。承诺与实现只能留一个，这里按承诺。
+      //
+      // `dayOfMonth` 是 1..31，跳过之后就等于没有候选，所以先判存在性再算时刻。
+      if (daysInMonth(probe.getFullYear(), probe.getMonth()) < schedule.dayOfMonth) continue;
+      const candidate = at(
+        probe.getFullYear(),
+        probe.getMonth(),
         schedule.dayOfMonth,
-        daysInMonth(probe.getFullYear(), probe.getMonth()),
+        hours,
+        minutes,
       );
-      const candidate = at(probe.getFullYear(), probe.getMonth(), target, hours, minutes);
       if (candidate > from) next = candidate;
     }
   }
@@ -149,6 +158,14 @@ export function createScheduler(deps: SchedulerDeps) {
   /** 在途的运行，用于让测试等它落地，也用于 stop() 时不再派发。 */
   const running = new Set<Promise<unknown>>();
   let handle: TimerHandle = null;
+  /**
+   * 是否处于"已启动"状态。
+   *
+   * 不能用 `handle !== null` 代替：注入的假 setInterval 可能返回 null（测试里就是
+   * 如此），而 stop() 之后 handle 也是 null——两种状态会无法区分，`tick` 就分不清
+   * "该干活"和"该早退"。
+   */
+  let started = false;
 
   const build = (task: ScheduledTask, at0: number): SchedulerEntry => ({
     task,
@@ -213,7 +230,12 @@ export function createScheduler(deps: SchedulerDeps) {
    * `settled()` 让测试能等到落地。
    */
   const tick = async (): Promise<void> => {
-    if (handle === null && table.size === 0) return; // 没 start 过也没数据
+    // 一个显式的运行标志，而不是 `handle !== null`：注入的假 setInterval 可能
+    // 返回 null（测试里就是这样），于是"已启动"和"已停止"用 handle 区分不开。
+    // 守卫原先写成 `handle === null && table.size === 0`，两个条件都要成立才
+    // 早退，于是 stop() 只清 handle 不清表时，停用的调度器仍从一张本该拆掉的
+    // 表里派发真实运行。
+    if (!started) return;
     const at0 = now();
     const due = [...table.values()].filter((entry) => entry.nextAt <= at0);
     for (const entry of due) {
@@ -236,7 +258,8 @@ export function createScheduler(deps: SchedulerDeps) {
    * 轮才进表，而更糟的是这一轮里它本来可能该触发。
    */
   const start = async (): Promise<void> => {
-    if (handle !== null) return;
+    if (started) return;
+    started = true;
     await refresh();
     // 排到下一个整周期边界上，而不是"启动后 30 秒"：漂移会让所有任务的判定
     // 落在不同的秒数上，而一个 09:00:00 的任务被 09:00:07 判为到点并不是错，
@@ -246,9 +269,18 @@ export function createScheduler(deps: SchedulerDeps) {
     // 已经把每个任务的下一次算到了"此刻之后"——立刻 tick 只会读到全部未到期。
   };
 
+  /**
+   * 停掉循环并拆掉调度表。
+   *
+   * 清表不是为了省内存：`peek()` / `isRunning()` 是给界面与测试看的，而一张
+   * 残留的表会让它们报告一个已经停掉的调度器仍在管着这些任务。下次 `start()`
+   * 会由 `refresh()` 重建它。
+   */
   const stop = (): void => {
     if (handle !== null) timers.clearInterval(handle);
     handle = null;
+    started = false;
+    table.clear();
   };
 
   return {
@@ -278,7 +310,7 @@ export type Scheduler = ReturnType<typeof createScheduler>;
  * 幂等：重复调用返回同一个调度器，第二次不排第二个循环。`bootstrap()` 在热重载
  * 与未来的重新初始化里都可能被调用两次，而两个循环会让每个到点的任务跑两遍。
  */
-let started: Scheduler | null = null;
+let startedScheduler: Scheduler | null = null;
 /** 数据订阅；`_resetSchedulerForTest` 要一并退订，否则跨用例泄漏。 */
 let schedulerUnsubscribe: (() => void) | null = null;
 
@@ -293,7 +325,7 @@ export async function startScheduler(
   logger?: AiLogger,
   overrides?: StartSchedulerOverrides,
 ): Promise<Scheduler> {
-  if (started) return started;
+  if (startedScheduler) return startedScheduler;
   const runtime = createScheduledRuntime({
     store,
     ...(logger ? { logger } : {}),
@@ -322,14 +354,14 @@ export async function startScheduler(
   });
   schedulerUnsubscribe = unsubscribe;
   await scheduler.start();
-  started = scheduler;
+  startedScheduler = scheduler;
   return scheduler;
 }
 
 /** 测试用：丢掉单例，让下一个 startScheduler 重新接。 */
 export function _resetSchedulerForTest(): void {
-  started?.stop();
-  started = null;
+  startedScheduler?.stop();
+  startedScheduler = null;
   schedulerUnsubscribe?.();
   schedulerUnsubscribe = null;
 }

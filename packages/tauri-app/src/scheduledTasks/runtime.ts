@@ -56,15 +56,34 @@ export function taskInFlight(): Set<string> {
 /**
  * 通知权限，与 api/timer.ts 同一套：macOS 的授权提示是一次性的，缓存住免得一次
  * 突发触发弹一串。
+ *
+ * **只缓存"已授权"。** 被拒也缓存住，等于把一次用户选择变成进程终身：他在系统
+ * 设置里后来打开了通知，这个进程之后每一次定时运行都仍然发不出去，而记录里只
+ * 留一句 warn——用户看到的是"通知坏了"，去哪儿查都查不到。
+ *
+ * 代价是被拒时每次运行都问一次宿主。`isPermissionGranted` 是本地读取、不会弹框，
+ * 而 `requestPermission` 在 macOS 上只对**尚未决定过**的应用弹一次，用户拒绝过
+ * 之后它直接返回 denied ——所以"每次都问"不会退化成一串弹窗。
  */
-let permissionOnce: Promise<boolean> | null = null;
+let permissionGranted: Promise<boolean> | null = null;
 
 async function ensureNotificationPermission(): Promise<boolean> {
-  permissionOnce ??= (async () => {
+  if (permissionGranted) return permissionGranted;
+  const check = (async () => {
     if (await isPermissionGranted()) return true;
     return (await requestPermission()) === 'granted';
   })();
-  return permissionOnce;
+  // 先挂上再 await：并发调用共用同一个 in-flight 请求，而不是各问一次。
+  permissionGranted = check;
+  const granted = await check;
+  // 只有拒绝的那一侧不留缓存。
+  if (!granted) permissionGranted = null;
+  return granted;
+}
+
+/** 测试用：丢掉权限缓存。 */
+export function _resetPermissionForTest(): void {
+  permissionGranted = null;
 }
 
 /**

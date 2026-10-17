@@ -15,7 +15,7 @@
 //!     instead of the head of it.
 //!
 //! Paths are resolved against the task's execution directory by
-//! [`resolve_path`]: an absolute path is taken as written, a `~`-prefixed one
+//! [`resolve_path`](super::paths::resolve_path): an absolute path is taken as written, a `~`-prefixed one
 //! expands against the home directory, and anything else is relative to the
 //! task's `cwd`. Nothing restricts *which* path that is; per ADR-0008, an
 //! unreadable or unwriteable path is simply reported as an error.
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::exec::resolve_path;
+use super::paths::resolve_path;
 use super::{to_text, GatewayContext, GatewayError, GatewayErrorCode};
 
 /// Largest slice returned by one read, in bytes.

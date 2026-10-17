@@ -106,6 +106,8 @@ describe('the gateway tools — ADR-0008: 每一次调用都带 taskId/runId', (
 
   test("the three app-data tools come along, so a prompt can read the user's own data", async () => {
     const tools = auditTools(buildScheduledTools(deps(recordingInvoke())), createAuditSink());
+    // 这个列表同时是一道闸：定时运行能碰到的东西就这么多。往里加名字是一次
+    // 有意的决定，而不是"chat 那边加了什么它就跟着有什么"。
     expect(tools.map((t) => t.name).sort()).toEqual([
       'getSummary',
       'httpRequest',

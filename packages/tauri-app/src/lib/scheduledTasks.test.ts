@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Schedule, ScheduledTask, ScheduledTaskRun } from '@tiny-schedule/shared';
+import { nextTriggerAt } from '@/scheduledTasks/scheduler';
 import {
   calendarDaysBetween,
   formatDuration,
@@ -86,6 +87,40 @@ describe('nextRunAt', () => {
     expect(nextRunAt({ kind: 'monthly', dayOfMonth: 31, time: '09:00' }, NOVEMBER_NOON)).toBe(
       new Date(2026, 11, 31, 9, 0).getTime(),
     );
+  });
+
+  test('界面算出的「下次触发」与调度器是同一个答案', () => {
+    // 这一条的存在理由是**同一个频率有两个实现**：界面的 `nextRunAt` 与主进程的
+    // `nextTriggerAt`。它们一度对「每月 31 号」的 2 月给出不同答案——界面说 3 月
+    // 31 日，调度器钳位到 2 月 28 日，于是界面把一个不会发生的日期当作事实
+    // 摆在用户面前。
+    //
+    // 界面自己的推算可以错（后果只是提示不准），但它与调度器不一致就是另一回事：
+    // 那是在对用户撒谎。逐个频率比一遍，把这个性质固定住。
+    const cases: Schedule[] = [
+      { kind: 'daily', time: '09:00' },
+      { kind: 'weekly', daysOfWeek: [1, 4], time: '08:30' },
+      { kind: 'monthly', dayOfMonth: 31, time: '09:00' },
+      { kind: 'monthly', dayOfMonth: 30, time: '09:00' },
+      { kind: 'monthly', dayOfMonth: 29, time: '09:00' },
+      { kind: 'monthly', dayOfMonth: 1, time: '00:05' },
+    ];
+    // 覆盖 1 月 31 日之后（连跳 2 月）、闰年 2 月、以及月中这三种起算点。
+    const froms = [
+      new Date(2026, 0, 31, 10, 0).getTime(),
+      new Date(2027, 0, 31, 10, 0).getTime(),
+      new Date(2028, 1, 1, 10, 0).getTime(),
+      new Date(2026, 6, 17, 8, 0).getTime(),
+    ];
+    for (const schedule of cases) {
+      for (const from of froms) {
+        expect({ schedule, from, shown: nextRunAt(schedule, from) }).toEqual({
+          schedule,
+          from,
+          shown: nextTriggerAt(schedule, from),
+        });
+      }
+    }
   });
 
   test('时刻格式非法时返回 null，而不是给出一个假时间', () => {

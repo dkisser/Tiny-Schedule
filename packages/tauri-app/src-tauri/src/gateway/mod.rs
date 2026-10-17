@@ -52,6 +52,7 @@
 pub mod exec;
 pub mod files;
 pub mod http;
+pub mod paths;
 
 use serde::{Deserialize, Serialize};
 

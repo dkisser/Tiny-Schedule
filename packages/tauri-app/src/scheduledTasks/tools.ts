@@ -146,7 +146,18 @@ function outcomeSummary(resultText: string): string {
   if (r.truncated === true) parts.push('truncated');
   // A failed command writes the reason to stderr, so an exit=0 summary with no
   // detail would hide exactly the case a reader opens the run record to see.
-  const detail = [r.stderr, r.body].find((v) => typeof v === 'string' && v.trim() !== '');
+  //
+  // The response **body** is deliberately not a detail source. Redacting request
+  // headers while pasting the response body into the same record leaves the
+  // credential half-defended: an API that echoes the Authorization back — a debug
+  // endpoint, an error tracker — puts the token in data.json and in every rotated
+  // backup. The size is recorded above, which is the part worth keeping.
+  const detail = [r.stderr].find((v) => typeof v === 'string' && v.trim() !== '');
+  if (parts.length === 0 && r.body !== undefined) {
+    // No shape fields at all: still say something about the payload rather than
+    // dumping a JSON blob that may contain a credential.
+    return `body=<${String(r.body).length} chars>`;
+  }
   return parts.length > 0
     ? `${parts.join(' ')} | ${String(detail ?? '').trim()}`
     : JSON.stringify(r);
@@ -405,6 +416,22 @@ export function buildGatewayTools(ctx: ScheduledToolDeps): AuditableTool[] {
  *
  * 它们的 target 是 `app:data` —— 不碰执行目录，也不出网，审计记的是"读了应用数据"。
  */
+/**
+ * 定时运行可以调用的应用内工具名。
+ *
+ * **一个显式名单，而不是"chat 有的都算"。** 聊天是有人盯着的：工具失败会有人
+ * 补救，写操作有人确认。定时任务是在**网关凭据全开**的上下文里无人值守地跑，
+ * 两者不是同一个风险等级。
+ *
+ * 继承 `buildChatTools` 的全部意味着：将来有人给聊天加一个写工具（`updateTask`
+ * 之类），它会**静默地**出现在定时运行的工具集里——没有编译错误，没有测试失败，
+ * 没有 ADR 复核。而无人值守的执行会把这次写入照做。
+ *
+ * 名单变短是刻意的：少一个工具，代价是一个定时 prompt 写不了某件事；多一个，
+ * 代价是一整类操作在无人值守下变得可达，且没人会发现。
+ */
+const SCHEDULED_APP_TOOLS = new Set(['queryTasks', 'getSummary', 'listProjects']);
+
 export function buildAppDataTools(
   ctx: Pick<ScheduledToolDeps, 'getData' | 'today'>,
 ): AuditableTool[] {
@@ -418,7 +445,9 @@ export function buildAppDataTools(
     // of what was read, and the interceptor truncates whatever comes back.
     summarize: (resultText) => (resultText !== '' ? resultText : 'ok'),
   });
-  return buildChatTools(ctx.getData, ctx.today).map(asAuditable);
+  return buildChatTools(ctx.getData, ctx.today)
+    .filter((tool) => SCHEDULED_APP_TOOLS.has(tool.name))
+    .map(asAuditable);
 }
 
 /** Everything a scheduled run's agent can call. Nothing else is reachable. */
