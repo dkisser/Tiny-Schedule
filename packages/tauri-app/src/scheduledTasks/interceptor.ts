@@ -60,12 +60,34 @@ export function createAuditSink(now: () => number = Date.now): AuditSink {
   };
 }
 
+/**
+ * Clips to `limit`, keeping the head **and** the tail.
+ *
+ * Both ends, because a single-ended clip silently picks the wrong one. Keeping
+ * only the head turns a 40 KB compiler log into 8000 characters of warnings: the
+ * model reads it, concludes the build passed, and the `error TS2304` it needed
+ * is in the 2 KB that were dropped. Keeping only the tail loses the context that
+ * says which run this was.
+ *
+ * The marker states *how much* was dropped, because a bare ellipsis reads as
+ * "this is the whole thing" — exactly the wrong conclusion for the one reader
+ * the record exists for.
+ *
+ * A run with two-ended clipping is left alone rather than having its head
+ * shortened to make room for a tail: when almost everything fits, the tail adds
+ * nothing the head does not already have.
+ */
 export function truncate(text: string, limit: number): string {
   if (text.length <= limit) return text;
-  // The marker says *how much* was dropped. A bare ellipsis reads as "this is
-  // the whole thing" — which for a truncated command's output is exactly the
-  // wrong conclusion for the one reader the record exists for.
-  return `${text.slice(0, limit)}…[已截断，共 ${text.length} 字符]`;
+  const marker = `…[已截断，共 ${text.length} 字符]`;
+  // 3:1 in favour of the head. The head establishes which run this is; the tail
+  // carries the error, but a traceback is a handful of lines, not thousands of
+  // characters, so it needs far less room than the log it is buried in.
+  const budget = limit - marker.length;
+  if (budget <= 0) return `${text.slice(0, limit)}${marker}`;
+  const headRoom = Math.floor(budget * 0.75);
+  const tailRoom = budget - headRoom;
+  return `${text.slice(0, headRoom)}${marker}${tailRoom > 0 ? text.slice(text.length - tailRoom) : ''}`;
 }
 
 function errorResult(toolName: string, message: string): ToolResult {

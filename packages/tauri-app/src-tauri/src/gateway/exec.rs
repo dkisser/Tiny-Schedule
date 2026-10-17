@@ -16,7 +16,11 @@
 //!   - a per-stream output cap ([`MAX_OUTPUT_BYTES`]), because `cat` on a
 //!     4 GB core dump must not take the app down with it;
 //!   - drain-to-EOF after the cap, so a child that keeps writing exits normally
-//!     instead of blocking forever on a full pipe (see [`read_capped`]).
+//!     instead of blocking forever on a full pipe (see [`read_into`]).
+//!
+//! A killed child keeps whatever it had already written: the timeout arm drains
+//! both pipes after the reap, so a command that ran for the full deadline
+//! reports how far it got rather than an empty string beside `timedOut`.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -45,6 +49,14 @@ pub const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 /// without a `wait` leaves a zombie nobody will ever collect — one per timed-out
 /// command, on a path a scheduler can hit repeatedly.
 const REAP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How long to spend reading a killed child's pipes before giving up on them.
+///
+/// The child is already gone by this point, so both write ends are closed and the
+/// reads end at whatever is buffered — this is a backstop, not the expected
+/// path. Short anyway: it runs on the way to answering the caller, and a
+/// truncated tail is a better answer than a wait that never finishes.
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Read granularity while draining a pipe.
 const READ_CHUNK: usize = 16 * 1024;
@@ -122,32 +134,99 @@ pub async fn exec(request: ExecRequest) -> Result<ExecOutcome, GatewayError> {
     })?;
 
     let timeout = clamp_timeout(request.timeout_ms, MAX_EXEC_TIMEOUT);
-    let collected = match tokio::time::timeout(timeout, collect(&mut child)).await {
-        Ok(Ok(collected)) => collected,
-        Ok(Err(e)) => return Err(e),
-        Err(_) => {
-            reap(&mut child, &request, &cwd).await;
-            return Ok(ExecOutcome {
-                exit_code: None,
-                signal: None,
-                stdout: String::new(),
-                stderr: String::new(),
-                stdout_truncated: false,
-                stderr_truncated: false,
-                timed_out: true,
-            });
-        }
+    // The buffers live outside the `collect` future on purpose. A timeout drops
+    // that future mid-read, so anything kept only inside it dies with it — and
+    // the bytes a command printed before the deadline are exactly the ones worth
+    // keeping. Writing into shared buffers here means the timeout arm can still
+    // hand them back.
+    let stdout_buf = SharedBuffer::new(MAX_OUTPUT_BYTES);
+    let stderr_buf = SharedBuffer::new(MAX_OUTPUT_BYTES);
+    // The pipes are handed to `collect` by mutable reference rather than taken
+    // out of the child, so the timeout arm still owns them afterwards and can
+    // drain whatever the killed process had already written.
+    let status =
+        match tokio::time::timeout(timeout, collect(&mut child, &stdout_buf, &stderr_buf)).await {
+            Ok(Ok(status)) => Some(status),
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                reap(&mut child, &request, &cwd).await;
+                // Whatever the killed child had already written may still be sitting
+                // in the pipe, unread. Draining it now is the difference between a
+                // run record that shows how far the command got and one that shows
+                // only the word "timed out" — and for a build that ran for ten
+                // minutes, that evidence is the whole point of looking.
+                drain_after_kill(&mut child, &stdout_buf, &stderr_buf).await;
+                None
+            }
+        };
+
+    let Some(status) = status else {
+        return Ok(ExecOutcome {
+            exit_code: None,
+            signal: None,
+            stdout: to_text(stdout_buf.take()),
+            stderr: to_text(stderr_buf.take()),
+            stdout_truncated: stdout_buf.truncated(),
+            stderr_truncated: stderr_buf.truncated(),
+            timed_out: true,
+        });
     };
 
     Ok(ExecOutcome {
-        exit_code: collected.status.code(),
-        signal: exit_signal(&collected.status),
-        stdout: to_text(collected.stdout),
-        stderr: to_text(collected.stderr),
-        stdout_truncated: collected.stdout_truncated,
-        stderr_truncated: collected.stderr_truncated,
+        exit_code: status.code(),
+        signal: exit_signal(&status),
+        stdout: to_text(stdout_buf.take()),
+        stderr: to_text(stderr_buf.take()),
+        stdout_truncated: stdout_buf.truncated(),
+        stderr_truncated: stderr_buf.truncated(),
         timed_out: false,
     })
+}
+
+/// A capped output buffer the reader appends to and the caller drains.
+///
+/// Shared because the timeout arm outlives the future that fills it: see the
+/// comment at the call site. `Mutex` over a channel because both pipes are read
+/// concurrently but drained only after the join.
+#[derive(Debug)]
+struct SharedBuffer {
+    max: usize,
+    inner: std::sync::Mutex<(Vec<u8>, bool)>,
+}
+
+impl SharedBuffer {
+    fn new(max: usize) -> Self {
+        Self {
+            max,
+            inner: std::sync::Mutex::new((Vec::with_capacity(max.min(READ_CHUNK)), false)),
+        }
+    }
+
+    /// Appends one chunk, keeping at most `max` bytes and flagging the rest.
+    fn append(&self, chunk: &[u8]) {
+        // A poisoned lock means another thread panicked mid-append. The bytes
+        // already in it are still the best available answer, and this process is
+        // about to lose the run anyway.
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let (kept, truncated) = &mut *guard;
+        let room = self.max.saturating_sub(kept.len());
+        if chunk.len() > room {
+            kept.extend_from_slice(&chunk[..room]);
+            *truncated = true;
+        } else {
+            kept.extend_from_slice(chunk);
+        }
+    }
+
+    fn truncated(&self) -> bool {
+        self.inner.lock().map(|guard| guard.1).unwrap_or(false)
+    }
+
+    /// Empties the buffer and returns what it held.
+    fn take(&self) -> Vec<u8> {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut guard.0)
+    }
 }
 
 /// Tauri entry point. Thin on purpose: it forwards to [`exec`] and stamps the
@@ -261,15 +340,6 @@ pub(super) fn resolve_path(raw: &str, cwd: Option<&str>) -> Result<PathBuf, Gate
     Ok(base.join(as_path))
 }
 
-/// The captured result of one finished child.
-struct Collected {
-    status: std::process::ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    stdout_truncated: bool,
-    stderr_truncated: bool,
-}
-
 /// Drains both pipes and reaps the child.
 ///
 /// The reads run concurrently with the wait. Read them one after another and a
@@ -277,53 +347,87 @@ struct Collected {
 /// deadlocks — the classic pipe deadlock, and with a 10-minute ceiling it
 /// presents as "this command hangs", which sends the reader looking in the wrong
 /// place entirely.
-async fn collect(child: &mut tokio::process::Child) -> Result<Collected, GatewayError> {
+async fn collect(
+    child: &mut tokio::process::Child,
+    stdout_buf: &SharedBuffer,
+    stderr_buf: &SharedBuffer,
+) -> Result<std::process::ExitStatus, GatewayError> {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
 
+    // Both pipes concurrently, never one after the other: reading stdout to EOF
+    // first means a child that fills the stderr buffer while stdout is still
+    // open blocks on write forever, and the timeout then reports a hang for a
+    // command that was working fine.
     let read = async {
-        let (out, out_truncated) = match stdout.as_mut() {
-            Some(pipe) => read_capped(pipe, MAX_OUTPUT_BYTES).await,
-            None => (Vec::new(), false),
+        let out = async {
+            if let Some(pipe) = stdout.as_mut() {
+                read_into(pipe, stdout_buf).await;
+            }
         };
-        let (err, err_truncated) = match stderr.as_mut() {
-            Some(pipe) => read_capped(pipe, MAX_OUTPUT_BYTES).await,
-            None => (Vec::new(), false),
+        let err = async {
+            if let Some(pipe) = stderr.as_mut() {
+                read_into(pipe, stderr_buf).await;
+            }
         };
-        Ok::<_, GatewayError>((out, out_truncated, err, err_truncated))
+        tokio::join!(out, err);
     };
 
-    let (drained, status) = tokio::join!(read, child.wait());
-    let (out, out_truncated, err, err_truncated) = drained?;
-    let status = status.map_err(|e| {
+    let (_, status) = tokio::join!(read, child.wait());
+    status.map_err(|e| {
         GatewayError::new(
             GatewayErrorCode::SpawnFailed,
             format!("waiting for child failed: {e}"),
         )
-    })?;
-
-    Ok(Collected {
-        status,
-        stdout: out,
-        stderr: err,
-        stdout_truncated: out_truncated,
-        stderr_truncated: err_truncated,
     })
 }
 
-/// Reads a pipe to EOF, keeping at most `max` bytes and discarding the rest.
+/// Reads whatever is left in both pipes of an already-killed child.
+///
+/// Bounded like everything else here: the child is dead, so these pipes close on
+/// their own, and the cap is only a backstop against a pipe whose write end
+/// somehow outlived the process. Returns rather than loops forever if the bound
+/// is reached, because a truncated tail beats an await that never finishes.
+async fn drain_after_kill(
+    child: &mut tokio::process::Child,
+    stdout_buf: &SharedBuffer,
+    stderr_buf: &SharedBuffer,
+) {
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let out = async {
+        if let Some(pipe) = stdout {
+            read_bounded(pipe, stdout_buf).await;
+        }
+    };
+    let err = async {
+        if let Some(pipe) = stderr {
+            read_bounded(pipe, stderr_buf).await;
+        }
+    };
+    let _ = tokio::time::timeout(DRAIN_TIMEOUT, async { tokio::join!(out, err) }).await;
+}
+
+/// [`read_into`] under a deadline, for use after the child is already dead.
+async fn read_bounded<R>(reader: R, buf: &SharedBuffer)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    read_into(reader, buf).await;
+}
+
+/// Reads a pipe to EOF, appending to `buf` and discarding past its cap.
 ///
 /// Discarding rather than stopping is the point. Returning as soon as the cap
 /// is hit leaves the write end of the pipe with nobody reading it, so a child
 /// that keeps producing output blocks on write and never exits — the timeout
 /// then kills it and reports "timed out" for a command that was working fine
 /// and merely talked a lot.
-async fn read_capped<R>(mut reader: R, max: usize) -> (Vec<u8>, bool)
+async fn read_into<R>(mut reader: R, buf: &SharedBuffer)
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let mut kept: Vec<u8> = Vec::with_capacity(max.min(READ_CHUNK));
-    let mut truncated = false;
     let mut chunk = [0u8; READ_CHUNK];
 
     loop {
@@ -331,16 +435,8 @@ where
             // A read error mid-stream loses the tail, but the head is still the
             // most useful part of the output, so this is reported as a short
             // result rather than an error that discards it.
-            Ok(0) | Err(_) => return (kept, truncated),
-            Ok(n) => {
-                let room = max.saturating_sub(kept.len());
-                if n > room {
-                    kept.extend_from_slice(&chunk[..room]);
-                    truncated = true;
-                } else {
-                    kept.extend_from_slice(&chunk[..n]);
-                }
-            }
+            Ok(0) | Err(_) => return,
+            Ok(n) => buf.append(&chunk[..n]),
         }
     }
 }
@@ -592,6 +688,38 @@ mod tests {
     }
 
     #[test]
+    fn a_timed_out_command_keeps_the_output_it_produced() {
+        // 超时丢弃已读字节，是这条路径上最贵的一种丢信息：命令跑了整整一个
+        // deadline 才被杀，它在死之前打印的东西已经被 `read_capped` 读进内存了，
+        // 却在返回时被整个丢掉。模型拿到的于是是一个空输出，无法判断自己是在
+        // 第几步失败的；用户打开运行记录看到的也只是"超时"两个字，没有证据。
+        //
+        // 一个跑了十分钟才超时的构建，恰恰是最需要看它日志的那一次。
+        let mut req = request(
+            "sh",
+            &["-c", "echo BUILD_STARTED; echo TO_STDERR >&2; sleep 30"],
+        );
+        req.timeout_ms = Some(400);
+        let outcome = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(exec(req))
+            .expect("a timeout is a result, not a transport error");
+        assert!(outcome.timed_out);
+        assert!(
+            outcome.stdout.contains("BUILD_STARTED"),
+            "stdout produced before the deadline was discarded: {:?}",
+            outcome.stdout
+        );
+        assert!(
+            outcome.stderr.contains("TO_STDERR"),
+            "stderr produced before the deadline was discarded: {:?}",
+            outcome.stderr
+        );
+    }
+
+    #[test]
     fn a_missing_cwd_is_refused_with_the_path_named() {
         let mut req = request("echo", &[]);
         req.cwd = Some("/nope/not/a/directory".to_string());
@@ -660,13 +788,14 @@ mod tests {
     #[test]
     fn read_capped_keeps_the_head_and_reports_truncation() {
         let data = b"0123456789".repeat(10);
-        let (kept, truncated) = tokio::runtime::Builder::new_current_thread()
+        let buf = SharedBuffer::new(25);
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
-            .block_on(read_capped(&data[..], 25));
-        assert_eq!(kept, &b"0123456789012345678901234"[..]);
-        assert!(truncated);
+            .block_on(read_into(&data[..], &buf));
+        assert_eq!(buf.take(), &b"0123456789012345678901234"[..]);
+        assert!(buf.truncated());
     }
 
     #[test]
@@ -674,13 +803,14 @@ mod tests {
         // Off-by-one in the strict direction loses a byte of real output for no
         // reason; the flag must mean what it says.
         let data = b"0123456789";
-        let (kept, truncated) = tokio::runtime::Builder::new_current_thread()
+        let buf = SharedBuffer::new(10);
+        tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("runtime")
-            .block_on(read_capped(&data[..], 10));
-        assert_eq!(kept, &data[..]);
-        assert!(!truncated);
+            .block_on(read_into(&data[..], &buf));
+        assert_eq!(buf.take(), &data[..]);
+        assert!(!buf.truncated());
     }
 
     #[test]

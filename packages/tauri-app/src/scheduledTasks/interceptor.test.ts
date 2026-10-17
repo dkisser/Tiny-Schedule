@@ -273,8 +273,46 @@ describe('truncation — 两处，各有各的理由', () => {
     expect(result.content[0]?.text.length).toBeLessThan(TOOL_RESULT_LIMIT + 40);
   });
 
-  test('a short result is passed through untouched', () => {
-    expect(truncate('short', 100)).toBe('short');
+  test('截断保留尾部，那里是编译器与测试框架报告错误的地方', () => {
+    // 只留头部的话，一次 40 KB 的编译输出会被削成 8000 个字符的警告，模型读完
+    // 得出"编译通过"的结论——而真正的 `error TS2304` 在它读不到的最后 2 KB 里。
+    // 标记只说明"丢过东西"，不说明"活下来的是哪一头"，所以读者无从察觉自己
+    // 看到的是误导性的开头。
+    //
+    // 两头都留：开头说明这是哪次运行的输出（模型据此判断上下文），结尾才是
+    // 诊断所在（CONTEXT.md 把工具结果的价值定在"我能据此做什么"上）。
+    const head = 'HEAD_MARKER_编译开始';
+    const tail = 'TAIL_MARKER_error TS2304: Cannot find name';
+    const text = head + 'x'.repeat(40_000) + tail;
+
+    const clipped = truncate(text, 8_000);
+
+    expect(clipped).toContain(head);
+    expect(clipped).toContain(tail);
+    expect(clipped).toContain('已截断');
+    expect(clipped.length).toBeLessThan(8_000 + 60);
+  });
+
+  test('只比上限多一点的文本不值得挤掉头部去留尾部', () => {
+    // 两段保留不能反噬：文本刚过线时，尾部带来的诊断价值抵不过被砍掉的头部。
+    const text = 'A'.repeat(90) + 'B'.repeat(30);
+    const clipped = truncate(text, 100);
+    expect(clipped).toContain('已截断');
+    // 头部保住了远超 MIN_HEAD 的量——没有被尾部挤成一小截。
+    expect(clipped.split('…[已截断')[0]?.length ?? 0).toBeGreaterThan(50);
+  });
+
+  test('不超上限的文本原样返回，不加标记', () => {
     expect(truncate('x'.repeat(100), 100)).toBe('x'.repeat(100));
+    expect(truncate('short', 100)).toBe('short');
+  });
+
+  test('极小的上限下标记不会被尾部挤掉', () => {
+    // 审计摘要上限是 500，而标记本身在数字够大时会变长。分给尾部的预算不能
+    // 反过来把"这里截断了"这句话吃掉——那句话正是读者判断该去看原始输出的
+    // 唯一依据。
+    const clipped = truncate('E'.repeat(100_000), AUDIT_SUMMARY_LIMIT);
+    expect(clipped).toContain('已截断');
+    expect(clipped.length).toBeLessThanOrEqual(AUDIT_SUMMARY_LIMIT + 40);
   });
 });
