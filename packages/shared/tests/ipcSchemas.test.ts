@@ -12,6 +12,10 @@ import {
   ProjectCreateReqSchema,
   ProjectUpdateReqSchema,
   REFUSED_TIMER,
+  ScheduledTaskRunAddReqSchema,
+  ScheduledTaskRunFinishReqSchema,
+  ScheduledTaskRunsListReqSchema,
+  ScheduledTaskUpsertReqSchema,
   TimerChangedPayloadSchema,
 } from '../src/contract/ipc';
 import { type AppData, AppDataSchema, emptyAppData } from '../src/domain/appData';
@@ -161,6 +165,134 @@ describe('timerChanged payloads — a drop and a refusal are different values', 
     // WRITE_REFUSED branch of TimingStopResult follows. A `timer` key on the
     // refused branch would give a reader something to clear the TimerBar with.
     expect(Object.hasOwn(REFUSED_TIMER, 'timer')).toBe(false);
+  });
+});
+
+describe('定时任务的 wire 契约', () => {
+  test('the channels exist and are namespaced away from the other 任务', () => {
+    // Ipc.taskUpsert is a human's todo; these are the machine's rules. Same
+    // word, different entity — the channel names are the only place a reader
+    // can tell them apart at a glance.
+    expect(Ipc.scheduledTaskUpsert).toBe('scheduledTask:upsert');
+    expect(Ipc.scheduledTaskDelete).toBe('scheduledTask:delete');
+    expect(Ipc.scheduledTaskRunAdd).toBe('scheduledTask:runAdd');
+    expect(Ipc.scheduledTaskRunFinish).toBe('scheduledTask:runFinish');
+    expect(Ipc.scheduledTaskRunsList).toBe('scheduledTask:runsList');
+  });
+
+  test('upsert carries a structured schedule, never a cron string', () => {
+    const req = ScheduledTaskUpsertReqSchema.parse({
+      id: 'st1',
+      name: '每日汇总',
+      prompt: '汇总',
+      schedule: { kind: 'weekly', daysOfWeek: [1], time: '09:00' },
+    });
+    expect(req.schedule).toEqual({ kind: 'weekly', daysOfWeek: [1], time: '09:00' });
+    expect(
+      ScheduledTaskUpsertReqSchema.safeParse({
+        id: 'st1',
+        name: 'x',
+        prompt: 'y',
+        schedule: { kind: 'daily', time: '0 9 * * *' },
+      }).success,
+    ).toBe(false);
+  });
+
+  test('createdAt/updatedAt are absent from the edit — the service owns them', () => {
+    // The renderer edits from its render-time snapshot; letting it write these
+    // back would move the creation moment or roll back a concurrent change.
+    const parsed = ScheduledTaskUpsertReqSchema.parse({
+      id: 'st1',
+      name: 'x',
+      prompt: 'y',
+      schedule: { kind: 'daily', time: '09:00' },
+      createdAt: 1,
+      updatedAt: 2,
+    });
+    expect(Object.hasOwn(parsed, 'createdAt')).toBe(false);
+    expect(Object.hasOwn(parsed, 'updatedAt')).toBe(false);
+  });
+
+  test('null clears the working directory, undefined leaves it alone', () => {
+    // The same two-way distinction the follow-up edit needed: without it, the
+    // renderer's habit of spreading its snapshot would wipe a set directory.
+    const cleared = ScheduledTaskUpsertReqSchema.parse({
+      id: 'st1',
+      name: 'x',
+      prompt: 'y',
+      schedule: { kind: 'daily', time: '09:00' },
+      workingDirectory: null,
+    });
+    expect(cleared.workingDirectory).toBeNull();
+    const untouched = ScheduledTaskUpsertReqSchema.parse({
+      id: 'st1',
+      name: 'x',
+      prompt: 'y',
+      schedule: { kind: 'daily', time: '09:00' },
+    });
+    expect(untouched.workingDirectory).toBeUndefined();
+  });
+
+  test('a run is appended whole, and it must name a task', () => {
+    const run = {
+      id: 'r1',
+      scheduledTaskId: 'st1',
+      trigger: 'manual',
+      startedAt: 1,
+      finishedAt: 2,
+      status: 'success',
+      output: 'done',
+      toolCalls: [],
+    };
+    expect(ScheduledTaskRunAddReqSchema.parse({ run }).run.id).toBe('r1');
+    expect(ScheduledTaskRunAddReqSchema.safeParse({ run: { ...run, id: '' } }).success).toBe(false);
+    expect(ScheduledTaskRunAddReqSchema.safeParse({}).success).toBe(false);
+  });
+
+  test('the running record is appended, and it needs neither finishedAt nor output', () => {
+    // 运行从开始就落库，所以 append 这条通道必须接受一条只有"开始了"的记录。
+    const parsed = ScheduledTaskRunAddReqSchema.parse({
+      run: {
+        id: 'r2',
+        scheduledTaskId: 'st1',
+        trigger: 'scheduled',
+        startedAt: 1,
+        status: 'running',
+      },
+    });
+    expect(parsed.run.status).toBe('running');
+    expect(parsed.run.toolCalls).toEqual([]);
+  });
+
+  test('the finish channel carries a terminal run, and refuses anything else', () => {
+    // 收尾这条通道只朝一个方向走：用它把一条运行改回 running，或送一条没有结束时点
+    // 的"终态"，都在 wire 上就被拒绝——写侧于是不必再判断自己收到的是什么。
+    const finished = {
+      id: 'r1',
+      scheduledTaskId: 'st1',
+      trigger: 'manual',
+      startedAt: 1,
+      finishedAt: 2,
+      status: 'interrupted',
+      output: '',
+      toolCalls: [],
+    };
+    expect(ScheduledTaskRunFinishReqSchema.parse({ run: finished }).run.status).toBe('interrupted');
+    expect(ScheduledTaskRunFinishReqSchema.safeParse({}).success).toBe(false);
+    expect(
+      ScheduledTaskRunFinishReqSchema.safeParse({
+        run: { ...finished, status: 'running', finishedAt: undefined, output: undefined },
+      }).success,
+    ).toBe(false);
+    const { finishedAt, ...noFinish } = finished;
+    expect(ScheduledTaskRunFinishReqSchema.safeParse({ run: noFinish }).success).toBe(false);
+  });
+
+  test('runs are queried per task', () => {
+    expect(ScheduledTaskRunsListReqSchema.parse({ scheduledTaskId: 'st1' }).scheduledTaskId).toBe(
+      'st1',
+    );
+    expect(ScheduledTaskRunsListReqSchema.safeParse({}).success).toBe(false);
   });
 });
 

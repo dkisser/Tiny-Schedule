@@ -9,6 +9,7 @@ import { FollowUpDetail } from './components/FollowUpDetail';
 import { IdeaDetail } from './components/IdeaDetail';
 import { Layout } from './components/Layout';
 import { Sidebar } from './components/Sidebar';
+import { ScheduledTaskDetail } from './components/scheduledTasks/ScheduledTaskDetail';
 import { TaskDetail } from './components/TaskDetail';
 import { TaskList } from './components/TaskList';
 import { TimerBar } from './components/TimerBar';
@@ -22,6 +23,7 @@ import { ExportPage } from './pages/ExportPage';
 import { FollowUpsPage } from './pages/FollowUpsPage';
 import { HomePage } from './pages/HomePage';
 import { IdeasPage } from './pages/IdeasPage';
+import { ScheduledTasksPage } from './pages/ScheduledTasksPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { useDataStore } from './stores/data';
@@ -121,6 +123,7 @@ export default function App() {
   const selectedTaskId = useUiStore((s) => s.selectedTaskId);
   const selectedFollowUpId = useUiStore((s) => s.selectedFollowUpId);
   const selectedIdeaId = useUiStore((s) => s.selectedIdeaId);
+  const selectedScheduledTaskId = useUiStore((s) => s.selectedScheduledTaskId);
   const theme = data?.settings.theme;
 
   useEffect(() => {
@@ -156,6 +159,9 @@ export default function App() {
   const selectedTask = selectedTaskId ? (data.tasks[selectedTaskId] ?? null) : null;
   const selectedFollowUp = selectedFollowUpId ? (data.followUps[selectedFollowUpId] ?? null) : null;
   const selectedIdea = selectedIdeaId ? (data.ideas[selectedIdeaId] ?? null) : null;
+  const selectedScheduledTask = selectedScheduledTaskId
+    ? (data.scheduledTasks[selectedScheduledTaskId] ?? null)
+    : null;
 
   const page =
     view.type === 'home' ? (
@@ -172,6 +178,8 @@ export default function App() {
       <FollowUpsPage />
     ) : view.type === 'ideas' ? (
       <IdeasPage />
+    ) : view.type === 'scheduledTasks' ? (
+      <ScheduledTasksPage />
     ) : view.type === 'ai' ? (
       <AiPage />
     ) : view.type === 'export' ? (
@@ -210,6 +218,18 @@ export default function App() {
                 className="shrink-0 overflow-hidden"
               >
                 <FollowUpDetail key={selectedFollowUp.id} followUp={selectedFollowUp} />
+              </motion.div>
+            )}
+            {selectedScheduledTask && (
+              <motion.div
+                key="scheduled-task-detail"
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 380, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
+                className="shrink-0 overflow-hidden"
+              >
+                <ScheduledTaskDetail key={selectedScheduledTask.id} task={selectedScheduledTask} />
               </motion.div>
             )}
             {selectedIdea && (

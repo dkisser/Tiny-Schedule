@@ -11,6 +11,8 @@ import { type AiLogger } from '@/ai/logger';
 import { type CreateAiApiOptions, createAiApi } from '@/api/ai';
 import { createDataApi } from '@/api/data';
 import { createFilesApi } from '@/api/files';
+import { createScheduledTaskApi } from '@/api/scheduledTask';
+import { createScheduledTaskRunApi } from '@/api/scheduledTaskRun';
 import { createSystemApi, type SystemApiDeps } from '@/api/system';
 import { createTimerApi } from '@/api/timer';
 import { createWindowApi } from '@/api/window';
@@ -105,6 +107,11 @@ export function createApi(options: CreateApiOptions): RendererApi {
   const files = createFilesApi(store, {
     onTimerChanged: () => timerChanged.emit(DROPPED_TIMER),
   });
+  const scheduledTask = createScheduledTaskApi(store);
+  const scheduledTaskRun = createScheduledTaskRunApi({
+    store,
+    ...(options.logger ? { logger: options.logger } : {}),
+  });
   const system = createSystemApi(store, options.system ?? {});
   const timer = createTimerApi();
   const window = createWindowApi();
@@ -129,6 +136,8 @@ export function createApi(options: CreateApiOptions): RendererApi {
     ...data,
     ...ai,
     ...files,
+    ...scheduledTask,
+    ...scheduledTaskRun,
     ...system,
     ...timer,
     ...window,

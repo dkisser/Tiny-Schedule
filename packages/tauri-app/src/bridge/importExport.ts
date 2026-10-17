@@ -171,6 +171,12 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
     activeTimer: null,
     followUps: {},
     ideas: {},
+    // The backup format carries no scheduled tasks, so an import starts with
+    // none — same as followUps/ideas above. Listed explicitly rather than left
+    // to AppDataSchema's .default(): this object is typed as AppData, so the
+    // field has to be here for the type to be complete, and the two must agree.
+    scheduledTasks: {},
+    runs: {},
   };
 
   return {

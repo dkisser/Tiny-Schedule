@@ -3,6 +3,12 @@ import { type FollowUp, FollowUpSchema } from './followUp';
 import { type Idea, IdeaSchema } from './idea';
 import type { Project, Tag } from './project';
 import { INBOX_PROJECT_ID, ProjectSchema, TagSchema } from './project';
+import {
+  type ScheduledTask,
+  type ScheduledTaskRun,
+  ScheduledTaskRunSchema,
+  ScheduledTaskSchema,
+} from './scheduledTask';
 import { type ActiveTimer, ActiveTimerSchema, type Task, TaskSchema } from './task';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -55,6 +61,9 @@ export interface AppData {
   tags: Record<string, Tag>;
   followUps: Record<string, FollowUp>;
   ideas: Record<string, Idea>;
+  scheduledTasks: Record<string, ScheduledTask>;
+  /** 运行记录，按定时任务归集；删除定时任务连同它的全部运行（CONTEXT.md）。 */
+  runs: Record<string, ScheduledTaskRun>;
   timeTracking: unknown; // preserved raw from backup
   notes: unknown;
   planner: unknown;
@@ -104,6 +113,9 @@ export const AppDataSchema = z.object({
   followUps: z.record(z.string(), FollowUpSchema).default({}),
   // Default backfills data.json files written before the Idea module existed.
   ideas: z.record(z.string(), IdeaSchema).default({}),
+  // Default backfills data.json files written before the ScheduledTask module existed.
+  scheduledTasks: z.record(z.string(), ScheduledTaskSchema).default({}),
+  runs: z.record(z.string(), ScheduledTaskRunSchema).default({}),
   settings: SettingsSchema,
   activeTimer: ActiveTimerSchema.nullable(),
 });
@@ -143,6 +155,8 @@ export function emptyAppData(): AppData {
     misc: {},
     followUps: {},
     ideas: {},
+    scheduledTasks: {},
+    runs: {},
     settings: defaultSettings(),
     activeTimer: null,
   };

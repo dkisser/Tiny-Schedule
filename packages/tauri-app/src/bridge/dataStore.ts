@@ -794,6 +794,13 @@ function countRecords(data: AppData): number {
     Object.keys(data.tasks).length +
     Object.keys(data.ideas).length +
     Object.keys(data.followUps).length +
+    Object.keys(data.scheduledTasks).length +
+    // Runs count too, for the same reason chat sessions do: a user whose only
+    // user data is a scheduled task's execution history is exactly the user this
+    // guard exists to protect, and the audit trail is the whole point of the
+    // module (ADR-0008) — losing it silently would leave an unattended agent's
+    // actions with no trace at all.
+    Object.keys(data.runs).length +
     Object.keys(data.projects).filter((id) => id !== INBOX_PROJECT_ID).length +
     Object.keys(data.tags).filter((id) => !SYSTEM_TAGS.has(id)).length +
     // Chat sessions are the one record type that is not a keyed map, so
