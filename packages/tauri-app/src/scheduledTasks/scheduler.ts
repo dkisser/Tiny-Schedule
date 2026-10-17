@@ -1,7 +1,8 @@
-import type { Schedule, ScheduledTask } from '@tiny-schedule/shared';
+import type { ScheduledTask } from '@tiny-schedule/shared';
 import { type AiLogger, silentLogger } from '@/ai/logger';
 import type { DataStore } from '@/bridge/dataStore';
 import { createScheduledRuntime, type ScheduledRuntimeDeps, taskInFlight } from './runtime';
+import { nextTriggerAt } from './schedule';
 
 /**
  * 定时任务的调度器：到点触发，以及"前一次没跑完就跳过"这条领域规则。
@@ -15,85 +16,17 @@ import { createScheduledRuntime, type ScheduledRuntimeDeps, taskInFlight } from 
  *  - **不持久化定时器状态。** 重启后整个调度表从 schedule 重算。少一样要同步的
  *    东西，也就少一类"磁盘上的下次触发时间与应用看到的 schedule 对不上"的 bug。
  *
- * 频率求值 {@link nextTriggerAt} 是纯函数、不 import 任何宿主模块，所以它的边界
- * （当天时刻已过、跨周、月末）可以直接用 bun 测。
+ * 频率求值在 {@link nextTriggerAt} 所在的 `./schedule`，刻意与本文件分开：那里
+ * 不 import 任何宿主模块，所以界面侧「下次触发」的推算可以与它在同一个测试里
+ * 比对——两份实现必须给出同一个答案。
  */
+
+export { nextTriggerAt } from './schedule';
 
 /** 与"30s 对齐 tick"配套的周期；也是唤醒粒度下界。 */
 const DEFAULT_TICK_MS = 30_000;
 
 export type RunTriggerName = 'scheduled' | 'manual';
-
-/** `HH:mm` → [时, 分]。schema 已经保证形状，这里只是把它拆开。 */
-function parseTime(time: string): [number, number] {
-  const [h = '0', m = '0'] = time.split(':');
-  return [Number(h), Number(m)];
-}
-
-/** 本地时区的某个时刻。用 Date 构造器而不是加毫秒，跨夏令时才是对的。 */
-function at(year: number, month: number, day: number, hours: number, minutes: number): number {
-  return new Date(year, month, day, hours, minutes, 0, 0).getTime();
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
-
-/**
- * 相对 `from` 的下一次触发时间（epoch ms，本地时区）。
- *
- * 严格大于 `from`：调用方问的是"下一次"，而"此刻正好到点"那一刻的触发应该由调度
- * 表自己记账——两者混在一起会让 tick 在边界上重复触发或漏触发一次。
- */
-export function nextTriggerAt(schedule: Schedule, from: number): number {
-  const [hours, minutes] = parseTime(schedule.time);
-  const base = new Date(from);
-  const year = base.getFullYear();
-  const month = base.getMonth();
-  const day = base.getDate();
-  const now = at(year, month, day, hours, minutes);
-
-  let next: number | null = null;
-  if (schedule.kind === 'daily') {
-    next = now > from ? now : at(year, month, day + 1, hours, minutes);
-  } else if (schedule.kind === 'weekly') {
-    // 扫未来 8 天：day + 7 与今天同一星期几，而今天那一档要么已经在上面被否掉、
-    // 要么就是 now > from 已经返回了，所以 7 天内必然命中。
-    for (let offset = 0; offset <= 7 && next === null; offset += 1) {
-      const probe = new Date(year, month, day + offset);
-      if (!schedule.daysOfWeek.includes(probe.getDay())) continue;
-      const candidate = at(probe.getFullYear(), probe.getMonth(), probe.getDate(), hours, minutes);
-      if (candidate > from) next = candidate;
-    }
-  } else {
-    // 扫未来 13 个月。12 这个上界对"跳过"语义仍然够：任何 `dayOfMonth` 都
-    // 至少在 28 天以上的月份存在，所以最长连跳两个月（31 号遇上 2 月）之后必然
-    // 命中。
-    for (let offset = 0; offset <= 12 && next === null; offset += 1) {
-      const probe = new Date(year, month + offset, 1);
-      // 没有这一天的月份**跳过**，不收敛到月末。界面在选择器下面就是这么承诺的
-      // （「没有这一天的月份（如 2 月 31 日）会跳过，不补跑」），而早先的实现
-      // 悄悄收敛到 28/29 号——于是「每月 31 号」一年多跑三次，跑在用户被明确
-      // 告知不会跑的日期上。承诺与实现只能留一个，这里按承诺。
-      //
-      // `dayOfMonth` 是 1..31，跳过之后就等于没有候选，所以先判存在性再算时刻。
-      if (daysInMonth(probe.getFullYear(), probe.getMonth()) < schedule.dayOfMonth) continue;
-      const candidate = at(
-        probe.getFullYear(),
-        probe.getMonth(),
-        schedule.dayOfMonth,
-        hours,
-        minutes,
-      );
-      if (candidate > from) next = candidate;
-    }
-  }
-
-  // 三条分支都必然命中（见上面的循环上界）；真到这里说明 ScheduleSchema 被绕过
-  // 了，那是一个应该炸而不是该静默返回 null 的情况。
-  if (next === null) throw new Error(`无法求值频率：${JSON.stringify(schedule)}`);
-  return next;
-}
 
 /** 到下一次边界的毫秒数，让 tick 落在整 30 秒上而不是"启动后第 30 秒"。 */
 function msToNextBoundary(now: number, tickMs: number): number {
@@ -178,8 +111,13 @@ export function createScheduler(deps: SchedulerDeps) {
    * 每个任务的"下一次"都从**此刻**往后算，所以刷新不会补跑：一条 09:00 的每日
    * 任务在 11:00 被改过名字，刷新后下一次是明天 09:00，而不是今天已经过去的
    * 那一档。
+   *
+   * 停用时是空操作：`stop()` 清了表，而数据订阅会在任何一次写入后调到这里，
+   * 不挡住就会把表原样填回去——于是"停了就是停了"并不成立，`peek()` 又开始
+   * 报告一个已经停掉的调度器仍在管着这些任务。`start()` 走下面的 `rebuild`，
+   * 因为那时 `started` 还没有置位。
    */
-  const refresh = async (): Promise<void> => {
+  const rebuild = async (): Promise<void> => {
     const at0 = now();
     const tasks = await deps.getTasks();
     const next = new Map<string, SchedulerEntry>();
@@ -187,6 +125,11 @@ export function createScheduler(deps: SchedulerDeps) {
     table.clear();
     for (const [id, entry] of next) table.set(id, entry);
     logger.info({ action: 'scheduler:refresh', tasks: next.size });
+  };
+
+  const refresh = async (): Promise<void> => {
+    if (!started) return;
+    await rebuild();
   };
 
   /** 到点后的重排：始终从"这一次 tick 的此刻"往后算下一次。 */
@@ -259,8 +202,14 @@ export function createScheduler(deps: SchedulerDeps) {
    */
   const start = async (): Promise<void> => {
     if (started) return;
+    // 先排循环再置位？不行——那就有了"两个循环"的窗口。先 await refresh
+    // 也同样不行：refresh 抛错时标志已是 true，之后每次 start 都是静默的
+    // 空操作，循环再也排不上，而启动时 data.json 读不出来是会发生的。
+    //
+    // 所以用 try：成功才置位，失败原样抛出去并把标志留在 false，让调用方
+    // （用户修好文件之后）重试就能起来。
+    await rebuild();
     started = true;
-    await refresh();
     // 排到下一个整周期边界上，而不是"启动后 30 秒"：漂移会让所有任务的判定
     // 落在不同的秒数上，而一个 09:00:00 的任务被 09:00:07 判为到点并不是错，
     // 只是让"到点"这个词失去了它该有的含义。
@@ -273,8 +222,10 @@ export function createScheduler(deps: SchedulerDeps) {
    * 停掉循环并拆掉调度表。
    *
    * 清表不是为了省内存：`peek()` / `isRunning()` 是给界面与测试看的，而一张
-   * 残留的表会让它们报告一个已经停掉的调度器仍在管着这些任务。下次 `start()`
-   * 会由 `refresh()` 重建它。
+   * 残留的表会让它们报告一个已经停掉的调度器仍在管着这些任务。
+   *
+   * 清表本身还不够：数据订阅会在任何一次写入后调 `refresh()`，而 `refresh`
+   * 现在在停用时是空操作——守卫在那里，不在这里。否则这张表下一轮就被填回去。
    */
   const stop = (): void => {
     if (handle !== null) timers.clearInterval(handle);

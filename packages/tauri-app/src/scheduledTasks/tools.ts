@@ -144,23 +144,22 @@ function outcomeSummary(resultText: string): string {
     parts.push(`read=${String(r.returnedBytes)}B/${String(r.totalBytes)}B`);
   }
   if (r.truncated === true) parts.push('truncated');
-  // A failed command writes the reason to stderr, so an exit=0 summary with no
-  // detail would hide exactly the case a reader opens the run record to see.
-  //
+
   // The response **body** is deliberately not a detail source. Redacting request
   // headers while pasting the response body into the same record leaves the
   // credential half-defended: an API that echoes the Authorization back — a debug
   // endpoint, an error tracker — puts the token in data.json and in every rotated
-  // backup. The size is recorded above, which is the part worth keeping.
-  const detail = [r.stderr].find((v) => typeof v === 'string' && v.trim() !== '');
-  if (parts.length === 0 && r.body !== undefined) {
-    // No shape fields at all: still say something about the payload rather than
-    // dumping a JSON blob that may contain a credential.
-    return `body=<${String(r.body).length} chars>`;
-  }
-  return parts.length > 0
-    ? `${parts.join(' ')} | ${String(detail ?? '').trim()}`
-    : JSON.stringify(r);
+  // backup. Its length is recorded above, which is the part worth keeping.
+  if (typeof r.body === 'string') parts.push(`body=${r.body.length}B`);
+
+  // A failed command writes the reason to stderr, so a summary with no detail
+  // would hide exactly the case a reader opens the run record to see.
+  const detail = typeof r.stderr === 'string' ? r.stderr.trim() : '';
+  const head = parts.join(' ');
+  if (head === '') return JSON.stringify(r);
+  // The separator only goes in when there is something after it: `status=200 | `
+  // is a record that reads as broken.
+  return detail === '' ? head : `${head} | ${detail}`;
 }
 
 /**
@@ -445,9 +444,27 @@ export function buildAppDataTools(
     // of what was read, and the interceptor truncates whatever comes back.
     summarize: (resultText) => (resultText !== '' ? resultText : 'ok'),
   });
-  return buildChatTools(ctx.getData, ctx.today)
-    .filter((tool) => SCHEDULED_APP_TOOLS.has(tool.name))
-    .map(asAuditable);
+  const allowed = buildChatTools(ctx.getData, ctx.today).filter((tool) =>
+    SCHEDULED_APP_TOOLS.has(tool.name),
+  );
+  // A `Set.has` filter is silent in **both** directions, and the removal
+  // direction is the expensive one: rename `queryTasks` in chatAgentTools.ts and
+  // the filter quietly returns two tools instead of three. Every scheduled prompt
+  // that asked to read the user's tasks then gets a model that cannot, with a
+  // green typecheck and a green build.
+  //
+  // Names are runtime strings here rather than a type-level set, so this check is
+  // what stands in for the compiler. A missing name is a build-time-shaped bug
+  // discovered at startup instead of by a user wondering why a task stopped
+  // working.
+  const missing = [...SCHEDULED_APP_TOOLS].filter((name) => !allowed.some((t) => t.name === name));
+  if (missing.length > 0) {
+    throw new Error(
+      `定时任务的工具名单里有 chat 已经不存在的工具：${missing.join('、')}` +
+        '（改名会让它从定时运行的可达面里静默消失）',
+    );
+  }
+  return allowed.map(asAuditable);
 }
 
 /** Everything a scheduled run's agent can call. Nothing else is reachable. */

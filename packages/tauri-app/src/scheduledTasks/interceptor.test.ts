@@ -257,7 +257,8 @@ describe('truncation — 两处，各有各的理由', () => {
     await call(tools.find((t) => t.name === 'runCommand') as AgentTool, { command: 'cat' });
 
     const summary = sink.entries()[0]?.resultSummary ?? '';
-    expect(summary).toBe('exit=0 | ');
+    // 没有分隔符：这条记录里没有 detail 要接，`exit=0 | ` 读起来像坏掉的。
+    expect(summary).toBe('exit=0');
     expect(summary).not.toContain('yyy');
   });
 

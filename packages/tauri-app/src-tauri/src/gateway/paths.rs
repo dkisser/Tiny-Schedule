@@ -16,19 +16,12 @@ use super::{GatewayError, GatewayErrorCode};
 
 /// The user's home directory, or `None` when the process cannot determine it.
 ///
-/// `HOME` is the unix answer and `USERPROFILE` the Windows one; reading only the
-/// former leaves every `~` default failing on Windows, which is the same bug the
-/// expansion exists to remove. Tauri also hands a GUI-launched app a different
-/// environment than a shell does, so both names are checked rather than assumed.
+/// Delegates to [`crate::host::home_dir`] rather than reading the environment
+/// again: the data directory already needs this answer, and two copies of "where
+/// is home" drift apart the moment one of them is fixed — this one already
+/// gained a `USERPROFILE` fallback the other did not.
 pub fn home_dir() -> Option<PathBuf> {
-    for name in ["HOME", "USERPROFILE"] {
-        if let Ok(value) = std::env::var(name) {
-            if !value.is_empty() {
-                return Some(PathBuf::from(value));
-            }
-        }
-    }
-    None
+    crate::host::home_dir().ok().map(PathBuf::from)
 }
 
 /// Expands a leading `~` to the user's home directory.

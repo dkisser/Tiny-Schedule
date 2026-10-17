@@ -97,7 +97,17 @@ export async function notifyScheduledTask(payload: { title: string; body: string
     console.warn('scheduledTask: 通知权限被拒，运行记录仍然已保存');
     return;
   }
-  sendNotification(payload);
+  // `sendNotification` is synchronous in the plugin's own types (returns void), so
+  // there is no promise to drop and no unhandled rejection to worry about. What it
+  // *can* do is throw, and a throw here would propagate out of the runner's
+  // notification step — after the run record was already written, turning "the
+  // banner did not appear" into "the run failed". Catching keeps those separate,
+  // and logging keeps the failure from disappearing entirely.
+  try {
+    sendNotification(payload);
+  } catch (error) {
+    console.warn('scheduledTask: 通知发送失败，运行记录仍然已保存', error);
+  }
 }
 
 export interface ScheduledRuntimeDeps {

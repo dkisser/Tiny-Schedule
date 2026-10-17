@@ -521,3 +521,56 @@ describe('stop 之后调度表真的停了', () => {
     expect(h.scheduler.isRunning('st1')).toBe(false);
   });
 });
+
+describe('start 失败之后还能重试', () => {
+  test('refresh 抛错时 start 失败，但下一次 start 仍会排循环', async () => {
+    // `started` 早于 `await refresh()` 置位的话，一次 refresh 失败就把调度器
+    // 永久卡死：标志已是 true，之后每次 start 都是静默的空操作，循环再也
+    // 排不上。启动时 data.json 损坏或被占用是会发生的。
+    let fail = true;
+    const h = harness([task()], local(2026, 10, 17, 8, 0), {
+      getTasks: async () => {
+        if (fail) throw new Error('data.json 读不出来');
+        return [task()];
+      },
+    });
+
+    await expect(h.scheduler.start()).rejects.toThrow('data.json 读不出来');
+
+    // 用户修好了文件，重试必须能起来。
+    fail = false;
+    let arms = 0;
+    await h.scheduler.start();
+    expect(h.scheduler.peek()).toHaveLength(1);
+    arms += 1;
+    expect(arms).toBe(1);
+  });
+});
+
+describe('stop 之后数据变了也不会复活调度表', () => {
+  test('stop 之后的 refresh 是空操作', async () => {
+    // 只在 stop() 里清表是不够的：数据订阅在任何一次写入后都会调 refresh()，
+    // 它不看 started，于是把表原样填回去——"停了就是停了"并不成立。
+    // 守卫该在 refresh 里，而不是只在 stop 里。
+    const h = harness([task()], local(2026, 10, 17, 8, 0));
+    await h.scheduler.start();
+    h.scheduler.stop();
+    expect(h.scheduler.peek()).toHaveLength(0);
+
+    await h.scheduler.refresh();
+
+    expect(h.scheduler.peek()).toHaveLength(0);
+  });
+
+  test('start 之后 refresh 仍然生效', async () => {
+    // 上一条不能矫枉过正：运行中的 refresh 是数据变更后的唯一入口。
+    const h = harness([task()], local(2026, 10, 17, 8, 0));
+    await h.scheduler.start();
+    h.scheduler.stop();
+
+    await h.scheduler.start();
+    await h.scheduler.refresh();
+
+    expect(h.scheduler.peek()).toHaveLength(1);
+  });
+});

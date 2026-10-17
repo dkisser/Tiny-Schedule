@@ -15,12 +15,18 @@ import { installTauriMocks } from '@/test/tauriMocks';
 let granted = false;
 let answer: 'granted' | 'denied' = 'denied';
 let sent: { title: string; body: string }[] = [];
+/** 让 sendNotification 抛错，模拟宿主拒绝投递（通知中心关闭、插件不可用）。 */
+let sendRejects = false;
 
 installTauriMocks({
   notification: {
     isPermissionGranted: async () => granted,
     requestPermission: async () => answer,
-    sendNotification: async (payload: { title: string; body: string }) => {
+    // Synchronous on purpose: the plugin's own signature returns `void`, so a
+    // stub that threw asynchronously would be testing a failure mode the real
+    // call cannot produce.
+    sendNotification: (payload: { title: string; body: string }) => {
+      if (sendRejects) throw new Error('notification centre disabled');
       sent.push(payload);
     },
   },
@@ -63,10 +69,30 @@ describe('通知权限的缓存', () => {
   test('已授权时正常发出', async () => {
     _resetPermissionForTest();
     granted = true;
+    sendRejects = false;
     sent = [];
 
     await notify({ title: 'a', body: 'b' });
 
     expect(sent).toHaveLength(1);
+  });
+
+  test('宿主拒绝投递时不抛出，失败也不会凭空消失', async () => {
+    // 插件的 `sendNotification` 是同步的（返回 void），所以这里没有未处理的
+    // promise rejection 要防——它抛的是一个同步异常。而它确实会抛：通知中心
+    // 被关掉、插件不可用。
+    //
+    // 不接住的话，异常会从 runner 的通知步骤里冒出去，而运行记录在那之前
+    // 已经写完了——于是"横幅没出现"变成"这次运行失败了"，把两件事混成一件。
+    // 接住并记一行：通知发不出去不是运行失败，但它必须被记录，而不是消失。
+    _resetPermissionForTest();
+    granted = true;
+    sendRejects = true;
+    sent = [];
+
+    await notify({ title: 'a', body: 'b' });
+
+    expect(sent).toHaveLength(0);
+    sendRejects = false;
   });
 });

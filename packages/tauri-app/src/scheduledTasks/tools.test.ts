@@ -140,3 +140,41 @@ describe('审计摘要 — 响应侧同样不落凭据', () => {
     expect(summary).toContain('build failed at step 3');
   });
 });
+
+describe('审计摘要 — 没有内容时不留悬空分隔符', () => {
+  function summarize(name: string, result: unknown): string {
+    const tool = tools().find((t) => t.tool.name === name);
+    if (!tool) throw new Error(`no such tool: ${name}`);
+    return tool.summarize(JSON.stringify(result));
+  }
+
+  test('成功的 http 请求不留下 " | " 尾巴', () => {
+    expect(
+      summarize('httpRequest', { status: 200, headers: {}, body: 'ok', truncated: false }),
+    ).toBe('status=200 body=2B');
+  });
+
+  test('失败的命令仍然带上 stderr 的原因', () => {
+    expect(
+      summarize('runCommand', { exitCode: 2, stdout: '', stderr: 'boom', timedOut: false }),
+    ).toBe('exit=2 | boom');
+  });
+});
+
+describe('工具名单 — 改名不会让工具静默消失', () => {
+  test('名单里的每个名字都必须在 chat 工具里真实存在', () => {
+    // 这条断言守的是"移除方向"的静默失败：把 chat 里的 queryTasks 改名，
+    // `Set.has('queryTasks')` 只是变成 false，工具集少一个，typecheck 与构建
+    // 全绿，而每一个要求读任务的定时 prompt 都从此拿不到数据。
+    // 这里断言至少名单和实现没有脱节——真正要抓的是"改名"这个动作。
+    expect(() =>
+      buildScheduledTools({
+        workingDirectory: '/repo',
+        context: { taskId: 't1', runId: 'r1' },
+        invoke: async () => ({}),
+        getData: (): AppData => emptyAppData(),
+        today: () => '2026-10-17',
+      }),
+    ).not.toThrow();
+  });
+});
