@@ -1251,3 +1251,52 @@ describe('DataStore concurrency', () => {
     expect((await onDisk(fs)).settings.userName).toBe('b');
   });
 });
+
+describe('onDataChanged — 数据变了，依赖它的东西得知道', () => {
+  test('一次真正的写入会通知订阅者', async () => {
+    // 调度表靠这个信号刷新。没有它，新建的任务永远排在启动时那张表之外，
+    // 用户看着「下次触发 明天 09:00」等一个永远不会响的闹钟。
+    const store = await DataStore.open(DIR, new MemoryFs(), silentLogger);
+    await store.save(emptyAppData());
+    let fired = 0;
+    store.onDataChanged(() => {
+      fired += 1;
+    });
+
+    await store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'x' } }));
+
+    expect(fired).toBe(1);
+  });
+
+  test('没有实际变化的写入不通知', async () => {
+    // 30 秒心跳走的就是这条路径：返回同一引用时不该打扰任何人，否则每次心跳
+    // 都会让调度表重建一次。
+    const store = await DataStore.open(DIR, new MemoryFs(), silentLogger);
+    await store.save(emptyAppData());
+    await store.load();
+    let fired = 0;
+    store.onDataChanged(() => {
+      fired += 1;
+    });
+
+    const current = await store.get();
+    await store.update(() => current);
+
+    expect(fired).toBe(0);
+  });
+
+  test('退订之后不再通知', async () => {
+    // 渲染进程重载会重跑 effect，只增不减的列表会一直通知一个已经不在的窗口。
+    const store = await DataStore.open(DIR, new MemoryFs(), silentLogger);
+    await store.save(emptyAppData());
+    let fired = 0;
+    const off = store.onDataChanged(() => {
+      fired += 1;
+    });
+
+    off();
+    await store.update((d) => ({ ...d, settings: { ...d.settings, userName: 'y' } }));
+
+    expect(fired).toBe(0);
+  });
+});

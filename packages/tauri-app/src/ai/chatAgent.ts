@@ -75,6 +75,10 @@ export class ChatAgentManager {
   private agentRunIds = new Map<Agent, string>(); // agent -> 正在其上执行的 run 的 requestId（订阅事件归属）
   private runPromises = new Map<string, Promise<void>>(); // sessionId -> 最近一次 run() 的 promise
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  // sessionId -> 正在执行的工具数。工具在执行 = 有进展，而这段时间 LLM 本来就不会
+  // 流式输出——把这段静默计进空闲会把一次健康的长工具调用误掐成超时。工具可并发、
+  // 按完成顺序逐个 emit end，所以是计数而不是开关。
+  private pendingTools = new Map<string, number>();
   // 用户主动 stop 的会话：run 失效分支需要 persist 部分回答（超时/抢占则不需要）
   private userStops = new Set<string>();
 
@@ -103,6 +107,7 @@ export class ChatAgentManager {
     this.userStops.delete(id);
     this.agents.delete(id);
     this.runPromises.delete(id);
+    this.pendingTools.delete(id);
     return this.deps.deleteStoredSession(id);
   }
 
@@ -221,12 +226,21 @@ export class ChatAgentManager {
         case 'message_update': {
           const inner = event.assistantMessageEvent;
           if (inner.type === 'text_delta') {
-            this.armTimer(sessionId, this.deps.timeouts?.idleMs ?? IDLE_TIMEOUT_MS, 'IDLE_TIMEOUT');
+            // 工具执行期间的 delta 不重置空闲计时——那时 LLM 的静默不算停滞。
+            if ((this.pendingTools.get(sessionId) ?? 0) === 0) {
+              this.armTimer(
+                sessionId,
+                this.deps.timeouts?.idleMs ?? IDLE_TIMEOUT_MS,
+                'IDLE_TIMEOUT',
+              );
+            }
             this.deps.sink.chunk(sessionId, requestId, inner.delta);
           }
           break;
         }
         case 'tool_execution_start': {
+          this.pendingTools.set(sessionId, (this.pendingTools.get(sessionId) ?? 0) + 1);
+          this.clearTimer(sessionId);
           this.deps.sink.tool({
             sessionId,
             requestId,
@@ -238,6 +252,12 @@ export class ChatAgentManager {
           break;
         }
         case 'tool_execution_end': {
+          const pending = Math.max(0, (this.pendingTools.get(sessionId) ?? 1) - 1);
+          this.pendingTools.set(sessionId, pending);
+          // 只有最后一个工具结束时才重新计 LLM 的空闲。
+          if (pending === 0) {
+            this.armTimer(sessionId, this.deps.timeouts?.idleMs ?? IDLE_TIMEOUT_MS, 'IDLE_TIMEOUT');
+          }
           const text = event.result?.content?.[0]?.text ?? '';
           this.deps.sink.tool({
             sessionId,
@@ -263,6 +283,8 @@ export class ChatAgentManager {
     if (!session) return;
     const agent = await this.getOrCreateAgent(session, cfg);
     this.deps.sink.status({ sessionId, requestId, status: 'running' });
+    // 上一轮若在工具执行中被掐断，end 事件不会再来，计数会滞留——每个 run 从零开始。
+    this.pendingTools.set(sessionId, 0);
     this.armTimer(
       sessionId,
       this.deps.timeouts?.firstTokenMs ?? FIRST_TOKEN_TIMEOUT_MS,

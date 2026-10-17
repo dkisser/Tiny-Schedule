@@ -316,6 +316,50 @@ describe('mergeImport', () => {
     expect(merged.planner).toEqual(current.planner);
   });
 
+  test('定时任务与运行记录在导入后原样保留', () => {
+    // Super Productivity 的备份格式里没有定时任务这个概念，`normalizeBackup`
+    // 因此产出空对象。它们此前只靠 `...current` 的展开顺序幸存——没有任何
+    // 一行代码说"必须保留"，所以下一次有人往覆盖列表里加一项，整个定时任务
+    // 列表和全部审计轨迹会在一次导入里被抹掉，且无法撤销。
+    //
+    // 审计记录尤其不能丢：ADR-0008 把"运行记录是全开模式下唯一的追溯手段"
+    // 写成了 Consequences。
+    const current = emptyAppData();
+    const task = {
+      id: 'st1',
+      name: '每日汇总',
+      prompt: '汇总',
+      schedule: { kind: 'daily' as const, time: '09:00' },
+      workingDirectory: '/repo',
+      enabled: true,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    current.scheduledTasks = { st1: task };
+    current.runs = {
+      r1: {
+        id: 'r1',
+        taskId: 'st1',
+        trigger: 'scheduled',
+        status: 'success',
+        startedAt: 1,
+        finishedAt: 2,
+        output: 'done',
+        toolCalls: [],
+      },
+    } as unknown as typeof current.runs;
+
+    const imported = normalizeBackup(fixture).data;
+    // 备份里确实带着一个空对象——这正是 normalizeBackup 对未知概念的产出。
+    expect(imported.scheduledTasks).toEqual({});
+    expect(imported.runs).toEqual({});
+
+    const merged = mergeImport(current, imported);
+
+    expect(merged.scheduledTasks.st1?.name).toBe('每日汇总');
+    expect(merged.runs.r1?.output).toBe('done');
+  });
+
   test('does not mutate either input', () => {
     const current = emptyAppData();
     const imported = normalizeBackup(fixture).data;

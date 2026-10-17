@@ -78,6 +78,18 @@ type ModeListener = (writable: boolean, reason: string | null) => void;
  */
 type RecoveryListener = () => void | Promise<void>;
 
+/**
+ * Runs after a write that actually changed the dataset.
+ *
+ * Fires only on real change: the 30s timer heartbeat calls `update()` constantly
+ * with an identical reference, and a notification per heartbeat would rebuild
+ * every derived table (the scheduler's schedule table above all) forever.
+ *
+ * Takes no arguments on purpose — the store has no notion of which slice
+ * changed, and a listener that had to diff to find out would be guessing.
+ */
+type DataListener = () => void;
+
 export class DataStore {
   private cache: AppData | null = null;
   /**
@@ -94,6 +106,8 @@ export class DataStore {
   private recoveryListeners: RecoveryListener[] = [];
   /** Told whenever the store enters or leaves the read-only mode. */
   private modeListeners: ModeListener[] = [];
+  /** Told after every write that actually changed the dataset. */
+  private dataListeners: DataListener[] = [];
   /** Records generation 1 holds; invalidated on every rotation. null = not read yet. */
   private cachedBackupRecords: number | null = null;
 
@@ -266,7 +280,33 @@ export class DataStore {
     // real saving comes from taskService.syncTimer's value comparison.
     if (next === base) return { data: base, persisted: true };
     const persisted = await this.persist(next);
+    // Notified on the changed-reference path only, so a heartbeat that changed
+    // nothing never reaches a listener — see `DataListener`.
+    for (const listener of this.dataListeners) {
+      try {
+        listener();
+      } catch (error) {
+        // A listener that throws must not fail the write that triggered it: the
+        // data is already on disk, and reporting the write as failed would have
+        // the caller retry a mutation that succeeded.
+        this.logger.error({ action: 'dataStore:listenerThrew', error });
+      }
+    }
     return { data: persisted ? next : (this.cache ?? next), persisted };
+  }
+
+  /**
+   * Subscribe to writes that changed the dataset.
+   *
+   * Returns an unsubscribe function, like {@link onModeChanged}: the renderer
+   * reloads its effects, and a list that only grows would keep notifying a
+   * window that is gone.
+   */
+  onDataChanged(listener: DataListener): () => void {
+    this.dataListeners = [...this.dataListeners, listener];
+    return () => {
+      this.dataListeners = this.dataListeners.filter((l) => l !== listener);
+    };
   }
 
   /**
@@ -794,6 +834,13 @@ function countRecords(data: AppData): number {
     Object.keys(data.tasks).length +
     Object.keys(data.ideas).length +
     Object.keys(data.followUps).length +
+    Object.keys(data.scheduledTasks).length +
+    // Runs count too, for the same reason chat sessions do: a user whose only
+    // user data is a scheduled task's execution history is exactly the user this
+    // guard exists to protect, and the audit trail is the whole point of the
+    // module (ADR-0008) — losing it silently would leave an unattended agent's
+    // actions with no trace at all.
+    Object.keys(data.runs).length +
     Object.keys(data.projects).filter((id) => id !== INBOX_PROJECT_ID).length +
     Object.keys(data.tags).filter((id) => !SYSTEM_TAGS.has(id)).length +
     // Chat sessions are the one record type that is not a keyed map, so

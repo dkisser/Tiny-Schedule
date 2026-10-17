@@ -5,5 +5,6 @@ export * from './domain/appData';
 export * from './domain/followUp';
 export * from './domain/idea';
 export * from './domain/project';
+export * from './domain/scheduledTask';
 export * from './domain/task';
 export * from './version';

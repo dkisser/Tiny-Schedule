@@ -171,6 +171,12 @@ export function normalizeBackup(raw: unknown): { data: AppData; counts: ImportCo
     activeTimer: null,
     followUps: {},
     ideas: {},
+    // The backup format carries no scheduled tasks, so an import starts with
+    // none — same as followUps/ideas above. Listed explicitly rather than left
+    // to AppDataSchema's .default(): this object is typed as AppData, so the
+    // field has to be here for the type to be complete, and the two must agree.
+    scheduledTasks: {},
+    runs: {},
   };
 
   return {
@@ -205,6 +211,13 @@ export function mergeImport(current: AppData, imported: AppData): AppData {
     // 不能用 normalizeBackup 产出的空对象覆盖（决策 12）。
     followUps: current.followUps,
     ideas: current.ideas,
+    // 同上，而且没有回头路：`runs` 是 ADR-0008 全开模式下唯一的追溯手段，
+    // 一次导入抹掉它等于让所有无人值守运行永久失去可追溯性。
+    //
+    // 显式写出而不是靠 `...current` 侥幸幸存——那不是保护，是巧合。任何一次
+    // 往这个列表里加字段的重构都不会注意到还有两个字段在靠展开顺序活着。
+    scheduledTasks: current.scheduledTasks,
+    runs: current.runs,
     settings: current.settings,
     activeTimer: current.activeTimer,
   };

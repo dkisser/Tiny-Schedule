@@ -8,6 +8,7 @@ import {
   Archive,
   ArchiveRestore,
   Bot,
+  CalendarClock,
   CalendarDays,
   ChevronRight,
   Download,
@@ -322,6 +323,18 @@ export function Sidebar() {
         {openIdeas(data).length > 0 && (
           <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
             {openIdeas(data).length}
+          </span>
+        )}
+      </NavItem>
+      <NavItem
+        active={isActive({ type: 'scheduledTasks' })}
+        onClick={() => setView({ type: 'scheduledTasks' })}
+      >
+        <CalendarClock className="h-4 w-4" />
+        <span className="flex-1 text-left">定时任务</span>
+        {Object.keys(data.scheduledTasks).length > 0 && (
+          <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
+            {Object.keys(data.scheduledTasks).length}
           </span>
         )}
       </NavItem>

@@ -41,12 +41,14 @@ async function buildApi(): Promise<RendererApi> {
 const STUB_PATTERN = /not implemented/i;
 
 describe('contract completeness', () => {
-  test('the contract is 48 invokes and 6 subscriptions', () => {
+  test('the contract is 54 invokes and 6 subscriptions', () => {
     // Pinned so a change to packages/shared cannot quietly shrink the surface
     // this file claims to cover. Both numbers moved when main added the idea
-    // and follow-up command sets, timingStop, and the store-mode pull;
+    // and follow-up command sets, timingStop, the store-mode pull, and the
+    // scheduled-task CRUD + run channels — 53 then, 54 once the run channels
+    // split into appendRun (running) and finalizeRun (terminal);
     // onStoreWritable is the sixth subscription.
-    expect(CONTRACT_INVOKE_KEYS).toHaveLength(48);
+    expect(CONTRACT_INVOKE_KEYS).toHaveLength(54);
     expect(CONTRACT_SUBSCRIPTION_KEYS).toHaveLength(6);
     expect(CONTRACT_INVOKE_KEYS).toEqual(Object.keys(IpcInvokeContract) as IpcInvokeKey[]);
   });
@@ -91,6 +93,8 @@ describe('slices partition the contract', () => {
     const { createDataApi } = await import('@/api/data');
     const { createAiApi } = await import('@/api/ai');
     const { createFilesApi } = await import('@/api/files');
+    const { createScheduledTaskApi } = await import('@/api/scheduledTask');
+    const { createScheduledTaskRunApi } = await import('@/api/scheduledTaskRun');
     const { createSystemApi } = await import('@/api/system');
     const { createTimerApi } = await import('@/api/timer');
     const { createWindowApi } = await import('@/api/window');
@@ -103,6 +107,8 @@ describe('slices partition the contract', () => {
       data: createDataApi(store),
       ai: createAiApi({ store }),
       files: createFilesApi(store),
+      scheduledTask: createScheduledTaskApi(store),
+      scheduledTaskRun: createScheduledTaskRunApi({ store }),
       system: createSystemApi(store, {}),
       timer: createTimerApi(),
       window: createWindowApi(),

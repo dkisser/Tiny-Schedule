@@ -13,6 +13,7 @@
 
 pub mod calendar;
 pub mod close;
+pub mod gateway;
 pub mod host;
 pub mod idle;
 pub mod menu;
@@ -38,6 +39,12 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .manage(SseState::default())
         .manage(QuitState::default())
+        // The last four are the ADR-0008 gateway — the only commands that reach
+        // the shell, the network or an arbitrary path. Each carries taskId/runId
+        // so a future allowlist check has an anchor; none is access-controlled
+        // today, which `gateway/mod.rs` explains. Kept as bare entries because
+        // `scripts/check-ipc-literals.ts` parses this block by splitting on
+        // commas, and a comment inside it would be read as commands.
         .invoke_handler(tauri::generate_handler![
             host::home_dir,
             host::set_always_on_top,
@@ -46,6 +53,10 @@ pub fn run() {
             sse::sse_cancel,
             close::confirm_close,
             calendar::calendar_add_task,
+            gateway::exec::scheduled_exec,
+            gateway::http::scheduled_http_request,
+            gateway::files::scheduled_write_file,
+            gateway::files::scheduled_read_file,
         ])
         .on_menu_event(|app, event| menu::on_menu_event(app, event.id().as_ref()))
         .on_window_event(close::on_window_event)

@@ -2,6 +2,12 @@ import { z } from 'zod';
 import type { AppData, ChatSession } from '../domain/appData';
 import { FollowUpEntrySchema, FollowUpSchema } from '../domain/followUp';
 import { PROJECT_TITLE_MAX_LENGTH } from '../domain/project';
+import {
+  FinishedScheduledTaskRunSchema,
+  type ScheduledTaskRun,
+  ScheduledTaskRunSchema,
+  ScheduleSchema,
+} from '../domain/scheduledTask';
 import { ActiveTimerSchema, TaskSchema } from '../domain/task';
 
 /**
@@ -30,6 +36,12 @@ export const Ipc = {
   ideaDeleteEntry: 'idea:deleteEntry',
   ideaUpdateEntry: 'idea:updateEntry',
   ideaCloseWithVerdict: 'idea:closeWithVerdict',
+  scheduledTaskUpsert: 'scheduledTask:upsert',
+  scheduledTaskDelete: 'scheduledTask:delete',
+  scheduledTaskRunAdd: 'scheduledTask:runAdd',
+  scheduledTaskRunFinish: 'scheduledTask:runFinish',
+  scheduledTaskRunsList: 'scheduledTask:runsList',
+  scheduledTaskRunNow: 'scheduledTask:runNow',
   orderSet: 'order:set',
   projectCreate: 'project:create',
   projectUpdate: 'project:update',
@@ -234,6 +246,91 @@ export const IdeaCloseWithVerdictReqSchema = z.object({
   text: z.string().optional(),
 });
 export type IdeaCloseWithVerdictReq = z.infer<typeof IdeaCloseWithVerdictReqSchema>;
+
+// ---------------------------------------------------------------------------
+// 定时任务
+//
+// 与跟进/想法不同，这里没有意图命令集：定时任务的写侧全是普通 CRUD，因为它的
+// "状态"只有 enabled 一个布尔属性——启用/停用是属性不是状态机，因此留在 upsert
+// 里。运行记录则相反：开始即落一条 running，结束时改写为终态，而改写只允许
+// running → 终态这一个方向——审计记录一旦能被反复修改，它就不再是追溯手段
+// （ADR-0008）。
+// ---------------------------------------------------------------------------
+
+export const ScheduledTaskDeleteReqSchema = z.object({ id: z.string().min(1) });
+
+/**
+ * 定时任务的字段编辑，同时覆盖新建（id 不存在时）与更新。
+ *
+ * 刻意是**编辑**而不是整条覆盖，且 createdAt 不在其中：渲染进程拿着渲染时的快照
+ * 回写时，整条覆盖会把 createdAt 一起改掉，也会把一次并发执行留下的 updatedAt
+ * 回滚。`enabled` 缺省表示"不动"——停用是一个动作，不是"把 enabled 写成默认值"。
+ *
+ * `workingDirectory` 的 `null` = 清空（回到应用默认目录），`undefined` = 不动，
+ * 两者必须分开，否则渲染进程每次都显式带上 `workingDirectory: undefined` 就会抹掉
+ * 已设的执行目录。
+ */
+export const ScheduledTaskUpsertReqSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().trim().min(1),
+  prompt: z.string().trim().min(1),
+  schedule: ScheduleSchema,
+  workingDirectory: z.string().trim().min(1).nullable().optional(),
+  enabled: z.boolean().optional(),
+});
+// z.input, not z.infer: several keys are optional-in / absent-in distinctions the
+// caller expresses by leaving the key out.
+export type ScheduledTaskUpsertReq = z.input<typeof ScheduledTaskUpsertReqSchema>;
+
+/**
+ * 追加一条运行。整个对象过 schema 而不是拆成平铺字段，因为运行记录的形状就是
+ * 审计记录的形状——平铺会让写侧漏掉某个字段而 schema 又查不出来。
+ *
+ * 走这条通道的是**开始时**那条 running 记录。运行从开始就落库，所以一次执行的痕
+ * 迹在进程中途死掉时也不会凭空消失（CONTEXT.md）。
+ */
+export const ScheduledTaskRunAddReqSchema = z.object({ run: ScheduledTaskRunSchema });
+export type ScheduledTaskRunAddReq = z.infer<typeof ScheduledTaskRunAddReqSchema>;
+
+/**
+ * 终结一条运行：把开始时落下的 running 记录改写为终态。
+ *
+ * 请求体是**终态运行**，不是任意状态——写侧不接受"用 finish 改回 running"，所以这条
+ * 通道只朝一个方向走，而 `running` 是唯一允许被改写的状态（终态记录不可再改写，见
+ * service 的 finalizeRun）。
+ *
+ * 这是运行记录唯一一次可写的地方，也是它可写的原因：进程在运行途中死掉时那条
+ * running 记录就是这次执行留下的全部痕迹，审计（ADR-0008）不能因此少掉一次运行。
+ */
+export const ScheduledTaskRunFinishReqSchema = z.object({ run: FinishedScheduledTaskRunSchema });
+export type ScheduledTaskRunFinishReq = z.infer<typeof ScheduledTaskRunFinishReqSchema>;
+
+/** 按任务查询运行。查全部运行没有意义：运行记录会一直增长，接口必须按任务收窄。 */
+export const ScheduledTaskRunsListReqSchema = z.object({ scheduledTaskId: z.string().min(1) });
+export type ScheduledTaskRunsListReq = z.infer<typeof ScheduledTaskRunsListReqSchema>;
+
+/** 「立即运行」的请求：任务 id。运行记录由主进程建，调用方不传。 */
+export const ScheduledTaskRunNowReqSchema = z.object({ taskId: z.string().min(1) });
+export type ScheduledTaskRunNowReq = z.infer<typeof ScheduledTaskRunNowReqSchema>;
+
+/**
+ * runNow 的返回值，三个分支按**有没有东西发生过**划分（与 TimingStopResult 同一
+ * 条原则）：
+ *
+ * - `ok: true` —— 跑完了，成功。带记录。
+ * - `ok: false` 带记录 —— 跑了但失败（provider 报错、超时、工具全炸）。**仍然带
+ *   记录**，因为这次运行确实执行过；没有它的界面上只能显示"失败"两字，而用户要的
+ *   恰恰是那次执行的证据。
+ * - `TASK_NOT_FOUND` —— 什么都没跑，所以没有记录可给。这与"跑了但失败"必须分开，
+ *   否则调用方无从判断该不该跳去运行详情页。
+ *
+ * skipped（上一轮未结束时被跳过）落在第一个分支里：它不是错误，重叠是正常状态，
+ * 只是这次没有执行。
+ */
+export type ScheduledTaskRunNowResult =
+  | { ok: true; run: ScheduledTaskRun }
+  | { ok: false; run: ScheduledTaskRun; error: string }
+  | { ok: false; error: 'TASK_NOT_FOUND' };
 
 export const OrderSetReqSchema = z.object({
   viewKey: z.string().min(1),
@@ -700,6 +797,59 @@ export const IpcInvokeContract = {
     ch: Ipc.ideaCloseWithVerdict,
     req: IdeaCloseWithVerdictReqSchema,
     res: null as unknown as IdeaCommandResult,
+  },
+  /**
+   * 定时任务的字段编辑，新建与更新共用（见 {@link ScheduledTaskUpsertReqSchema}）。
+   *
+   * 返回裸数据集而非 WriteOutcome：调用方只用返回值刷新界面，而"这个应用现在还
+   * 还在保存吗"是 store 模式推送的事，不需要逐次携带（ADR-0004）。
+   */
+  scheduledTaskUpsert: {
+    ch: Ipc.scheduledTaskUpsert,
+    req: ScheduledTaskUpsertReqSchema,
+    res: null as unknown as AppData,
+  },
+  /** 删除定时任务连同其全部运行记录（CONTEXT.md）。 */
+  scheduledTaskDelete: {
+    ch: Ipc.scheduledTaskDelete,
+    req: ScheduledTaskDeleteReqSchema,
+    res: null as unknown as AppData,
+  },
+  /** 追加一条运行记录；开始时落的是 running 记录。 */
+  scheduledTaskRunAdd: {
+    ch: Ipc.scheduledTaskRunAdd,
+    req: ScheduledTaskRunAddReqSchema,
+    res: null as unknown as AppData,
+  },
+  /**
+   * 终结一条运行：把那条 running 记录改写为终态（含 output 与全部工具调用）。
+   *
+   * 与 `runAdd` 分成两个通道而不是一个带 upsert 语义的通道，是因为"能不能改写"
+   * 是这条通道唯一需要防的事：终态记录一旦能再被改写，它就不再是追溯手段
+   * （ADR-0008）。写侧因此只接受 running → 终态这一个方向的跃迁。
+   */
+  scheduledTaskRunFinish: {
+    ch: Ipc.scheduledTaskRunFinish,
+    req: ScheduledTaskRunFinishReqSchema,
+    res: null as unknown as AppData,
+  },
+  /** 按任务取运行，最新的在前。 */
+  scheduledTaskRunsList: {
+    ch: Ipc.scheduledTaskRunsList,
+    req: ScheduledTaskRunsListReqSchema,
+    res: null as unknown as ScheduledTaskRun[],
+  },
+  /**
+   * 「立即运行」：手动触发一次，产物与定时触发完全同构（CONTEXT.md）。
+   *
+   * 返回的是**运行记录**而不是裸 AppData：调用方要立刻知道这次跑了没有、成了没有。
+   * 拿数据集回来刷新界面解决不了"我刚点的那一下怎么样了"——那条记录才是答案，而
+   * 它正是用户接下来要点开看的东西。
+   */
+  scheduledTaskRunNow: {
+    ch: Ipc.scheduledTaskRunNow,
+    req: ScheduledTaskRunNowReqSchema,
+    res: null as unknown as ScheduledTaskRunNowResult,
   },
   orderSet: { ch: Ipc.orderSet, req: OrderSetReqSchema, res: null as unknown as void },
   projectCreate: {

@@ -10,10 +10,26 @@
   report `permission-denied`, which the user has no way to act on.
   Wording is copied verbatim from packages/app/electron-builder.yml so the two
   builds ask for the calendar in the same words.
+
+  The folder keys are for scheduled tasks (ADR-0008): the exec/file gateway
+  works wherever the user points a task's 执行目录, and macOS gates each of
+  these locations behind its own prompt. Without the key there is no prompt —
+  just a silent EPERM. iCloud Drive (~/Library/Mobile Documents) has no
+  documented usage key; the fallback there is Full Disk Access.
 -->
 <plist version="1.0">
   <dict>
     <key>NSCalendarsFullAccessUsageDescription</key>
     <string>Tiny Schedule 需要访问系统日历以将任务作为事件写入。</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>定时任务会在你指定的执行目录中读写文件、运行命令。</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>定时任务会在你指定的执行目录中读写文件、运行命令。</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>定时任务会在你指定的执行目录中读写文件、运行命令。</string>
+    <key>NSNetworkVolumesUsageDescription</key>
+    <string>定时任务会在你指定的执行目录中读写文件、运行命令。</string>
+    <key>NSRemovableVolumesUsageDescription</key>
+    <string>定时任务会在你指定的执行目录中读写文件、运行命令。</string>
   </dict>
 </plist>

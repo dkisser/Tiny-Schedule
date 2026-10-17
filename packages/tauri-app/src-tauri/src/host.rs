@@ -7,17 +7,27 @@
 
 use tauri::{Manager, WebviewWindow};
 
-/// The user's home directory. `std::env::var("HOME")` is what a normal GUI
-/// launch populates; failing loudly beats resolving to `/` and scattering files
-/// at the filesystem root.
+/// The user's home directory, or the reason there isn't one.
+///
+/// `HOME` is what a unix GUI launch populates and `USERPROFILE` the Windows
+/// equivalent; reading only the first leaves every path that needs a home
+/// directory failing on Windows. Tauri also hands a GUI-launched app a
+/// different environment than a shell does, so both names are checked rather
+/// than assumed.
+///
+/// One implementation, not one per caller: the data directory and the gateway's
+/// `~` expansion both need this, and two copies of "where is home" drift apart
+/// the moment one of them is fixed.
 #[tauri::command]
 pub fn home_dir() -> Result<String, String> {
-    if let Ok(home) = std::env::var("HOME") {
-        if !home.is_empty() {
-            return Ok(home);
+    for name in ["HOME", "USERPROFILE"] {
+        if let Ok(home) = std::env::var(name) {
+            if !home.is_empty() {
+                return Ok(home);
+            }
         }
     }
-    Err("HOME is not set; cannot resolve the data directory".to_string())
+    Err("neither HOME nor USERPROFILE is set; cannot resolve the data directory".to_string())
 }
 
 /// Float the main window above other applications, or stop doing so.
