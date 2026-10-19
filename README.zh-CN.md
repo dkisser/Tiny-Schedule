@@ -131,6 +131,7 @@
 3. 首次启动可能遇到 Gatekeeper 拦截：
    - **推荐**：在 Applications 中 **右键** `Tiny Schedule.app` → **打开** → 确认"打开"。
    - **彻底**：先退出 app，再执行 `sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"`。
+     - 若该命令对包内每个路径都报 `xattr: [Errno 1] Operation not permitted`，说明你的终端应用缺少 **完全磁盘访问权限**——光有 `sudo` 没用，macOS 限制的是发起调用的进程，而不是 root 用户。到「系统设置 → 隐私与安全性 → 完全磁盘访问权限」里给终端（Terminal / iTerm 等）打勾，重开终端后再执行一次。
 4. 启动后进入 **设置页** → 填入你的 AI Provider（API key、base URL、模型），即可使用 AI 分析。
 
 > 📥 如果你已经在用 Super Productivity，参见下一节 [从 Super Productivity 导入](#从-super-productivity-导入)。
@@ -228,6 +229,8 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
   ```
 
   之后双击即可正常启动。
+
+  **排查**：若命令对包内每个路径都报 `xattr: [Errno 1] Operation not permitted`，说明终端应用缺少 **完全磁盘访问权限**。`sudo` 绕不过去——macOS 这条限制作用在发起调用的进程上，不是作用在 root 上。到「系统设置 → 隐私与安全性 → 完全磁盘访问权限」里把终端（Terminal / iTerm 等）加上，重开终端，再执行一次即可。
 
 ---
 

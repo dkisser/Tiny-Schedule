@@ -131,6 +131,7 @@ A local-first desktop app for people who want **complete ownership of their task
 3. On first launch, macOS Gatekeeper may block the unsigned app:
    - **Recommended**: In Applications, **right-click** `Tiny Schedule.app` → **Open** → confirm.
    - **Permanent fix**: Quit the app first, then run `sudo xattr -rd com.apple.quarantine "/Applications/Tiny Schedule.app"`.
+     - If that command prints `xattr: [Errno 1] Operation not permitted` for every path, your terminal app lacks **Full Disk Access** — `sudo` is not enough, because macOS restricts the parent process, not the root user. Go to System Settings → Privacy & Security → Full Disk Access, enable it for Terminal/iTerm, reopen the terminal, and run the command again.
 4. Open **Settings** → fill in your AI provider (API key, base URL, model) to enable AI analysis.
 
 > 📥 Already on Super Productivity? See [Importing from Super Productivity](#importing-from-super-productivity).
@@ -229,6 +230,8 @@ No Apple Developer ID signing or notarization, so Gatekeeper will block first la
   ```
 
   After that, double-click works normally.
+
+  **Troubleshooting** — if the command fails with `xattr: [Errno 1] Operation not permitted` on every path inside the bundle, the terminal app is missing **Full Disk Access**. `sudo` does not bypass this: macOS applies the restriction to the calling process, not to root. Add your terminal (Terminal, iTerm, …) under System Settings → Privacy & Security → Full Disk Access, reopen it, and re-run the command.
 
 ---
 
