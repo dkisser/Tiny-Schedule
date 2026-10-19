@@ -270,12 +270,15 @@ export function TaskDetail({ task }: { task: Task }) {
               <input
                 type="checkbox"
                 checked={s.isDone}
-                onChange={(e) => {
+                onChange={() => {
                   // Same path as the card checkbox: completing a timed subtask
                   // must end its timing, confirm and all.
-                  const next = { ...s, isDone: e.target.checked };
-                  if (!next.isDone) next.doneAt = undefined;
-                  requestComplete(next);
+                  //
+                  // `requestComplete` reads the task's current `isDone` to decide
+                  // the direction, so it needs the pre-toggle task. Handing it
+                  // the toggled one inverts every click: checking boxes
+                  // un-completes them, and un-checking completes them.
+                  requestComplete(s);
                 }}
               />
               <span className={s.isDone ? 'line-through text-muted-foreground' : ''}>
