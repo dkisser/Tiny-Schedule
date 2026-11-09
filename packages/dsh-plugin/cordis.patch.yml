@@ -1,0 +1,10 @@
+# The dsh-plugin-tiny-schedule bundle patch.
+#
+# One host row for the plugin. The browser half ships through
+# exports["./client"] plus the `dsh.client` declaration in package.json; the
+# client-modules node half discovers it by scanning enabled loader entries for
+# packages that declare `dsh.client`, so this row is what puts the plugin on
+# the browser roster.
+- insert:
+    - id: tiny-schedule
+      name: dsh-plugin-tiny-schedule

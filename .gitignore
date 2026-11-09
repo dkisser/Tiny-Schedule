@@ -24,6 +24,9 @@ packages/app/release/
 *.blockmap
 *.app
 
+# dsh plugin 构建产物
+packages/dsh-plugin/lib/
+
 # Swift Package Manager 产物(event-helper Swift CLI)
 packages/app/event-helper/.build/
 packages/app/event-helper/Package.resolved

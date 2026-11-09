@@ -8,13 +8,14 @@
     "build:event-helper": "bun run --cwd packages/tauri-app build:event-helper",
     "dev": "bun run build:event-helper && bun run --cwd packages/tauri-app tauri:dev",
     "build": "bun run build:event-helper && bun run --cwd packages/tauri-app build",
-    "test": "bun run --cwd packages/tauri-app test && bun run --cwd packages/shared test",
+    "test": "bun run --cwd packages/tauri-app test && bun run --cwd packages/shared test && bun run --cwd packages/dsh-plugin test",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check:ipc": "bun scripts/check-ipc-literals.ts",
-    "typecheck": "tsc -b",
+    "typecheck": "tsc -b && bun run --cwd packages/dsh-plugin typecheck",
     "release": "REBUILD_EVENT_HELPER=1 bun run build:event-helper && bun run --cwd packages/tauri-app release",
-    "release:dir": "REBUILD_EVENT_HELPER=1 bun run build:event-helper && bun run --cwd packages/tauri-app release:dir"
+    "release:dir": "REBUILD_EVENT_HELPER=1 bun run build:event-helper && bun run --cwd packages/tauri-app release:dir",
+    "build:dsh-plugin": "bun run --cwd packages/dsh-plugin build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
