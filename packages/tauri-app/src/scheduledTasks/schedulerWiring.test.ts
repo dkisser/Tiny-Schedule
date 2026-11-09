@@ -4,6 +4,7 @@ import { type AppData, emptyAppData, type ScheduledTask } from '@tiny-schedule/s
 import { silentLogger } from '@/ai/logger';
 import { DataStore } from '@/bridge/dataStore';
 import { MemoryFs } from '@/bridge/fsAdapter';
+import { SHOW_SCHEDULED_TASKS_ENTRY } from '@/lib/features';
 import { installTauriMocks } from '@/test/tauriMocks';
 import { _resetInFlightForTest } from './runtime';
 import { _resetSchedulerForTest, startScheduler } from './scheduler';
@@ -119,6 +120,44 @@ describe('startScheduler 的真实接线', () => {
     expect(runs[0]?.output).toBe('done');
     // `skipped` is the symptom: the wiring bug made every trigger record a skip.
     expect(runs[0]?.status).not.toBe('skipped');
+  });
+
+  test('入口收起时，调度器照样起跑', async () => {
+    // 「入口收起」与「功能停用」是两件事。这条断言把它们分开：入口在界面上不
+    // 可见（见 lib/features.ts），但调度器与界面无关——已配置的定时任务照常到点
+    // 触发、照常落运行记录、照常发系统通知。
+    //
+    // 真正的回归不是"任务不跑了"（那个有症状，运行记录会停在 running），而是
+    // "任务还在跑，但界面上再也看不到它的运行记录"——因为看运行记录的唯一入口
+    // 正是被收起的那一行导航项。
+    expect(SHOW_SCHEDULED_TASKS_ENTRY).toBe(false);
+
+    const store = await openStore([task('st1', '00:01')]);
+    const scheduler = await startScheduler(store, silentLogger, {
+      invoke: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      runner: {
+        createAgent: () => FINISHED_AGENT,
+        timeouts: { firstTokenMs: 60_000, idleMs: 60_000 },
+      },
+    });
+
+    await store.update((d) => ({
+      ...d,
+      scheduledTasks: {
+        st1: { ...d.scheduledTasks.st1!, schedule: { kind: 'daily', time: '00:01' } },
+      },
+    }));
+
+    for (const entry of scheduler.peek()) {
+      entry.nextAt = 0;
+    }
+    await scheduler.tick();
+    await scheduler.settled();
+
+    const runs = Object.values((await store.get()).runs);
+    expect(runs).toHaveLength(1);
+    expect(runs[0]?.status).toBe('success');
+    expect(runs[0]?.output).toBe('done');
   });
 
   test('运行期新建的任务会进调度表', async () => {

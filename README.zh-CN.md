@@ -250,7 +250,6 @@ Actions 中的 `release.yml` 会在 `macos-latest` runner 上：跑 lint/typeche
 
 - [`AGENTS.md`](./AGENTS.md) — UI 规范入口
 - [`docs/ui-guidelines.md`](./docs/ui-guidelines.md) — 按钮 / 图标 / 间距约定
-- [`CLAUDE.md`](./CLAUDE.md) — 项目专属 Claude Code 指令
 
 建议流程：fork → 新建分支 → 提交 PR（commit message 遵循 [Conventional Commits](https://www.conventionalcommits.org/)）。
 
