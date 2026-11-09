@@ -251,7 +251,6 @@ Contributions welcome. Please read before opening a PR:
 
 - [`AGENTS.md`](./AGENTS.md) — UI conventions entry point
 - [`docs/ui-guidelines.md`](./docs/ui-guidelines.md) — buttons / icons / spacing
-- [`CLAUDE.md`](./CLAUDE.md) — Claude Code instructions for this repo
 
 Suggested flow: fork → new branch → PR (commit messages follow [Conventional Commits](https://www.conventionalcommits.org/)).
 
