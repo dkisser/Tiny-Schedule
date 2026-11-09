@@ -24,6 +24,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useState } from 'react';
+import { SHOW_SCHEDULED_TASKS_ENTRY } from '../lib/features';
 import { dueFollowUps } from '../lib/followUps';
 import { ideaByProjectId, openIdeas } from '../lib/ideas';
 import { cn } from '../lib/utils';
@@ -326,18 +327,22 @@ export function Sidebar() {
           </span>
         )}
       </NavItem>
-      <NavItem
-        active={isActive({ type: 'scheduledTasks' })}
-        onClick={() => setView({ type: 'scheduledTasks' })}
-      >
-        <CalendarClock className="h-4 w-4" />
-        <span className="flex-1 text-left">定时任务</span>
-        {Object.keys(data.scheduledTasks).length > 0 && (
-          <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
-            {Object.keys(data.scheduledTasks).length}
-          </span>
-        )}
-      </NavItem>
+      {/* 定时任务入口暂时收起，功能没动：调度器照常起跑，已配置的任务照常触发。
+          恢复只需把 SHOW_SCHEDULED_TASKS_ENTRY 改回 true，见 lib/features.ts。 */}
+      {SHOW_SCHEDULED_TASKS_ENTRY && (
+        <NavItem
+          active={isActive({ type: 'scheduledTasks' })}
+          onClick={() => setView({ type: 'scheduledTasks' })}
+        >
+          <CalendarClock className="h-4 w-4" />
+          <span className="flex-1 text-left">定时任务</span>
+          {Object.keys(data.scheduledTasks).length > 0 && (
+            <span className="rounded-full bg-secondary px-1.5 text-xs text-muted-foreground">
+              {Object.keys(data.scheduledTasks).length}
+            </span>
+          )}
+        </NavItem>
+      )}
 
       <Collapsible
         open={!collapsedGroups.projects}
