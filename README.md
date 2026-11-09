@@ -37,7 +37,7 @@
 
 A local-first desktop app for people who want **complete ownership of their tasks and time**. Tiny-Schedule combines a fast keyboard-driven task manager with **AI-powered daily / weekly reports**, so you can focus on doing the work instead of reviewing what you did.
 
-- 📦 **Local-first**: All task data lives in a local SQLite database. No cloud required (except your explicitly configured AI provider).
+- 📦 **Local-first**: All task data lives in a local JSON store. No cloud required (except your explicitly configured AI provider).
 - ⌨️ **Keyboard-driven**: Inspired by Super Productivity and Things.
 - 🤖 **AI insights**: Multiple OpenAI-compatible providers (OpenAI, DeepSeek, Azure, self-hosted, Ollama). One-click daily/weekly reports.
 - 🔁 **Portable**: Full backup-JSON import from Super Productivity with auto-backup. Never get locked in.
@@ -113,7 +113,7 @@ A local-first desktop app for people who want **complete ownership of their task
 | Renderer | React 19 + TypeScript 5.7 |
 | Styling | Tailwind CSS 4 + Radix UI + lucide-react |
 | State | Zustand 5 |
-| Data | Local JSON store (encrypted at rest) |
+| Data | Local JSON store (task data is plain text on disk; only LLM API keys are encrypted) |
 | AI | [@earendil-works/pi-ai](https://www.npmjs.com/package/@earendil-works/pi-ai) (multi-provider, OpenAI-compatible) |
 | Markdown | cherry-markdown / react-markdown / remark-gfm |
 | Packaging | Tauri bundler (DMG, macOS arm64 + x64, < 20 MB) |

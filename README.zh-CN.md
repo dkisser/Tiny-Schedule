@@ -37,7 +37,7 @@
 
 一个**完全掌控数据**、**键盘流操作**、且能借助 **AI 自动复盘** 的桌面端任务管理器。
 
-- 📦 **本地优先**：所有任务数据保存在本机 SQLite，不依赖任何云服务（除你显式配置的 AI Provider）。
+- 📦 **本地优先**：所有任务数据保存在本机 JSON 文件，不依赖任何云服务（除你显式配置的 AI Provider）。
 - ⌨️ **键盘流**：参考 Super Productivity / Things 的快捷键体验。
 - 🤖 **AI 复盘**：多 Provider OpenAI 兼容接口（OpenAI / DeepSeek / 任意兼容 endpoint），一键生成日报、周报。
 - 🔁 **可迁移**：完整支持 Super Productivity 备份 JSON 整库导入 + 自动备份，避免数据被锁死。
