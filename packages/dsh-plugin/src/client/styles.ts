@@ -312,6 +312,31 @@ const CSS = `
 .ts-entries { display: flex; flex-direction: column; gap: 2px; }
 .ts-entry { display: flex; align-items: center; gap: 6px; }
 .ts-entry .ts-icon { margin-left: auto; }
+
+/* ── page ──────────────────────────────────────────────────────────────── */
+.ts-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  color: var(--dsw-alias-label-primary, inherit);
+  font-size: 13px;
+  line-height: 20px;
+}
+.ts-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(127, 127, 127, 0.16));
+}
+.ts-page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
 `;
 
 let injected = false;

@@ -9,6 +9,7 @@
  * The drag is plain pointer events: the board owns the geometry, the host
  * owns the write. Nothing is persisted until the pointer is released.
  */
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -23,7 +24,7 @@ import type { QuadrantKey, TaskView } from '../../domain/types.ts';
 import { QUADRANT_KEYS, QUADRANT_LABELS } from '../../domain/types.ts';
 import { TaskCard } from './TaskCard.tsx';
 
-export interface QuadrantBoardProps {
+export interface QuadrantBoardProps extends PropsLocale<'tinySchedule'> {
   tasks: TaskView[];
   today: string;
   thresholdDays: number;
@@ -48,7 +49,7 @@ export interface QuadrantBoardProps {
 }
 
 export function QuadrantBoard(props: QuadrantBoardProps) {
-  const { tasks, today, thresholdDays } = props;
+  const { tasks, today, thresholdDays, t } = props;
   const cells = useMemo(
     () => quadrantTasks(tasks, today, thresholdDays),
     [tasks, today, thresholdDays],
@@ -235,11 +236,12 @@ export function QuadrantBoard(props: QuadrantBoardProps) {
             <div className="ts-quadrant-head">
               <span className="ts-section-title">{QUADRANT_LABELS[cell]}</span>
               <span className="ts-meta">
-                {cellTasks.length} · 本周完成 {completedInCell(tasks, cell, today, thresholdDays)}
+                {cellTasks.length} · {t('label.weeklyDone')}{' '}
+                {completedInCell(tasks, cell, today, thresholdDays)}
               </span>
             </div>
             {cellTasks.length === 0 ? (
-              <div className="ts-empty">拖动任务到此格</div>
+              <div className="ts-empty">{t('label.dropHere')}</div>
             ) : (
               <div className="ts-list">
                 {cellTasks.map((task) => (
@@ -252,6 +254,7 @@ export function QuadrantBoard(props: QuadrantBoardProps) {
                     }}
                   >
                     <TaskCard
+                      t={t}
                       task={task}
                       urgent={isUrgent(task, today, thresholdDays)}
                       overdue={isOverdue(task)}

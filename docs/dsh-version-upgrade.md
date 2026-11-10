@@ -196,16 +196,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
     "platform": "web",
     "inject": [
       "@deepseek-ai/dsh-client-locale",
+      "@deepseek-ai/dsh-client-ui-layout",
       "@deepseek-ai/dsh-client-ui-renderer",
-      "@deepseek-ai/dsh-client-ui-conversation"
+      "@deepseek-ai/dsh-client-ui-sidebar"
     ]
   }
 }
 ```
 
-`inject` 列出的是**包 id**，不是服务名。它决定加载顺序；不写的话插件可能在 `ctx.slots` / `ctx.locale` 就绪前就执行 `apply()`，表现为标签页偶尔不出现。
+`inject` 列出的是**包 id**，不是服务名。它决定加载顺序；不写的话插件可能在 `ctx.slots` / `ctx.locale` 就绪前就执行 `apply()`，表现为左栏入口偶尔不出现。
 
-对照 `export const inject = ['slots', 'locale']` —— 那是 cordis 层的**服务**注入，两者是不同维度，别混。
+对照 `export const inject = ['slots', 'locale', 'layout']` —— 那是 cordis 层的**服务**注入，两者是不同维度，别混。
 
 验证声明生效：
 
@@ -260,18 +261,23 @@ curl -s -b /tmp/c.txt http://127.0.0.1:3080/ts/api/tools      # 期望 24 个 ts
 
 ### 浏览器验证
 
-标签栏（`conversation.view` 插槽）只在**有会话**时才渲染。起一个临时实例验证，不污染真实 profile：
+插件的入口在**左栏**（会话历史上方），点击后中栏打开插件自己的整页。起一个临时实例验证，不污染真实 profile：
 
 ```bash
 DEEPSEEK_API_KEY=sk-dummy-local-check dsh web --port 3081 --no-open
 ```
 
-用占位 key 建一条消息触发会话（模型调用必然报「API 密钥无效」，**不影响验证**——会话一旦建立，标签栏就会渲染），然后：
+然后：
 
-- 标签行应出现 `对话 | 轨迹 | 任务 | 想法`
-- 「任务」页应出现 `今日 | 四象限 | 长期池` + 「新建任务」
+- 左栏在「工作区 / 会话历史」上方应出现一行图标 + 「任务与想法」（`sidebar.panellist`）
+- 点击后中栏应出现整页 `.ts-page`，顶层页签是 `任务 | 想法`，头部有「返回对话」
+- 「任务」页内的投影是 `今日 | 四象限 | 长期池`；「想法」页内是 `收集箱 | 验证中 | 已了结`
+- 点「返回对话」后中栏应交还对话（`main.conversation` 槽位重新出现）
+- 会话标签环应只剩 `对话 | 轨迹`（插件不再往那里注册）
 - 浏览器控制台：`document.querySelector('style[data-plugin-css="dsh-plugin-tiny-schedule/styles.css"]')` 应存在（证明浏览器半边 `apply()` 跑过）
 - 建一条任务 → 检查 `~/.dsh/storages/task_tracker.json` 落库 → 删掉它（清理测试数据）
+
+> **入口与页面共用一个 id。** 宿主 `ctx.layout.selectPanel(id)` 会校验 `main` 插槽里存在同 key 的条目，`sidebar.panellist` 行与 `main` 注册必须拼同一个字符串（当前是 `tiny-schedule`），否则表现为"点了没反应"（见 [ADR 0010](adr/0010-the-plugin-opens-as-a-page-from-the-left-column.md)）。升级后如果入口点了没反应，先查这两样：`sidebar.panellist` 席位还在不在、`main` 是否仍是 keyed 插槽。
 
 ---
 
@@ -286,6 +292,7 @@ DEEPSEEK_API_KEY=sk-dummy-local-check dsh web --port 3081 --no-open
 | `spawn pnpm ENOENT` | pnpm 不在 PATH | `npm install -g pnpm` |
 | 运行时原生模块报错 | npm 11 没跑安装脚本 | 加 `--allow-scripts=...` 重装 |
 | 标签页偶尔不出现 | 客户端加载顺序没声明 | 补 `dsh.client.inject` |
+| 左栏入口点了没反应 | `sidebar.panellist` 与 `main` 的 id/key 不一致 | 两处拼同一个字符串（ADR 0010） |
 | `installation rejected: incompatible` | peer 版本与 dsh 不匹配 | 正常升级 peer 依赖（别用 allow-version 绕过） |
 
 ---

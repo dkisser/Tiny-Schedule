@@ -5,6 +5,7 @@
  * editable in place. Fields commit as they change — title and estimate are
  * debounced, the rest commit on the spot.
  */
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import { useEffect, useRef, useState } from 'react';
 import type { ProjectRecord, TagRecord } from '../../domain/schema.ts';
 import type { TaskView } from '../../domain/types.ts';
@@ -19,7 +20,7 @@ export interface TaskPatchInput {
   tagIds?: string[];
 }
 
-export interface TaskDetailProps {
+export interface TaskDetailProps extends PropsLocale<'tinySchedule'> {
   task: TaskView;
   /** Every task, so the subtask list can resolve its rows. */
   tasks: TaskView[];
@@ -39,7 +40,7 @@ export interface TaskDetailProps {
 }
 
 export function TaskDetail(props: TaskDetailProps) {
-  const { task } = props;
+  const { task, t } = props;
   const title = useDebouncedCommit(task.title, 400, (value) => {
     const trimmed = value.trim();
     if (trimmed !== '' && trimmed !== task.title) props.onPatch(task.id, { title: trimmed });
@@ -93,17 +94,17 @@ export function TaskDetail(props: TaskDetailProps) {
   return (
     <>
       <div className="ts-drawer-backdrop" onClick={props.onClose} />
-      <aside className="ts-drawer" aria-label="任务详情">
+      <aside className="ts-drawer" aria-label={t('field.taskDetail')}>
         <div className="ts-drawer-head">
           <button type="button" className="ts-button" onClick={props.onClose}>
-            关闭
+            {t('field.close')}
           </button>
           <button
             type="button"
             className="ts-button is-primary"
             onClick={() => props.onToggleDone(task)}
           >
-            {task.isDone ? '取消完成' : '完成'}
+            {task.isDone ? t('action.uncomplete') : t('action.complete')}
           </button>
         </div>
 
@@ -118,7 +119,7 @@ export function TaskDetail(props: TaskDetailProps) {
         />
 
         <label className="ts-field">
-          <span className="ts-field-label">项目</span>
+          <span className="ts-field-label">{t('field.project')}</span>
           <select
             className="ts-input"
             value={task.projectId}
@@ -133,9 +134,9 @@ export function TaskDetail(props: TaskDetailProps) {
         </label>
 
         <div className="ts-field">
-          <span className="ts-field-label">标签</span>
+          <span className="ts-field-label">{t('field.tags')}</span>
           <div className="ts-tag-picker">
-            {props.tags.length === 0 && <span className="ts-meta">还没有标签</span>}
+            {props.tags.length === 0 && <span className="ts-meta">{t('field.noTags')}</span>}
             {props.tags.map((tag) => (
               <button
                 key={tag.id}
@@ -151,7 +152,7 @@ export function TaskDetail(props: TaskDetailProps) {
 
         <div className="ts-field-grid">
           <label className="ts-field">
-            <span className="ts-field-label">截止日</span>
+            <span className="ts-field-label">{t('field.dueDay')}</span>
             <div className="ts-inline">
               <input
                 className="ts-input"
@@ -162,7 +163,9 @@ export function TaskDetail(props: TaskDetailProps) {
               <button
                 type="button"
                 className="ts-icon is-star"
-                aria-label={task.isImportant ? '取消重要' : '标为重要'}
+                aria-label={
+                  task.isImportant ? t('action.unmarkImportant') : t('action.markImportant')
+                }
                 aria-pressed={task.isImportant}
                 onClick={() => props.onPatch(task.id, { isImportant: !task.isImportant })}
               >
@@ -171,7 +174,7 @@ export function TaskDetail(props: TaskDetailProps) {
             </div>
           </label>
           <label className="ts-field">
-            <span className="ts-field-label">预估（小时）</span>
+            <span className="ts-field-label">{t('field.estimate')}</span>
             <input
               className="ts-input"
               type="number"
@@ -185,7 +188,7 @@ export function TaskDetail(props: TaskDetailProps) {
         </div>
 
         <div className="ts-field">
-          <span className="ts-field-label">子任务</span>
+          <span className="ts-field-label">{t('field.subtasks')}</span>
           {subTasks.length > 0 && (
             <div className="ts-subtasks">
               {subTasks.map((sub) => (
@@ -199,7 +202,7 @@ export function TaskDetail(props: TaskDetailProps) {
                   <button
                     type="button"
                     className="ts-icon is-danger"
-                    aria-label="删除子任务"
+                    aria-label={t('action.deleteSubtask')}
                     onClick={() => props.onDelete(sub)}
                   >
                     ✕
@@ -211,7 +214,7 @@ export function TaskDetail(props: TaskDetailProps) {
           <div className="ts-inline">
             <input
               className="ts-input"
-              placeholder="添加子任务"
+              placeholder={t('field.addSubtask')}
               value={subTitle}
               onChange={(event) => setSubTitle(event.target.value)}
               onKeyDown={(event) => {
@@ -219,15 +222,15 @@ export function TaskDetail(props: TaskDetailProps) {
               }}
             />
             <button type="button" className="ts-button" onClick={addSubTask}>
-              添加
+              {t('action.add')}
             </button>
           </div>
         </div>
 
         <div className="ts-field">
-          <span className="ts-field-label">计时记录</span>
+          <span className="ts-field-label">{t('field.timeEntries')}</span>
           {task.timeEntries.length === 0 ? (
-            <div className="ts-meta">暂无计时记录</div>
+            <div className="ts-meta">{t('field.noTimeEntries')}</div>
           ) : (
             <div className="ts-entries">
               {[...task.timeEntries]
@@ -241,7 +244,7 @@ export function TaskDetail(props: TaskDetailProps) {
                     <button
                       type="button"
                       className="ts-icon is-danger"
-                      aria-label="删除计时记录"
+                      aria-label={t('action.deleteTimeEntry')}
                       onClick={() => props.onDeleteTime(entry.id)}
                     >
                       ✕
@@ -256,7 +259,7 @@ export function TaskDetail(props: TaskDetailProps) {
               type="number"
               min="0"
               step="1"
-              placeholder="补记分钟"
+              placeholder={t('field.logMinutes')}
               value={minutes}
               onChange={(event) => setMinutes(event.target.value)}
               onKeyDown={(event) => {
@@ -264,13 +267,13 @@ export function TaskDetail(props: TaskDetailProps) {
               }}
             />
             <button type="button" className="ts-button" onClick={addTime}>
-              记录
+              {t('action.log')}
             </button>
           </div>
         </div>
 
         <div className="ts-field">
-          <span className="ts-field-label">备注</span>
+          <span className="ts-field-label">{t('field.notes')}</span>
           <textarea
             className="ts-input ts-textarea"
             rows={4}
@@ -285,11 +288,11 @@ export function TaskDetail(props: TaskDetailProps) {
         <div className="ts-drawer-foot">
           {active ? (
             <button type="button" className="ts-button" onClick={() => props.onStopTimer(task)}>
-              停止计时
+              {t('action.stopTimer')}
             </button>
           ) : (
             <button type="button" className="ts-button" onClick={() => props.onStartTimer(task)}>
-              开始计时
+              {t('action.startTimer')}
             </button>
           )}
           <button
@@ -301,7 +304,7 @@ export function TaskDetail(props: TaskDetailProps) {
             }}
             onBlur={() => setConfirmDelete(false)}
           >
-            {confirmDelete ? '确认删除？' : '删除'}
+            {confirmDelete ? t('action.confirmDelete') : t('action.delete')}
           </button>
         </div>
       </aside>

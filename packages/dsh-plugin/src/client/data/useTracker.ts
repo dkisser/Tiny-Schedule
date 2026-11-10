@@ -17,7 +17,12 @@ export interface TrackerView {
   refresh: () => Promise<void>;
 }
 
-export function useTracker(): TrackerView {
+export interface TrackerOptions {
+  /** Re-read the snapshot on this interval, in milliseconds; omitted means no polling. */
+  pollMs?: number;
+}
+
+export function useTracker(options: TrackerOptions = {}): TrackerView {
   const [state, setState] = useState<TrackerSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,6 +39,15 @@ export function useTracker(): TrackerView {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const pollMs = options.pollMs;
+  useEffect(() => {
+    if (pollMs === undefined) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, pollMs);
+    return () => window.clearInterval(timer);
+  }, [pollMs, refresh]);
 
   const act = useCallback(
     async (action: Record<string, unknown>) => {

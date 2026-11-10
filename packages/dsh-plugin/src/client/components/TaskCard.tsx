@@ -6,10 +6,11 @@
  * The card is presentational — every action is a callback, so the board and
  * the flat lists drive it the same way.
  */
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { TaskView } from '../../domain/types.ts';
 
-export interface TaskCardProps {
+export interface TaskCardProps extends PropsLocale<'tinySchedule'> {
   task: TaskView;
   /** Whether the task is urgent right now (derived by the host's rules). */
   urgent: boolean;
@@ -36,7 +37,7 @@ export interface TaskCardProps {
 }
 
 export function TaskCard(props: TaskCardProps) {
-  const { task } = props;
+  const { task, t } = props;
   const done = task.isDone;
   const classes = [
     'ts-card',
@@ -62,8 +63,8 @@ export function TaskCard(props: TaskCardProps) {
         <button
           type="button"
           className="ts-icon is-grip"
-          aria-label="拖动排序"
-          title="拖动排序"
+          aria-label={t('action.dragSort')}
+          title={t('action.dragSort')}
           onPointerDown={(event) => props.onGripDown?.(event)}
           onClick={(event) => event.stopPropagation()}
         >
@@ -73,9 +74,9 @@ export function TaskCard(props: TaskCardProps) {
       <button
         type="button"
         className="ts-icon is-star"
-        aria-label={task.isImportant ? '取消重要' : '标为重要'}
+        aria-label={task.isImportant ? t('action.unmarkImportant') : t('action.markImportant')}
         aria-pressed={task.isImportant}
-        title={task.isImportant ? '取消重要' : '标为重要'}
+        title={task.isImportant ? t('action.unmarkImportant') : t('action.markImportant')}
         onClick={(event) => {
           event.stopPropagation();
           props.onToggleImportant(task);
@@ -86,7 +87,7 @@ export function TaskCard(props: TaskCardProps) {
       <button
         type="button"
         className="ts-check"
-        aria-label={done ? '取消完成' : '完成'}
+        aria-label={done ? t('action.uncomplete') : t('action.complete')}
         aria-pressed={done}
         onClick={(event) => {
           event.stopPropagation();
@@ -104,13 +105,17 @@ export function TaskCard(props: TaskCardProps) {
           (done && task.doneAt !== undefined)) && (
           <div className="ts-card-chips">
             {done && task.doneAt !== undefined && (
-              <span className="ts-chip is-done">做完于 {formatClock(task.doneAt)}</span>
+              <span className="ts-chip is-done">
+                {t('label.doneAt')} {formatClock(task.doneAt)}
+              </span>
             )}
-            {props.overdue && <span className="ts-chip is-overdue">逾期</span>}
-            {props.urgent && !done && <span className="ts-chip is-urgent">紧急</span>}
+            {props.overdue && <span className="ts-chip is-overdue">{t('label.overdue')}</span>}
+            {props.urgent && !done && (
+              <span className="ts-chip is-urgent">{t('label.urgent')}</span>
+            )}
             {props.subTasksDone !== undefined && (
               <span className="ts-chip">
-                子任务 {props.subTasksDone}/{task.subTaskIds.length}
+                {t('label.subtasks')} {props.subTasksDone}/{task.subTaskIds.length}
               </span>
             )}
             {props.projectTitle !== '' && <span className="ts-chip">{props.projectTitle}</span>}
@@ -137,8 +142,8 @@ export function TaskCard(props: TaskCardProps) {
             <button
               type="button"
               className="ts-icon"
-              aria-label="停止计时"
-              title="停止计时"
+              aria-label={t('action.stopTimer')}
+              title={t('action.stopTimer')}
               onClick={(event) => {
                 event.stopPropagation();
                 props.onStopTimer?.(task);
@@ -150,8 +155,8 @@ export function TaskCard(props: TaskCardProps) {
             <button
               type="button"
               className="ts-icon"
-              aria-label="开始计时"
-              title="开始计时"
+              aria-label={t('action.startTimer')}
+              title={t('action.startTimer')}
               onClick={(event) => {
                 event.stopPropagation();
                 props.onStartTimer?.(task);
@@ -164,8 +169,8 @@ export function TaskCard(props: TaskCardProps) {
           <button
             type="button"
             className="ts-icon is-danger"
-            aria-label="删除"
-            title="删除"
+            aria-label={t('action.delete')}
+            title={t('action.delete')}
             onClick={(event) => {
               event.stopPropagation();
               props.onDelete?.(task);

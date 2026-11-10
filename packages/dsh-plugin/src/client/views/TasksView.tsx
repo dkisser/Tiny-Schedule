@@ -7,7 +7,6 @@
  * dragged: every write goes through the host's HTTP action endpoint, so the
  * browser and the agent never disagree about the state.
  */
-import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client';
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import { useMemo, useState } from 'react';
 import {
@@ -28,9 +27,14 @@ import { useTracker } from '../data/useTracker.ts';
 
 type Panel = 'today' | 'quadrant' | 'longTerm';
 
-export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
+export interface TasksViewProps extends PropsLocale<'tinySchedule'> {
+  /** How often to re-read the host's snapshot, in milliseconds; omitted means no polling. */
+  pollMs?: number;
+}
+
+export function TasksView(props: TasksViewProps) {
   const { t } = props;
-  const { state, error, act } = useTracker();
+  const { state, error, act } = useTracker({ pollMs: props.pollMs });
   const [panel, setPanel] = useState<Panel>('today');
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -70,6 +74,7 @@ export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
   const renderCard = (task: TaskView) => (
     <TaskCard
       key={task.id}
+      t={t}
       task={task}
       urgent={isUrgent(task, day, threshold)}
       overdue={isOverdue(task)}
@@ -99,7 +104,7 @@ export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
           <Segment id="longTerm" active={panel} label={t('panel.longTerm')} onSelect={setPanel} />
         </div>
         <button type="button" className="ts-button is-primary" onClick={() => setCreating(true)}>
-          + 新建任务
+          {t('action.newTask')}
         </button>
         {state?.activeTimer !== undefined && state.activeTimer !== null && (
           <span className="ts-chip is-urgent">{t('label.timerRunning')}</span>
@@ -137,6 +142,7 @@ export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
 
       {state !== null && panel === 'quadrant' && (
         <QuadrantBoard
+          t={t}
           tasks={tasks}
           today={day}
           thresholdDays={threshold}
@@ -198,6 +204,7 @@ export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
         open={creating}
         projects={projects}
         tags={tags}
+        t={t}
         onCreate={(input) => {
           void act({
             type: 'task.create',
@@ -215,6 +222,7 @@ export function TasksView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
 
       {selected !== undefined && (
         <TaskDetail
+          t={t}
           task={selected}
           tasks={tasks}
           projects={projects}

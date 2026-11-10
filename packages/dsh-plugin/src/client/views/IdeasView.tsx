@@ -5,7 +5,6 @@
  * enters the today view and never takes time.
  */
 
-import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client';
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import { useMemo, useState } from 'react';
 import { incubatingIdeas, openIdeas, resolvedIdeas } from '../../domain/ideas.ts';
@@ -14,9 +13,14 @@ import { useTracker } from '../data/useTracker.ts';
 
 type Group = 'inbox' | 'incubating' | 'resolved';
 
-export function IdeasView(props: ConvViewProps & PropsLocale<'tinySchedule'>) {
+export interface IdeasViewProps extends PropsLocale<'tinySchedule'> {
+  /** How often to re-read the host's snapshot, in milliseconds; omitted means no polling. */
+  pollMs?: number;
+}
+
+export function IdeasView(props: IdeasViewProps) {
   const { t } = props;
-  const { state, error, act } = useTracker();
+  const { state, error, act } = useTracker({ pollMs: props.pollMs });
   const [group, setGroup] = useState<Group>('inbox');
 
   const ideas = state?.ideas ?? [];

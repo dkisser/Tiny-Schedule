@@ -2,12 +2,13 @@
 
 Task tracking and idea lifecycle for the [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness).
 
-Two domains — **任务** and **想法** — plus the agent tools to work with them, and two tabs in the harness web client.
+Two domains — **任务** and **想法** — plus the agent tools to work with them, and a page in the harness web client you open from the left column.
 
 ```
-dsh web  →  标签行：[对话] [轨迹] [任务] [想法]
-                          ├── 今日 · 四象限 · 长期池
-                          └── 收集箱 · 验证中 · 已了结
+dsh web  →  左栏（会话历史上方）：[✓ 任务与想法]  ← 总入口
+                              └── 点击 → 中栏整页：任务 | 想法
+                                                    任务内：今日 · 四象限 · 长期池
+                                                    想法内：收集箱 · 验证中 · 已了结
 ```
 
 ## What it is
@@ -17,7 +18,7 @@ dsh web  →  标签行：[对话] [轨迹] [任务] [想法]
 | **Domain** | Task, Project, Tag, TimeEntry, Idea, FollowUp — zod schemas, projections, the idea state machine. Pure, no I/O. |
 | **Storage** | One dsh storage domain (`task_tracker`), seven tables plus a global slot. json backend → `~/.dsh/storages/task_tracker.json`. |
 | **Tools** | 24 agent tools, all prefixed `ts_` (`todo_write` is taken by the harness). |
-| **Client** | Two tabs in the conversation's view ring. The browser reads a snapshot the host computes and writes through one same-origin JSON endpoint. |
+| **Client** | A left-column entry above the session history. Clicking it swaps the centre column for a page of the plugin's own — the 任务 and 想法 tabs, as they were before. The browser reads a snapshot the host computes and writes through one same-origin JSON endpoint. |
 
 ## Install
 
@@ -61,7 +62,17 @@ Dates are local calendar days in `YYYY-MM-DD`. "Urgent" is derived (`dueDay` wit
 
 ## The browser half
 
-The **任务** tab is where work is created, inspected and moved:
+The plugin is one entry in the **left column**, above the session history. Clicking it opens a page in the centre column; the page's own top tabs are **任务 | 想法**, and a 「返回对话」 button hands the column back.
+
+### The page (`src/client/page/TrackerPage.tsx`)
+
+- **任务 | 想法** — the two top-level tabs. 任务 holds three projections of one task set (**今日 / 四象限 / 长期池**); 想法 holds the idea lifecycle (**收集箱 / 验证中 / 已了结**).
+- **返回对话** — `ctx.layout.selectPanel(null)`; the centre column returns to the conversation.
+- A 30 s poll of `/ts/api/state` keeps the page in step with what the agent tools write.
+
+### The task surface (`src/client/views/TasksView.tsx`)
+
+Where work is created, inspected and moved:
 
 - **新建任务** — title, notes, due day, estimate, project, tags, importance.
 - **Task detail** — the same fields editable in place (title and estimate commit on a 400 ms debounce), plus subtasks, time entries, notes, the timer and delete.
@@ -69,6 +80,19 @@ The **任务** tab is where work is created, inspected and moved:
 - The drag is plain pointer events — no animation library in the client bundle, and nothing is written until the pointer is released.
 
 Reads go to `GET /ts/api/state`; writes go to `POST /ts/api/action`, which calls the same service methods the `ts_*` tools call. One write path, one projection path.
+
+### How it gets into the column
+
+The harness ships this seam itself: a `sidebar.panellist` row selects a centre panel. The plugin registers the two halves of that pair —
+
+| Seat | What | Fields |
+|---|---|---|
+| `sidebar.panellist` | the left-column row | `id: 'tiny-schedule'`, `order: 20` |
+| `main` | the keyed centre panel | `key: 'tiny-schedule'` |
+
+Both spell the same id on purpose: `ctx.layout.selectPanel(id)` refuses to select a panel the `main` slot does not hold. `dsh-client-ui-plugin-manager` and `dsh-client-ui-schedule` are built the same way.
+
+The plugin therefore **does not patch the shell's DOM** — no `data-slot` anchor, no portal host, no re-anchoring timer. The only host coupling is the seat names themselves. See [ADR 0010](../../docs/adr/0010-the-plugin-opens-as-a-page-from-the-left-column.md).
 
 ## Rules worth knowing
 
@@ -96,3 +120,7 @@ Two pins are load-bearing:
 
 - **`zod` is pinned to `4.4.3`,** the exact version `@deepseek-ai/dsh-storage-domain` depends on. `domainTable()` infers its value type from `ZodType<V>`, and a schema built by a *different* zod version makes TypeScript match the two type graphs structurally — which does not fail, it exhausts the heap. A mismatched zod turns `bun run typecheck` into an OOM instead of an error.
 - **`@deepseek-ai/dsh-client-ui-renderer` is a peer dependency** for one reason: `ctx.slots` is declared there, not in `dsh-client-ui-slots`. The browser half needs the renderer's Context merge to type `ctx.slots.inject(...)`.
+
+A third peer, **`@deepseek-ai/dsh-client-ui-sidebar`**, declares the `sidebar.panellist` seat the entry registers into; it is type-only (the seat name is a string, not an import), but the version still has to match the host.
+
+A fourth peer, **`@deepseek-ai/dsh-client-ui-layout`**, declares the `main` slot row and the `ctx.layout` service the page uses for panel selection and 「返回对话」. Also type-only, also version-locked.

@@ -21,3 +21,7 @@ Tiny-Schedule 不再是一个独立的 Tauri 桌面应用，而是 **DeepSeek Ha
 - **插件是 out-of-tree 的**：浏览器半边走 dsh 的 closure-factory 打包约定（`exports["./client"]` + `dsh.client` 声明），数据到浏览器走插件自注册的 HTTP 路由，而不是 dsh 内部的 Remote 代码生成（那条链路是 in-repo 机制，对外部包的支持未经验证）。
 - **dsh 版本强耦合**：插件依赖 dsh 的 `0.2.2-rc.1` 系列包，而 dsh 仍在 developer preview，破坏性变更频繁；依赖必须钉死版本。`zod` 也必须钉到 `dsh-storage-domain` 用的那一个版本（`4.4.3`）——版本一错，`domainTable()` 的泛型推断会让 `tsc` 直接堆内存溢出而不是报错。
 - **同一时刻只能有一个 dsh 进程持有该 domain**：json 后端没有跨进程写锁。
+
+## Amendment（2026-11-10）
+
+「界面退化为对话旁边的两个视图」这条后来被 [ADR 0010](0010-the-plugin-opens-as-a-page-from-the-left-column.md) 改写：插件界面不再挂在会话标签环里（标签行只放「任务」「想法」两个入口的说法作废），改为**左栏一个总入口，点击后在中栏打开插件自己的整页**，页内保持「任务 | 想法」两个页签。触发原因与宿主的插槽现实见 ADR 0010。

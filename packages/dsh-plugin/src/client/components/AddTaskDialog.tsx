@@ -1,10 +1,11 @@
 /**
  * The create-task form.
  *
- * The retired app's dialog, reduced to what a browser panel can carry: no
+ * The retired app's dialog, reduced to what a browser page can carry: no
  * portal, no combobox — a plain select for the project and a chip row for
  * the tags. The host owns the write; this only collects the fields.
  */
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import { useEffect, useState } from 'react';
 import type { ProjectRecord, TagRecord } from '../../domain/schema.ts';
 
@@ -18,7 +19,7 @@ export interface NewTaskInput {
   tagIds: string[];
 }
 
-export interface AddTaskDialogProps {
+export interface AddTaskDialogProps extends PropsLocale<'tinySchedule'> {
   open: boolean;
   projects: ProjectRecord[];
   tags: TagRecord[];
@@ -29,7 +30,7 @@ export interface AddTaskDialogProps {
 }
 
 export function AddTaskDialog(props: AddTaskDialogProps) {
-  const { open, projects, tags } = props;
+  const { open, projects, tags, t } = props;
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
   const [dueDay, setDueDay] = useState('');
@@ -87,14 +88,14 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
         className="ts-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="新建任务"
+        aria-label={t('action.newTask')}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="ts-modal-title">新建任务</div>
+        <div className="ts-modal-title">{t('action.newTask')}</div>
         <input
           className="ts-input"
           autoFocus
-          placeholder="任务名称"
+          placeholder={t('field.title')}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
           onKeyDown={(event) => {
@@ -103,14 +104,14 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
         />
         <textarea
           className="ts-input ts-textarea"
-          placeholder="备注"
+          placeholder={t('field.notes')}
           rows={3}
           value={notes}
           onChange={(event) => setNotes(event.target.value)}
         />
         <div className="ts-field-grid">
           <label className="ts-field">
-            <span className="ts-field-label">截止日</span>
+            <span className="ts-field-label">{t('field.dueDay')}</span>
             <input
               className="ts-input"
               type="date"
@@ -119,7 +120,7 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
             />
           </label>
           <label className="ts-field">
-            <span className="ts-field-label">预估（小时）</span>
+            <span className="ts-field-label">{t('field.estimate')}</span>
             <input
               className="ts-input"
               type="number"
@@ -132,13 +133,13 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
           </label>
         </div>
         <label className="ts-field">
-          <span className="ts-field-label">项目</span>
+          <span className="ts-field-label">{t('field.project')}</span>
           <select
             className="ts-input"
             value={projectId}
             onChange={(event) => setProjectId(event.target.value)}
           >
-            <option value="">（收件箱）</option>
+            <option value="">{t('field.noProject')}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.title}
@@ -147,9 +148,9 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
           </select>
         </label>
         <div className="ts-field">
-          <span className="ts-field-label">标签</span>
+          <span className="ts-field-label">{t('field.tags')}</span>
           <div className="ts-tag-picker">
-            {tags.length === 0 && <span className="ts-meta">还没有标签</span>}
+            {tags.length === 0 && <span className="ts-meta">{t('field.noTags')}</span>}
             {tags.map((tag) => (
               <button
                 key={tag.id}
@@ -168,11 +169,11 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
             checked={isImportant}
             onChange={(event) => setImportant(event.target.checked)}
           />
-          <span>标为重要</span>
+          <span>{t('field.markImportant')}</span>
         </label>
         <div className="ts-modal-footer">
           <button type="button" className="ts-button" onClick={props.onClose}>
-            取消
+            {t('action.cancel')}
           </button>
           <button
             type="button"
@@ -180,7 +181,7 @@ export function AddTaskDialog(props: AddTaskDialogProps) {
             disabled={!canSubmit}
             onClick={submit}
           >
-            创建
+            {t('action.create')}
           </button>
         </div>
       </div>
