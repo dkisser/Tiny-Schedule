@@ -9,6 +9,8 @@ import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-locale/client';
 // Type-only: pulls the ui-conversation SlotMap row ('conversation.view').
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client';
+// Type-only: pulls the renderer's Context merge (ctx.slots).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import { en, NS, type TinyScheduleKey, zh } from './locales.ts';
 import { injectStyles } from './styles.ts';
 import { IdeasView } from './views/IdeasView.tsx';

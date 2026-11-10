@@ -90,4 +90,9 @@ The browser half is a CJS closure factory (`window.__ModuleLoader__.load({ id, f
 
 ## Compatibility
 
-Built against dsh `0.1.0-rc.7`. The harness is a developer preview with frequent breaking changes — the dependency versions here are pinned on purpose.
+Built against dsh `0.2.2-rc.1`. The harness is a developer preview with frequent breaking changes — the dependency versions here are pinned on purpose.
+
+Two pins are load-bearing:
+
+- **`zod` is pinned to `4.4.3`,** the exact version `@deepseek-ai/dsh-storage-domain` depends on. `domainTable()` infers its value type from `ZodType<V>`, and a schema built by a *different* zod version makes TypeScript match the two type graphs structurally — which does not fail, it exhausts the heap. A mismatched zod turns `bun run typecheck` into an OOM instead of an error.
+- **`@deepseek-ai/dsh-client-ui-renderer` is a peer dependency** for one reason: `ctx.slots` is declared there, not in `dsh-client-ui-slots`. The browser half needs the renderer's Context merge to type `ctx.slots.inject(...)`.

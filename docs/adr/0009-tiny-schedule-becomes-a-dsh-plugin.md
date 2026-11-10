@@ -19,5 +19,5 @@ Tiny-Schedule 不再是一个独立的 Tauri 桌面应用，而是 **DeepSeek Ha
 - **计时器不再自动暂停**：dsh 是纯 Node，没有宿主睡眠/闲置检测，计时器变成显式的 start/pause/stop。这是一个**能力退化**，必须在界面上说明。
 - **没有定时复盘**：复盘由用户在对话里主动发起，dsh 的 agent 依据插件提供的数据生成；插件不提供调度器。
 - **插件是 out-of-tree 的**：浏览器半边走 dsh 的 closure-factory 打包约定（`exports["./client"]` + `dsh.client` 声明），数据到浏览器走插件自注册的 HTTP 路由，而不是 dsh 内部的 Remote 代码生成（那条链路是 in-repo 机制，对外部包的支持未经验证）。
-- **dsh 版本强耦合**：插件依赖 dsh 的 `0.1.0-rc.7` 系列包，而 dsh 仍在 developer preview，破坏性变更频繁；依赖必须钉死版本。
+- **dsh 版本强耦合**：插件依赖 dsh 的 `0.2.2-rc.1` 系列包，而 dsh 仍在 developer preview，破坏性变更频繁；依赖必须钉死版本。`zod` 也必须钉到 `dsh-storage-domain` 用的那一个版本（`4.4.3`）——版本一错，`domainTable()` 的泛型推断会让 `tsc` 直接堆内存溢出而不是报错。
 - **同一时刻只能有一个 dsh 进程持有该 domain**：json 后端没有跨进程写锁。
