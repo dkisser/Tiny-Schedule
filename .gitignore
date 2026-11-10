@@ -6,9 +6,6 @@ out/
 .vite/
 dist-types/
 
-# graphify
-graphify-out/
-
 # local tooling
 .qoder/
 .claude/
